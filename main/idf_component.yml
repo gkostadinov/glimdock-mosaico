@@ -1,0 +1,28 @@
+dependencies:
+  idf: ">=6.2"
+  esp-mosaico-bsp:
+    version: "*"
+    override_path: "../../../submodule/esp-mosaico-bsp/components/esp-mosaico-bsp"
+  # Camera sub-board (left slot): discovery, DVP capture, flash, JPEG helpers.
+  mosaico_module_camera:
+    version: "*"
+    override_path: "../../../submodule/esp-mosaico-bsp/components/mosaico_module_camera"
+  # Interaction sub-board (either slot): buttons, PIR, light, WS2812 LEDs, IR (Tools).
+  mosaico_module_interact:
+    version: "*"
+    override_path: "../../../submodule/esp-mosaico-bsp/components/mosaico_module_interact"
+  espressif/esp_new_jpeg: "^1.0.0"
+  # Files and Swifty decode PNG images.
+  espressif/libpng: "^1.6.59"
+  # The shell drives LVGL through the BSP's display adapter (the BSP asks for it
+  # only once its display options are configured: a fresh build needs it here).
+  espressif/esp_lvgl_adapter: "0.6.2"
+  # Swifty: realtime speech recognition over WebSocket.
+  espressif/esp_websocket_client: "^1.4.0"
+  # Photos and files on the board's NAND, the LittleFS volume Vibe Mode keeps.
+  joltwallet/littlefs: "^1.20.0"
+  esp_iris:
+    version: "*"
+    override_path: "../../../submodule/esp-mosaico-utils/ESP-Iris/components/esp_iris"
+  # The BSP display adapter uses headers deprecated by LVGL 9.6.
+  lvgl/lvgl: "==9.5.0"

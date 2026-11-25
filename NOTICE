@@ -1,0 +1,61 @@
+Glimdock for ESP-Mosaico
+Copyright 2026 Glimdock contributors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE). This repository
+also contains, or is derived in part from, the following third-party work, each
+under its own licence:
+
+third_party/glimdock/
+  Glimdock firmware data layer (network.cpp, model and setup headers).
+  Copyright (c) 2026 Glimdock contributors. MIT License (third_party/glimdock/LICENSE).
+  https://github.com/gkostadinov/glimdock
+  The Glimdock app's board adapters (components/glimdock_port: audio cues,
+  runtime health), the Home app (components/home_app, ported from Swifty
+  Home's Lua app) and the Home icon set (components/mosaico_ui/include/
+  home_icons.h, generated from Swifty Home's icons) are adapted from the same
+  authors' Glimdock and Swifty Home work.
+
+components/esp_driver_i2c/
+  ESP-IDF 6.2 I2C master driver, Copyright Espressif Systems (Shanghai) CO LTD.
+  Apache License 2.0. Modified: see components/esp_driver_i2c/MOSAICO_PATCH.md.
+
+components/libsmb2/
+  libsmb2 6.0.0, Copyright (C) 2016- Ronnie Sahlberg and contributors.
+  GNU Lesser General Public License 2.1 or later (components/libsmb2/COPYING,
+  LICENCE-LGPL-2.1.txt). https://github.com/sahlberg/libsmb2
+  Modified: lib/libsmb2.c and lib/sync.c (notices at the top of each file).
+  Includes public-domain AES (tiny-AES128-C), MD5 and portable-endian code,
+  the RSA Data Security, Inc. MD4 Message-Digest Algorithm, and RFC 4634
+  SHA/HMAC code (see the headers of those files).
+
+components/mosaico_ui/assets/Inter-*.ttf
+  Inter, Copyright 2020 The Inter Project Authors. SIL Open Font License 1.1
+  (components/mosaico_ui/assets/Inter-OFL.txt).
+
+components/glimdock_port/include/brand_assets_mosaico.h,
+components/mosaico_shell/src/launcher_brand.h
+  Glyphs rendered from Space Grotesk, Copyright 2020 The Space Grotesk Project
+  Authors. SIL Open Font License 1.1 (LICENSES/Space-Grotesk-OFL-1.1.txt).
+
+components/usb_webcam/
+  The UVC descriptors follow Espressif's usb_device_uvc component
+  (Apache License 2.0).
+
+components/swifty_app/
+  The speech recogniser's loudness envelope and parts of the assistant's look
+  follow ESP-Claw (https://github.com/espressif/esp-claw and
+  https://github.com/esp-mosaico/esp-mosaico-claw), Apache License 2.0.
+
+components/camera_app/
+  Started from the camera_photo_app example of esp-mosaico-bsp
+  (https://github.com/esp-mosaico/esp-mosaico-bsp), Apache License 2.0.
+
+components/app_config/, sdkconfig.uart.defaults, sdkconfig.usj.defaults,
+tools/quality/ (configuration files)
+  Generated from the ESP-Mosaico project template (`mosaico.py project init`,
+  https://github.com/esp-mosaico/esp-mosaico-utils).
+
+Build-time dependencies (ESP-IDF, LVGL, TinyUSB, ArduinoJson, libpng, LittleFS,
+esp_websocket_client, esp_lvgl_adapter, the ESP-Mosaico BSP and ESP-Iris) are
+fetched by the build and are not part of this repository; their own licences
+apply to firmware binaries built from it.

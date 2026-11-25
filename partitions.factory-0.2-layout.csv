@@ -1,0 +1,13 @@
+# Name,    Type, SubType, Offset,   Size,     Flags
+# Identical to the ESP-Mosaico factory table (ESP-Claw). This firmware writes
+# only main_app, so ESP-Claw's ui_apps (menu bundle), system files, NVS and
+# NAND data stay intact and the stock program can be put back into main_app.
+otadata,   data, ota,     0x9000,   0x2000,
+phy_init,  data, phy,     0xb000,   0x1000,
+sysmeta,   data, nvs,     0xc000,   0x14000,
+vibe_mode, app,  test,    0x20000,  0x1c0000,
+coredump,  data, coredump,0x1e0000, 0x20000,
+nvs,       data, nvs,     0x200000, 0x6000,
+main_app,  app,  ota_0,   0x210000, 0x7d0000,
+ui_apps,   data, 0x41,    0x9e0000, 0x320000,
+system,    data, 0x83,    0xd00000, 0x2ee000,
