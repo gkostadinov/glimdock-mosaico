@@ -1,0 +1,42 @@
+{
+  "schema": "mosaico-ideas/project-release/1",
+  "project": {
+    "title": "Glimdock",
+    "content_type": "software",
+    "category_id": 27,
+    "boards": ["camera"],
+    "tags": ["homelab", "dashboard", "smart home", "voice assistant", "camera", "webcam", "launcher", "LVGL"],
+    "external_links": [
+      {"label": "Source code", "url": "https://github.com/gkostadinov/glimdock-mosaico", "platform": "github"},
+      {"label": "Glimdock homelab collector", "url": "https://github.com/gkostadinov/glimdock", "platform": "github"}
+    ]
+  },
+  "firmware": "build/glimdock-system-update.irisfw",
+  "website": {
+    "readme": "store/website/readme.md",
+    "changelog": "store/website/changelog.md",
+    "covers": [
+      "store/covers/launcher-home-screen.png",
+      "store/covers/glim-systems.png",
+      "store/covers/glim-overview.png",
+      "store/covers/home.png"
+    ]
+  },
+  "device": {
+    "default_locale": "en",
+    "presentations": {
+      "en": {
+        "name": "Glimdock",
+        "description": "Homelab dashboard, smart-home display, voice assistant, camera, files and tools in one launcher. Doubles as a USB webcam.",
+        "font": "components/mosaico_ui/assets/Inter-Regular.ttf",
+        "icon": "store/icon.png"
+      },
+      "zh-CN": {
+        "name": "Glimdock",
+        "description": "集家庭实验室仪表盘、智能家居面板、语音助手、相机、文件和工具于一体的启动器，还可用作 USB 摄像头。",
+        "font": "store/fonts/NotoSansSC-Regular-subset.ttf",
+        "icon": "store/icon.png"
+      }
+    }
+  }
+}

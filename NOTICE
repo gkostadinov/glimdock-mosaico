@@ -37,6 +37,11 @@ components/mosaico_shell/src/launcher_brand.h
   Glyphs rendered from Space Grotesk, Copyright 2020 The Space Grotesk Project
   Authors. SIL Open Font License 1.1 (LICENSES/Space-Grotesk-OFL-1.1.txt).
 
+store/fonts/NotoSansSC-Regular-subset.ttf
+  A subset of Noto Sans SC, Copyright 2014-2021 Adobe, with Reserved Font Name
+  'Source'. SIL Open Font License 1.1 (store/fonts/NotoSansSC-OFL.txt). Used
+  only for the store listing's Chinese text.
+
 components/usb_webcam/
   The UVC descriptors follow Espressif's usb_device_uvc component
   (Apache License 2.0).

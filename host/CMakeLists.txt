@@ -60,6 +60,7 @@ add_executable(mosaico-preview
     "${IDEA}/components/glimdock_port/src/glimdock_summary.cpp"
     "${IDEA}/components/swifty_app/src/swifty_figure.cpp"
     "${IDEA}/components/tools_app/src/tools_app.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/interact_host.cpp"
     ${font_sources}
     ${HOME_SOURCES})
 target_include_directories(mosaico-preview PRIVATE

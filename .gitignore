@@ -51,3 +51,6 @@ Thumbs.db
 
 # ESP-Iris Project Gateway data (coredumps, firmware artefacts, logs)
 .gateway/
+
+# Mosaico Ideas release ZIPs (python mosaico.py project package)
+dist/

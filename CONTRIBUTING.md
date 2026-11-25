@@ -56,3 +56,29 @@ The shell registers RPCs on service `0x4744` (18244), callable with
 | 46 | 32-bit offset (little-endian) | The last webcam JPEG, 960 bytes at a time. |
 
 While the USB webcam is on, ESP-Iris is stopped: read 44–46 after it ends.
+
+## Releasing to Mosaico Ideas
+
+`mosaico-ideas.json` describes the store listing (category 27, Smart Home);
+its covers, icon, website text and the Chinese font subset live in `store/`.
+From the workspace root, with `libraqm` installed (`brew install libraqm` or
+your distribution's `libraqm0`) and a Python environment holding
+`submodule/esp-mosaico-utils/mosaico-tools/requirements-ideas.txt` and
+`submodule/esp-mosaico-utils/ESP-Iris/components/esp_iris/tools/requirements.txt`:
+
+```sh
+# 1. Bump project(glimdock VERSION ...) in CMakeLists.txt, then build the bundle
+idf.py -C projects/glimdock -D ESP_IRIS_PYTHON="$(which python)" system-update-bundle
+# 2. Package and check it (offline)
+python mosaico.py project package --project projects/glimdock --output projects/glimdock/dist/glimdock-VERSION.zip
+python mosaico.py project validate projects/glimdock/dist/glimdock-VERSION.zip --json
+# 3. Upload as a draft (first time --create; later --update PUBLIC_ID)
+python mosaico.py account login
+python mosaico.py project upload projects/glimdock/dist/glimdock-VERSION.zip --create --yes --json
+```
+
+Covers come from the desktop preview's demo data (`host/render.py`), never
+from a real board: those would show your own hosts and rooms. If the Chinese
+description changes, regenerate `store/fonts/NotoSansSC-Regular-subset.ttf`
+with `pyftsubset` for its characters (the font is OFL; keep
+`store/fonts/NotoSansSC-OFL.txt`).
