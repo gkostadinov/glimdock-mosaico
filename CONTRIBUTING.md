@@ -40,6 +40,29 @@ holds the checks).
   connect ran at 18-23 and froze the screen; it now runs in a helper task). A
   frame over 500 ms logs the running tasks with their base priorities.
 
+## Keeping the UI fast
+
+Measure on the board (RPC 11, 14, 15 and 16 below) before and after a change.
+What the measurements taught so far:
+
+- **LVGL redraws on every set**, of the same value too. Periodic updaters use
+  `mui::set_text`, `set_hidden`, `set_bg_color` and the other `set_*`
+  helpers, which leave an unchanged object alone; `bar_set` does the same.
+- **Never lay the screen out while building a page.** `lv_obj_update_layout`
+  lays out the whole screen; reading a size that way in a per-object helper
+  made a page build quadratic. Read the size as set, or measure text with
+  `lv_text_get_size`.
+- **Fonts come from `mui::font`**, whose wrapper caches glyph metrics and
+  kerning in front of tiny_ttf (its own lookups cost ~24 us a glyph).
+- **Update pages in place when their shape is unchanged** (Glimdock's
+  Systems page): building costs ~125 us an object on the PSRAM heap, plus
+  layout and a whole-screen redraw.
+- **Redraw on what is shown changing**: a clock showing minutes redraws a
+  minute apart; a sensor's noise stays under a dead band.
+- The display sends whole frames behind the panel's scan while LVGL renders
+  the next one (`frame_sync.cpp`); a full-screen change reaches ~30 fps, the
+  40 MHz QSPI link's limit.
+
 ## Checks
 
 ```sh
