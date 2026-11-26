@@ -137,12 +137,17 @@ struct {
     std::atomic<int64_t> ping_sent{0}, ping_worst{0};
 } R;
 
-int64_t session_ms() { return (esp_timer_get_time() - R.started) / 1000; }
+int64_t session_ms()
+{
+    return (esp_timer_get_time() - R.started) / 1000;
+}
 
 void pong(void *)
 {
     const int64_t waited = esp_timer_get_time() - R.ping_sent;
-    if (waited > R.ping_worst) R.ping_worst = waited;
+    if (waited > R.ping_worst) {
+        R.ping_worst = waited;
+    }
     ++R.pongs;
 }
 
@@ -157,7 +162,7 @@ bool video_control(uint8_t rhport, uint8_t stage, tusb_control_request_t const *
     // every request after it times out (macOS asks these before streaming).
     // The terminals have no controls: stall, the UVC answer for "not here".
     if (rq->bmRequestType_bit.type == TUSB_REQ_TYPE_CLASS && rq->bmRequestType_bit.recipient == TUSB_REQ_RCPT_INTERFACE &&
-        tu_u16_low(rq->wIndex) == 0 && tu_u16_high(rq->wIndex) != 0) {
+            tu_u16_low(rq->wIndex) == 0 && tu_u16_high(rq->wIndex) != 0) {
         e.ok = 0;
         return false;
     }
@@ -185,7 +190,9 @@ uint16_t video_open(uint8_t rhport, tusb_desc_interface_t const *itf, uint16_t m
     if (!n) {  // would the streaming endpoint open by itself?
         alignas(4) static const uint8_t ep[7] = {7, TUSB_DESC_ENDPOINT, EP_IN, TUSB_XFER_BULK, 0x00, 0x02, 1};  // bulk IN, 512
         R.edpt_test = usbd_edpt_open(rhport, reinterpret_cast<const tusb_desc_endpoint_t *>(ep)) ? 1 : 0;
-        if (R.edpt_test) usbd_edpt_close(rhport, EP_IN);
+        if (R.edpt_test) {
+            usbd_edpt_close(rhport, EP_IN);
+        }
     }
     return n;
 }
@@ -199,7 +206,9 @@ void usb_event(tinyusb_event_t *event, void *)
 {
     if (event->id == TINYUSB_EVENT_ATTACHED) {
         ++R.mounts;
-        if (R.mounted_at < 0) R.mounted_at = (esp_timer_get_time() - R.started) / 1000;
+        if (R.mounted_at < 0) {
+            R.mounted_at = (esp_timer_get_time() - R.started) / 1000;
+        }
     } else if (event->id == TINYUSB_EVENT_DETACHED) {
         ++R.unmounts;
     } else if (event->id == TINYUSB_EVENT_SUSPENDED) {
@@ -241,12 +250,16 @@ void stream_task(void *)
             count = 0;
             window = now;
         }
-        if (tud_mounted() && R.mounted_at < 0) R.mounted_at = (esp_timer_get_time() - R.started) / 1000;
+        if (tud_mounted() && R.mounted_at < 0) {
+            R.mounted_at = (esp_timer_get_time() - R.started) / 1000;
+        }
         if (!tud_video_n_streaming(0, 0)) {
             busy = false;  // the computer closed the stream
             continue;
         }
-        if (busy) continue;  // tx is TinyUSB's until its last packet went out
+        if (busy) {
+            continue;    // tx is TinyUSB's until its last packet went out
+        }
         size_t len = 0;
         {
             std::lock_guard<std::mutex> g(frame_lock);
@@ -256,11 +269,18 @@ void stream_task(void *)
                 sent_seq = latest_seq;
             }
         }
-        if (!len) continue;
-        if (R.streaming_at < 0) R.streaming_at = (esp_timer_get_time() - R.started) / 1000;
+        if (!len) {
+            continue;
+        }
+        if (R.streaming_at < 0) {
+            R.streaming_at = (esp_timer_get_time() - R.started) / 1000;
+        }
         busy = tud_video_n_frame_xfer(0, 0, tx, len);
-        if (busy) ++R.sent;
-        else ++R.xfer_fail;
+        if (busy) {
+            ++R.sent;
+        } else {
+            ++R.xfer_fail;
+        }
     }
     streamer = nullptr;
     vTaskDelay(2);  // a push or a callback that read the handle just before may still notify it
@@ -276,7 +296,9 @@ extern "C" usbd_class_driver_t const *usbd_app_driver_get_cb(uint8_t *count)
 
 extern "C" void tud_video_frame_xfer_complete_cb(uint_fast8_t, uint_fast8_t)
 {
-    if (streamer) xTaskNotify(streamer, SENT_BIT, eSetBits);
+    if (streamer) {
+        xTaskNotify(streamer, SENT_BIT, eSetBits);
+    }
 }
 
 extern "C" int tud_video_commit_cb(uint_fast8_t, uint_fast8_t, video_probe_and_commit_control_t const *p)
@@ -291,11 +313,21 @@ extern "C" int tud_video_commit_cb(uint_fast8_t, uint_fast8_t, video_probe_and_c
 extern "C" esp_err_t usb_webcam_start(void)
 {
     std::lock_guard<std::mutex> g(switch_lock);
-    if (active) return ESP_OK;
-    if (!latest) latest = static_cast<uint8_t *>(heap_caps_malloc(MAX_FRAME, MALLOC_CAP_SPIRAM));
-    if (!tx) tx = static_cast<uint8_t *>(heap_caps_malloc(MAX_FRAME, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA));
-    if (!tx) tx = static_cast<uint8_t *>(heap_caps_malloc(MAX_FRAME, MALLOC_CAP_SPIRAM));
-    if (!latest || !tx) return ESP_ERR_NO_MEM;
+    if (active) {
+        return ESP_OK;
+    }
+    if (!latest) {
+        latest = static_cast<uint8_t *>(heap_caps_malloc(MAX_FRAME, MALLOC_CAP_SPIRAM));
+    }
+    if (!tx) {
+        tx = static_cast<uint8_t *>(heap_caps_malloc(MAX_FRAME, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA));
+    }
+    if (!tx) {
+        tx = static_cast<uint8_t *>(heap_caps_malloc(MAX_FRAME, MALLOC_CAP_SPIRAM));
+    }
+    if (!latest || !tx) {
+        return ESP_ERR_NO_MEM;
+    }
     uint8_t mac[6] = {};
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
     snprintf(serial, sizeof(serial), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
@@ -347,9 +379,13 @@ extern "C" esp_err_t usb_webcam_start(void)
 extern "C" esp_err_t usb_webcam_stop(void)
 {
     std::lock_guard<std::mutex> g(switch_lock);
-    if (!active) return ESP_OK;
+    if (!active) {
+        return ESP_OK;
+    }
     stopping = true;
-    for (int i = 0; i < 100 && streamer; ++i) vTaskDelay(pdMS_TO_TICKS(10));
+    for (int i = 0; i < 100 && streamer; ++i) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
     active = false;
     tinyusb_driver_uninstall();
     installing = false;
@@ -361,9 +397,15 @@ extern "C" esp_err_t usb_webcam_stop(void)
     return err;
 }
 
-extern "C" bool usb_webcam_active(void) { return active; }
+extern "C" bool usb_webcam_active(void)
+{
+    return active;
+}
 
-extern "C" bool usb_webcam_owns_usb(void) { return owns_usb; }
+extern "C" bool usb_webcam_owns_usb(void)
+{
+    return owns_usb;
+}
 
 extern "C" void usb_webcam_format(int *width, int *height)
 {
@@ -373,11 +415,16 @@ extern "C" void usb_webcam_format(int *width, int *height)
     *height = FRAME_H[f];
 }
 
-extern "C" bool usb_webcam_streaming(void) { return active && tud_video_n_streaming(0, 0); }
+extern "C" bool usb_webcam_streaming(void)
+{
+    return active && tud_video_n_streaming(0, 0);
+}
 
 extern "C" void usb_webcam_push(const uint8_t *jpeg, size_t length)
 {
-    if (!active || !jpeg || !length || length > MAX_FRAME) return;
+    if (!active || !jpeg || !length || length > MAX_FRAME) {
+        return;
+    }
     {
         std::lock_guard<std::mutex> g(frame_lock);
         memcpy(latest, jpeg, length);
@@ -385,19 +432,26 @@ extern "C" void usb_webcam_push(const uint8_t *jpeg, size_t length)
         ++latest_seq;
         ++R.pushed;
     }
-    if (TaskHandle_t t = streamer) xTaskNotify(t, FRAME_BIT, eSetBits);
+    if (TaskHandle_t t = streamer) {
+        xTaskNotify(t, FRAME_BIT, eSetBits);
+    }
 }
 
 extern "C" size_t usb_webcam_last_frame(size_t offset, uint8_t *out, size_t capacity)
 {
     std::lock_guard<std::mutex> g(frame_lock);
-    if (!latest || offset >= latest_len) return 0;
+    if (!latest || offset >= latest_len) {
+        return 0;
+    }
     const size_t n = std::min(capacity, latest_len - offset);
     memcpy(out, latest + offset, n);
     return n;
 }
 
-extern "C" int usb_webcam_fps(void) { return active ? fps.load() : 0; }
+extern "C" int usb_webcam_fps(void)
+{
+    return active ? fps.load() : 0;
+}
 
 extern "C" void usb_webcam_report(char *out, size_t cap)
 {

@@ -62,19 +62,35 @@ struct State {
 float loudness(const int16_t *pcm, size_t count)
 {
     uint32_t sum = 0, n = 0;
-    for (size_t i = 0; i < count; i += 4, ++n) sum += uint32_t(abs(pcm[i]));
-    if (!n) return 0;
+    for (size_t i = 0; i < count; i += 4, ++n) {
+        sum += uint32_t(abs(pcm[i]));
+    }
+    if (!n) {
+        return 0;
+    }
     const uint32_t mean = sum / n;
-    if (S.frames++ == 0) S.noise = mean < 512 ? mean : 160;
-    else if (mean > S.noise && mean - S.noise < 800) S.noise += (mean - S.noise + 63) >> 6;
-    else if (mean < S.noise) S.noise -= (S.noise - mean + 31) >> 5;
+    if (S.frames++ == 0) {
+        S.noise = mean < 512 ? mean : 160;
+    } else if (mean > S.noise && mean - S.noise < 800) {
+        S.noise += (mean - S.noise + 63) >> 6;
+    } else if (mean < S.noise) {
+        S.noise -= (S.noise - mean + 31) >> 5;
+    }
     uint32_t signal = mean > S.noise ? mean - S.noise : 0, target;
-    if (signal <= 24) target = 0;
-    else if ((signal -= 24) < 512) target = signal >> 2;
-    else if (signal < 2048) target = 128 + ((signal - 512) >> 4);
-    else target = std::min<uint32_t>(255, 224 + ((signal - 2048) >> 7));
-    if (target > S.envelope) S.envelope += (target - S.envelope + 1) >> 1;
-    else S.envelope -= (S.envelope - target + 7) >> 3;
+    if (signal <= 24) {
+        target = 0;
+    } else if ((signal -= 24) < 512) {
+        target = signal >> 2;
+    } else if (signal < 2048) {
+        target = 128 + ((signal - 512) >> 4);
+    } else {
+        target = std::min<uint32_t>(255, 224 + ((signal - 2048) >> 7));
+    }
+    if (target > S.envelope) {
+        S.envelope += (target - S.envelope + 1) >> 1;
+    } else {
+        S.envelope -= (S.envelope - target + 7) >> 3;
+    }
     return S.envelope / 255.f;
 }
 
@@ -108,7 +124,9 @@ void mic_task(void *)
                 S.written += FRAME_BYTES;
             }
         }
-        if (S.events.level) S.events.level(level);
+        if (S.events.level) {
+            S.events.level(level);
+        }
     }
     esp_codec_dev_close(S.mic);
     xEventGroupSetBits(S.bits, MIC_DONE);
@@ -120,7 +138,9 @@ void send_json(const JsonDocument &doc)
 {
     std::string text;
     serializeJson(doc, text);
-    if (S.ws) esp_websocket_client_send_text(S.ws, text.c_str(), int(text.size()), pdMS_TO_TICKS(3000));
+    if (S.ws) {
+        esp_websocket_client_send_text(S.ws, text.c_str(), int(text.size()), pdMS_TO_TICKS(3000));
+    }
 }
 
 void run_task()
@@ -153,9 +173,13 @@ void finish_task()
 void handle_text(const std::string &text)
 {
     JsonDocument doc;
-    if (deserializeJson(doc, text)) return;
+    if (deserializeJson(doc, text)) {
+        return;
+    }
     const char *event = doc["header"]["event"] | "";
-    if (strcmp(event, "result-generated")) ESP_LOGI(TAG, "%s", event);
+    if (strcmp(event, "result-generated")) {
+        ESP_LOGI(TAG, "%s", event);
+    }
     if (!strcmp(event, "task-started")) {
         xEventGroupSetBits(S.bits, STARTED);
     } else if (!strcmp(event, "task-finished")) {
@@ -166,7 +190,9 @@ void handle_text(const std::string &text)
         xEventGroupSetBits(S.bits, FAILED);
     } else if (!strcmp(event, "result-generated")) {
         JsonVariant sentence = doc["payload"]["output"]["sentence"];
-        if (sentence.isNull() || (sentence["heartbeat"] | false)) return;
+        if (sentence.isNull() || (sentence["heartbeat"] | false)) {
+            return;
+        }
         const char *words = sentence["text"] | "";
         const bool end = sentence["sentence_end"] | false;
         const long long id = sentence["sentence_id"].is<long long>() ? sentence["sentence_id"].as<long long>() : -1;
@@ -183,7 +209,9 @@ void handle_text(const std::string &text)
             }
             snapshot = S.committed + S.partial;
         }
-        if (!snapshot.empty() && S.events.partial) S.events.partial(snapshot);
+        if (!snapshot.empty() && S.events.partial) {
+            S.events.partial(snapshot);
+        }
     }
 }
 
@@ -191,7 +219,9 @@ void handle_text(const std::string &text)
 // no connection, a timeout, the certificate, or the server's own answer.
 std::string failure(const esp_websocket_event_data_t *e)
 {
-    if (!e) return "The speech service is unreachable.";
+    if (!e) {
+        return "The speech service is unreachable.";
+    }
     const esp_websocket_error_codes_t &h = e->error_handle;
     ESP_LOGW(TAG, "error: type %d, HTTP %d, tls 0x%x/%d, cert 0x%x, errno %d", int(h.error_type),
              h.esp_ws_handshake_status_code, unsigned(h.esp_tls_last_esp_err), h.esp_tls_stack_err,
@@ -202,10 +232,16 @@ std::string failure(const esp_websocket_event_data_t *e)
     switch (h.error_type) {
     case WEBSOCKET_ERROR_TYPE_HANDSHAKE: {
         const int status = h.esp_ws_handshake_status_code;
-        if (status == 401 || status == 403) return "The speech service refused the key.";
-        if (status >= 500) snprintf(text, sizeof(text), "The speech service is up but failing (HTTP %d).", status);
-        else if (status > 0) snprintf(text, sizeof(text), "The speech service answered HTTP %d.", status);
-        else strlcpy(text, "The speech service's handshake failed.", sizeof(text));
+        if (status == 401 || status == 403) {
+            return "The speech service refused the key.";
+        }
+        if (status >= 500) {
+            snprintf(text, sizeof(text), "The speech service is up but failing (HTTP %d).", status);
+        } else if (status > 0) {
+            snprintf(text, sizeof(text), "The speech service answered HTTP %d.", status);
+        } else {
+            strlcpy(text, "The speech service's handshake failed.", sizeof(text));
+        }
         return text;
     }
     case WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT:
@@ -248,7 +284,9 @@ void on_event(void *, esp_event_base_t, int32_t id, void *data)
         }
         {
             std::lock_guard<std::mutex> g(S.lock);
-            if (S.error.empty() && !(xEventGroupGetBits(S.bits) & FINISHED)) S.error = "The speech service hung up.";
+            if (S.error.empty() && !(xEventGroupGetBits(S.bits) & FINISHED)) {
+                S.error = "The speech service hung up.";
+            }
         }
         xEventGroupSetBits(S.bits, FAILED);
         break;
@@ -260,13 +298,19 @@ void on_event(void *, esp_event_base_t, int32_t id, void *data)
             break;
         }
         std::lock_guard<std::mutex> g(S.lock);
-        if (S.error.empty()) S.error = why;
+        if (S.error.empty()) {
+            S.error = why;
+        }
         xEventGroupSetBits(S.bits, FAILED);
         break;
     }
     case WEBSOCKET_EVENT_DATA:
-        if (!e || e->op_code != 0x1 || e->payload_len <= 0 || e->payload_len > 16384) break;
-        if (e->payload_offset == 0) S.rx.clear();
+        if (!e || e->op_code != 0x1 || e->payload_len <= 0 || e->payload_len > 16384) {
+            break;
+        }
+        if (e->payload_offset == 0) {
+            S.rx.clear();
+        }
         S.rx.append(e->data_ptr, size_t(e->data_len));
         if (int(S.rx.size()) >= e->payload_len) {
             handle_text(S.rx);
@@ -297,12 +341,19 @@ void stream_task(void *)
                     S.sent += n;
                 }
             }
-            if (done || (xEventGroupGetBits(S.bits) & FAILED)) break;
-            if (n) esp_websocket_client_send_bin(S.ws, reinterpret_cast<const char *>(chunk), int(n), pdMS_TO_TICKS(3000));
-            else vTaskDelay(pdMS_TO_TICKS(20));
+            if (done || (xEventGroupGetBits(S.bits) & FAILED)) {
+                break;
+            }
+            if (n) {
+                esp_websocket_client_send_bin(S.ws, reinterpret_cast<const char *>(chunk), int(n), pdMS_TO_TICKS(3000));
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
         }
         heap_caps_free(chunk);
-        if (!(xEventGroupGetBits(S.bits) & FAILED)) finish_task();
+        if (!(xEventGroupGetBits(S.bits) & FAILED)) {
+            finish_task();
+        }
     } else if (!(got & FAILED)) {
         std::lock_guard<std::mutex> g(S.lock);
         S.error = "The speech service did not start.";
@@ -314,7 +365,9 @@ void stream_task(void *)
 void close_socket()
 {
     std::lock_guard<std::mutex> g(S.socket_lock);
-    if (!S.ws) return;
+    if (!S.ws) {
+        return;
+    }
     esp_websocket_client_close(S.ws, pdMS_TO_TICKS(1000));
     esp_websocket_client_destroy(S.ws);
     S.ws = nullptr;
@@ -333,14 +386,21 @@ bool open_socket(const Config &c)
     ws.task_prio = 2;
     ws.task_stack = 6144;
     ws.user_agent = "swifty-mosaico";
-    if (!S.ca.empty()) ws.cert_pem = S.ca.c_str();
-    else ws.crt_bundle_attach = esp_crt_bundle_attach;
+    if (!S.ca.empty()) {
+        ws.cert_pem = S.ca.c_str();
+    } else {
+        ws.crt_bundle_attach = esp_crt_bundle_attach;
+    }
     S.ws = esp_websocket_client_init(&ws);
-    if (!S.ws) return false;
+    if (!S.ws) {
+        return false;
+    }
     const std::string auth = "Bearer " + c.asr_key;
     esp_websocket_client_append_header(S.ws, "Authorization", auth.c_str());
     esp_websocket_register_events(S.ws, WEBSOCKET_EVENT_ANY, on_event, nullptr);
-    if (esp_websocket_client_start(S.ws) == ESP_OK) return true;
+    if (esp_websocket_client_start(S.ws) == ESP_OK) {
+        return true;
+    }
     esp_websocket_client_destroy(S.ws);
     S.ws = nullptr;
     return false;
@@ -361,7 +421,9 @@ void connect_task(void *)
                 S.error.clear();
             }
             xEventGroupClearBits(S.bits, CONNECTED | STARTED | FAILED);
-            if (!open_socket(c)) continue;
+            if (!open_socket(c)) {
+                continue;
+            }
         } else if (!S.ws) {
             continue;
         }
@@ -370,10 +432,14 @@ void connect_task(void *)
         const EventBits_t got = xEventGroupWaitBits(S.bits, CONNECTED | FAILED, pdFALSE, pdFALSE, pdMS_TO_TICKS(12000));
         if (!(got & CONNECTED) && !(got & FAILED)) {  // no answer at all: give up
             std::lock_guard<std::mutex> g(S.lock);
-            if (S.error.empty()) S.error = "The speech host didn't answer in time.";
+            if (S.error.empty()) {
+                S.error = "The speech host didn't answer in time.";
+            }
             break;
         }
-        if (!(got & CONNECTED) || (got & FAILED)) continue;
+        if (!(got & CONNECTED) || (got & FAILED)) {
+            continue;
+        }
         run_task();
         if (xEventGroupWaitBits(S.bits, STARTED | FAILED, pdFALSE, pdFALSE, pdMS_TO_TICKS(5000)) & STARTED) {
             S.streaming = true;
@@ -383,7 +449,9 @@ void connect_task(void *)
     }
     {
         std::lock_guard<std::mutex> g(S.lock);
-        if (S.error.empty()) S.error = "The speech service is unreachable.";
+        if (S.error.empty()) {
+            S.error = "The speech service is unreachable.";
+        }
     }
     xEventGroupSetBits(S.bits, FAILED | GAVE_UP);
     vTaskDeleteWithCaps(nullptr);
@@ -403,7 +471,9 @@ void keeper_task(void *)
                 missing = !S.ws;
                 dropped = S.ws && S.idle_dead;
             }
-            if (dropped && !S.active) close_socket();
+            if (dropped && !S.active) {
+                close_socket();
+            }
             const int64_t now = esp_timer_get_time();
             const Config c = config();
             if ((missing || dropped) && now >= retry_at && c.asr_ready() && !S.active) {
@@ -414,8 +484,9 @@ void keeper_task(void *)
                     retry_at = now + 10 * 1000000LL;
                 } else {
                     // Connected, failed, or a press took it over (up to 12 s).
-                    for (int i = 0; i < 120 && !S.active && !S.idle_dead && !(xEventGroupGetBits(S.bits) & CONNECTED); ++i)
+                    for (int i = 0; i < 120 && !S.active && !S.idle_dead && !(xEventGroupGetBits(S.bits) & CONNECTED); ++i) {
                         vTaskDelay(pdMS_TO_TICKS(100));
+                    }
                     if (!S.active && !(xEventGroupGetBits(S.bits) & CONNECTED)) {
                         close_socket();  // did not connect: again in a while
                         retry_at = esp_timer_get_time() + (S.idle_dead ? 3 : 15) * 1000000LL;
@@ -425,13 +496,18 @@ void keeper_task(void *)
         }
         vTaskDelay(pdMS_TO_TICKS(500));
     }
-    if (!S.active) close_socket();  // nobody is coming: let the server go
+    if (!S.active) {
+        close_socket();    // nobody is coming: let the server go
+    }
     S.keeper = nullptr;
     vTaskDeleteWithCaps(nullptr);
 }
 }  // namespace
 
-bool asr_active() { return S.active; }
+bool asr_active()
+{
+    return S.active;
+}
 
 void asr_warm(bool on)
 {
@@ -439,19 +515,33 @@ void asr_warm(bool on)
         S.warm_until = 0;  // the keeper closes the waiting connection and ends
         return;
     }
-    if (!config().asr_ready()) return;
-    if (!S.bits) S.bits = xEventGroupCreate();
+    if (!config().asr_ready()) {
+        return;
+    }
+    if (!S.bits) {
+        S.bits = xEventGroupCreate();
+    }
     S.warm_until = esp_timer_get_time() + WARM_US;
-    if (!S.keeper) xTaskCreatePinnedToCoreWithCaps(keeper_task, "swifty-warm", 4096, nullptr, 2, &S.keeper, 0, PSRAM_STACK);
+    if (!S.keeper) {
+        xTaskCreatePinnedToCoreWithCaps(keeper_task, "swifty-warm", 4096, nullptr, 2, &S.keeper, 0, PSRAM_STACK);
+    }
 }
 
 bool asr_start(const AsrEvents &events)
 {
-    if (S.active) return false;
+    if (S.active) {
+        return false;
+    }
     const Config c = config();
-    if (!c.asr_ready()) return false;
-    if (!S.bits) S.bits = xEventGroupCreate();
-    if (!S.ring) S.ring = static_cast<uint8_t *>(heap_caps_malloc(RING_BYTES, MALLOC_CAP_SPIRAM));
+    if (!c.asr_ready()) {
+        return false;
+    }
+    if (!S.bits) {
+        S.bits = xEventGroupCreate();
+    }
+    if (!S.ring) {
+        S.ring = static_cast<uint8_t *>(heap_caps_malloc(RING_BYTES, MALLOC_CAP_SPIRAM));
+    }
     if (!S.mic) {
         S.mic = bsp_audio_codec_microphone_init();
         if (!S.mic) {
@@ -459,7 +549,9 @@ bool asr_start(const AsrEvents &events)
             return false;
         }
     }
-    if (!S.ring) return false;
+    if (!S.ring) {
+        return false;
+    }
     esp_codec_dev_sample_info_t format = {};
     format.bits_per_sample = 16;
     format.channel = 1;
@@ -470,13 +562,17 @@ bool asr_start(const AsrEvents &events)
     }
     esp_codec_dev_set_in_gain(S.mic, 30.0f);
     S.active = true;  // from here the keeper leaves the socket alone
-    if (S.warm_until.load() > esp_timer_get_time()) S.warm_until = esp_timer_get_time() + WARM_US;
+    if (S.warm_until.load() > esp_timer_get_time()) {
+        S.warm_until = esp_timer_get_time() + WARM_US;
+    }
     bool warm = false;
     {
         std::lock_guard<std::mutex> g(S.socket_lock);
         warm = S.ws && !S.idle_dead;  // connected, or still connecting
     }
-    if (!warm) close_socket();  // a dropped one
+    if (!warm) {
+        close_socket();    // a dropped one
+    }
     xEventGroupClearBits(S.bits, (warm ? 0 : CONNECTED) | STARTED | FINISHED | FAILED | MIC_DONE | GAVE_UP);
     ESP_LOGI(TAG, "%s", warm ? "using the connection made ahead" : "connecting");
     S.streaming = false;
@@ -509,7 +605,9 @@ bool asr_start(const AsrEvents &events)
 
 std::string asr_finish(std::string *error)
 {
-    if (!S.active) return "";
+    if (!S.active) {
+        return "";
+    }
     S.recording = false;
     xEventGroupWaitBits(S.bits, MIC_DONE, pdFALSE, pdFALSE, pdMS_TO_TICKS(1000));
     // Done when the text is final, or it failed for good: a failure before
@@ -517,7 +615,9 @@ std::string asr_finish(std::string *error)
     const TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(20000);  // connect (up to 12 s) + the rest
     while (xTaskGetTickCount() < until) {
         const EventBits_t b = xEventGroupWaitBits(S.bits, FINISHED | GAVE_UP, pdFALSE, pdFALSE, pdMS_TO_TICKS(200));
-        if ((b & (FINISHED | GAVE_UP)) || ((b & FAILED) && S.streaming)) break;
+        if ((b & (FINISHED | GAVE_UP)) || ((b & FAILED) && S.streaming)) {
+            break;
+        }
     }
     S.cancelled = true;  // no retry after this
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -532,14 +632,20 @@ std::string asr_finish(std::string *error)
     S.active = false;
     ESP_LOGI(TAG, "finished: %u bytes of audio sent, %u words%s%s", unsigned(S.sent), unsigned(text.size()),
              err.empty() ? "" : ", ", err.c_str());
-    if (text.empty() && err.empty()) err = "I didn't catch anything.";
-    if (error) *error = text.empty() ? err : "";
+    if (text.empty() && err.empty()) {
+        err = "I didn't catch anything.";
+    }
+    if (error) {
+        *error = text.empty() ? err : "";
+    }
     return text;
 }
 
 void asr_cancel()
 {
-    if (!S.active) return;
+    if (!S.active) {
+        return;
+    }
     S.cancelled = true;
     S.recording = false;
     xEventGroupSetBits(S.bits, FAILED);

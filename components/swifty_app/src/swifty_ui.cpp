@@ -79,7 +79,9 @@ Image *make_image(const uint8_t *src, int w, int h, int bpp, int max_w, int max_
                         const uint16_t v = uint16_t(p[0] | p[1] << 8);
                         acc[0] += v >> 11, acc[1] += (v >> 5) & 63, acc[2] += v & 31;
                     } else {
-                        for (int c = 0; c < 4; ++c) acc[c] += p[c];
+                        for (int c = 0; c < 4; ++c) {
+                            acc[c] += p[c];
+                        }
                     }
                 }
             uint8_t *o = img->px + (size_t(y) * ow + x) * bpp;
@@ -87,7 +89,9 @@ Image *make_image(const uint8_t *src, int w, int h, int bpp, int max_w, int max_
                 const uint16_t v = uint16_t((acc[0] / n) << 11 | (acc[1] / n) << 5 | (acc[2] / n));
                 o[0] = uint8_t(v), o[1] = uint8_t(v >> 8);
             } else {
-                for (int c = 0; c < 4; ++c) o[c] = uint8_t(acc[c] / n);
+                for (int c = 0; c < 4; ++c) {
+                    o[c] = uint8_t(acc[c] / n);
+                }
             }
         }
     }
@@ -106,7 +110,9 @@ Image *decode_jpeg(const uint8_t *data, size_t size, int max_w, int max_h)
     jpeg_dec_config_t cfg = DEFAULT_JPEG_DEC_CONFIG();
     cfg.output_type = JPEG_PIXEL_FORMAT_RGB565_LE;
     jpeg_dec_handle_t dec = nullptr;
-    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) return nullptr;
+    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) {
+        return nullptr;
+    }
     jpeg_dec_io_t io = {};
     io.inbuf = const_cast<uint8_t *>(data);
     io.inbuf_len = int(size);
@@ -114,11 +120,13 @@ Image *decode_jpeg(const uint8_t *data, size_t size, int max_w, int max_h)
     int outlen = 0;
     Image *img = nullptr;
     if (jpeg_dec_parse_header(dec, &io, &header) == JPEG_ERR_OK && jpeg_dec_get_outbuf_len(dec, &outlen) == JPEG_ERR_OK &&
-        header.width * header.height <= 2048 * 2048) {
+            header.width * header.height <= 2048 * 2048) {
         auto *raw = static_cast<uint8_t *>(jpeg_calloc_align(size_t(outlen), 16));
         if (raw) {
             io.outbuf = raw;
-            if (jpeg_dec_process(dec, &io) == JPEG_ERR_OK) img = make_image(raw, header.width, header.height, 2, max_w, max_h);
+            if (jpeg_dec_process(dec, &io) == JPEG_ERR_OK) {
+                img = make_image(raw, header.width, header.height, 2, max_w, max_h);
+            }
             jpeg_free_align(raw);
         }
     }
@@ -130,7 +138,9 @@ Image *decode_png(const uint8_t *data, size_t size, int max_w, int max_h)
 {
     png_image png = {};
     png.version = PNG_IMAGE_VERSION;
-    if (!png_image_begin_read_from_memory(&png, data, size)) return nullptr;
+    if (!png_image_begin_read_from_memory(&png, data, size)) {
+        return nullptr;
+    }
     if (png.width * png.height > 1024 * 1024) {
         png_image_free(&png);
         return nullptr;
@@ -139,8 +149,9 @@ Image *decode_png(const uint8_t *data, size_t size, int max_w, int max_h)
     const size_t bytes = PNG_IMAGE_SIZE(png);
     auto *raw = static_cast<uint8_t *>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     Image *img = nullptr;
-    if (raw && png_image_finish_read(&png, nullptr, raw, 0, nullptr))
+    if (raw && png_image_finish_read(&png, nullptr, raw, 0, nullptr)) {
         img = make_image(raw, int(png.width), int(png.height), 4, max_w, max_h);
+    }
     heap_caps_free(raw);
     png_image_free(&png);
     return img;
@@ -148,8 +159,12 @@ Image *decode_png(const uint8_t *data, size_t size, int max_w, int max_h)
 
 Image *decode(const uint8_t *data, size_t size, int max_w, int max_h)
 {
-    if (size > 3 && data[0] == 0xFF && data[1] == 0xD8) return decode_jpeg(data, size, max_w, max_h);
-    if (size > 8 && !memcmp(data, "\x89PNG", 4)) return decode_png(data, size, max_w, max_h);
+    if (size > 3 && data[0] == 0xFF && data[1] == 0xD8) {
+        return decode_jpeg(data, size, max_w, max_h);
+    }
+    if (size > 8 && !memcmp(data, "\x89PNG", 4)) {
+        return decode_png(data, size, max_w, max_h);
+    }
     return nullptr;
 }
 
@@ -169,8 +184,8 @@ struct {
     swifty_hooks_t hooks = {};
     std::atomic<bool> active{false};
     lv_obj_t *screen = nullptr, *figure = nullptr, *chat = nullptr, *empty = nullptr, *empty_hint = nullptr,
-             *pill = nullptr, *pill_label = nullptr, *pill_icon = nullptr, *wave = nullptr, *bars[BARS] = {},
-             *camera_btn = nullptr, *keys_btn = nullptr, *attach_row = nullptr, *entry = nullptr, *entry_ta = nullptr;
+              *pill = nullptr, *pill_label = nullptr, *pill_icon = nullptr, *wave = nullptr, *bars[BARS] = {},
+                                                                                                           *camera_btn = nullptr, *keys_btn = nullptr, *attach_row = nullptr, *entry = nullptr, *entry_ta = nullptr;
     // the reply being written
     lv_obj_t *reply = nullptr, *reply_body = nullptr, *reply_tool = nullptr, *draft = nullptr;
     std::string reply_text;
@@ -198,8 +213,14 @@ void post(std::function<void()> fn)
     U.posts.push_back(std::move(fn));
 }
 
-void set_mood(Mood m) { U.mood = int(m); }
-void shoot(Shot s) { U.shot = int(s); }
+void set_mood(Mood m)
+{
+    U.mood = int(m);
+}
+void shoot(Shot s)
+{
+    U.shot = int(s);
+}
 
 // ---- figure task ------------------------------------------------------------------------
 void figure_task(void *)
@@ -218,9 +239,13 @@ void figure_task(void *)
         fig.set_mood(Mood(U.mood.load()));
         fig.set_level(U.level);
         const int s = U.shot.exchange(-1);
-        if (s >= 0) fig.shoot(Shot(s));
+        if (s >= 0) {
+            fig.shoot(Shot(s));
+        }
         const int r = U.react_mood.exchange(-1);
-        if (r >= 0) fig.react(Shot(r), U.react_failed, U.react_len);
+        if (r >= 0) {
+            fig.react(Shot(r), U.react_failed, U.react_len);
+        }
         fig.step(float(start - last) / 1e6f);
         last = start;
         const int back = U.fig_shown ^ 1;
@@ -254,7 +279,9 @@ lv_obj_t *plain(lv_obj_t *parent)
 
 void scroll_end()
 {
-    if (!U.chat) return;
+    if (!U.chat) {
+        return;
+    }
     lv_obj_update_layout(U.chat);
     lv_obj_scroll_to_y(U.chat, LV_COORD_MAX, LV_ANIM_ON);
 }
@@ -262,8 +289,11 @@ void scroll_end()
 void update_empty()
 {
     const bool empty = lv_obj_get_child_count(U.chat) == 0;
-    if (empty) lv_obj_remove_flag(U.empty, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(U.empty, LV_OBJ_FLAG_HIDDEN);
+    if (empty) {
+        lv_obj_remove_flag(U.empty, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(U.empty, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 lv_obj_t *bubble(bool mine)
@@ -321,7 +351,9 @@ lv_obj_t *add_user(const std::string &text, const std::vector<Jpeg> &photos)
 {
     lv_obj_t *b = bubble(true);
     for (const Jpeg &p : photos)
-        if (Image *img = decode(p->data(), p->size(), 150, 150)) show_image(b, img, 12);
+        if (Image *img = decode(p->data(), p->size(), 150, 150)) {
+            show_image(b, img, 12);
+        }
     lv_obj_t *l = text_label(b, text, 0xFFFFFF);
     scroll_end();
     return l;
@@ -368,17 +400,24 @@ void fetch_task(void *arg)
             if (status == 200) {
                 uint8_t buf[2048];
                 int n;
-                while ((n = esp_http_client_read(h, reinterpret_cast<char *>(buf), sizeof(buf))) > 0 && body.size() < 900 * 1024)
+                while ((n = esp_http_client_read(h, reinterpret_cast<char *>(buf), sizeof(buf))) > 0 && body.size() < 900 * 1024) {
                     body.insert(body.end(), buf, buf + n);
+                }
             } else {
                 why = "HTTP " + std::to_string(status);
             }
         } else {
             why = "unreachable";
         }
-        if (h) esp_http_client_cleanup(h);
-        if (!body.empty()) img = decode(body.data(), body.size(), BUBBLE - 28, 300);
-        if (!img && why.empty()) why = body.empty() ? "empty" : "not a JPEG or PNG";
+        if (h) {
+            esp_http_client_cleanup(h);
+        }
+        if (!body.empty()) {
+            img = decode(body.data(), body.size(), BUBBLE - 28, 300);
+        }
+        if (!img && why.empty()) {
+            why = body.empty() ? "empty" : "not a JPEG or PNG";
+        }
     }
     lv_obj_t *holder = job->holder;
     post([holder, img, why] {
@@ -390,7 +429,8 @@ void fetch_task(void *arg)
             return;
         }
         lv_obj_clean(holder);
-        if (!img) {
+        if (!img)
+        {
             lv_obj_t *l = label(holder, ("Image unavailable (" + why + ")").c_str(), 14, 20, BUBBLE - 56, TEXT3, 14);
             lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
             return;
@@ -405,12 +445,16 @@ void fetch_task(void *arg)
 void fetch(const std::string &url, lv_obj_t *holder, int photo = -1)
 {
     auto *job = new Fetch{url, holder, photo};
-    if (xTaskCreatePinnedToCoreWithCaps(fetch_task, "swifty-img", 16 * 1024, job, 3, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS)
+    if (xTaskCreatePinnedToCoreWithCaps(fetch_task, "swifty-img", 16 * 1024, job, 3, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         delete job;
+    }
 }
 
-const ImageLoader LOAD_IMAGES = [](const std::string &url, const std::string &, lv_obj_t *holder) {
-    if (url.compare(0, 7, "http://") == 0 || url.compare(0, 8, "https://") == 0) fetch(url, holder);
+const ImageLoader LOAD_IMAGES = [](const std::string &url, const std::string &, lv_obj_t *holder)
+{
+    if (url.compare(0, 7, "http://") == 0 || url.compare(0, 8, "https://") == 0) {
+        fetch(url, holder);
+    }
 };
 
 // ---- the reply -----------------------------------------------------------------------
@@ -431,7 +475,9 @@ void begin_reply()
 
 void reply_photo(int index)
 {
-    if (!U.reply) begin_reply();
+    if (!U.reply) {
+        begin_reply();
+    }
     lv_obj_t *holder = plain(U.reply);
     lv_obj_set_size(holder, BUBBLE - 28, 120);
     lv_obj_set_style_bg_color(holder, lv_color_hex(FIELD), 0);
@@ -443,7 +489,9 @@ void reply_photo(int index)
 
 void render_reply(bool final)
 {
-    if (!U.reply_body) return;
+    if (!U.reply_body) {
+        return;
+    }
     U.reply_dirty = false;
     U.reply_drawn = lv_tick_get();
     md_render(U.reply_body, U.reply_text.empty() ? std::string("\xE2\x80\xA6") : U.reply_text, BUBBLE - 28,
@@ -455,34 +503,41 @@ void set_pill(const char *text, bool live);
 
 void send(const std::string &text, bool spoken, lv_obj_t *draft)
 {
-    if (text.empty() || agent_busy()) return;
+    if (text.empty() || agent_busy()) {
+        return;
+    }
     std::vector<Jpeg> photos;
     photos.swap(U.attached);
     lv_obj_clean(U.attach_row);
-    if (draft) lv_label_set_text(draft, text.c_str());
-    else add_user(text, photos);
+    if (draft) {
+        lv_label_set_text(draft, text.c_str());
+    } else {
+        add_user(text, photos);
+    }
     begin_reply();
     shoot(Shot::Send);
     set_mood(Mood::Think);
     U.status = "Thinking";
     set_pill("Stop", false);
     AgentEvents ev;
-    ev.text = [](const std::string &t) {
+    ev.text = [](const std::string & t) {
         post([t] {
             U.reply_text = t;
             U.reply_dirty = true;
             set_mood(Mood::Talk);
         });
     };
-    ev.tool = [](const std::string &what) {
+    ev.tool = [](const std::string & what) {
         post([what] {
             if (!U.reply_tool) return;
             lv_label_set_text(U.reply_tool, what.c_str());
             lv_obj_remove_flag(U.reply_tool, LV_OBJ_FLAG_HIDDEN);
         });
     };
-    ev.show_photo = [](int index) { post([index] { reply_photo(index); }); };
-    ev.done = [](const std::string &t, Shot mood, bool failed) {
+    ev.show_photo = [](int index) {
+        post([index] { reply_photo(index); });
+    };
+    ev.done = [](const std::string & t, Shot mood, bool failed) {
         post([t, mood, failed] {
             U.reply_text = failed ? "*" + t + "*" : t;
             render_reply(true);
@@ -497,15 +552,21 @@ void send(const std::string &text, bool spoken, lv_obj_t *draft)
             set_pill(nullptr, false);
         });
     };
-    if (!agent_send(text, photos, spoken, ev)) add_note("Swifty is still answering.");
+    if (!agent_send(text, photos, spoken, ev)) {
+        add_note("Swifty is still answering.");
+    }
 }
 
 // ---- listening ------------------------------------------------------------------------
 void set_pill(const char *text, bool live)
 {
-    if (!U.pill) return;
+    if (!U.pill) {
+        return;
+    }
     const bool busy = agent_busy();
-    if (!text) text = busy ? "Stop" : "Hold to talk";
+    if (!text) {
+        text = busy ? "Stop" : "Hold to talk";
+    }
     lv_label_set_text(U.pill_label, text);
     lv_obj_set_style_bg_color(U.pill, lv_color_hex(live ? SKY_DEEP : FIELD), 0);
     if (live) {
@@ -521,7 +582,9 @@ void set_pill(const char *text, bool live)
 
 void start_listening()
 {
-    if (U.listening || U.recognizing) return;
+    if (U.listening || U.recognizing) {
+        return;
+    }
     if (agent_busy()) {
         agent_stop();
         return;
@@ -532,13 +595,15 @@ void start_listening()
         return;
     }
     AsrEvents ev;
-    ev.partial = [](const std::string &t) {
+    ev.partial = [](const std::string & t) {
         post([t] {
             if (U.draft && lv_obj_is_valid(U.draft)) lv_label_set_text(U.draft, t.c_str());
             scroll_end();
         });
     };
-    ev.level = [](float l) { U.level = l; };
+    ev.level = [](float l) {
+        U.level = l;
+    };
     if (!asr_start(ev)) {
         add_note("The microphone isn't available right now.");
         shoot(Shot::Sorry);
@@ -553,47 +618,58 @@ void start_listening()
 
 void stop_listening()
 {
-    if (!U.listening) return;
+    if (!U.listening) {
+        return;
+    }
     U.listening = false;
     U.recognizing = true;
     U.level = 0;
     set_mood(Mood::Think);
     set_pill("Recognizing\xE2\x80\xA6", false);
     xTaskCreatePinnedToCoreWithCaps(
-        [](void *) {
-            std::string error;
-            const std::string text = asr_finish(&error);
-            post([text, error] {
-                U.recognizing = false;
-                lv_obj_t *draft = U.draft;
-                U.draft = nullptr;
-                if (text.empty()) {
-                    if (draft && lv_obj_is_valid(draft)) lv_obj_delete(lv_obj_get_parent(lv_obj_get_parent(draft)));
-                    update_empty();
-                    add_note(error.empty() ? "I didn't catch that." : error);
-                    set_mood(Mood::Idle);
-                    U.react_failed = true, U.react_len = 0, U.react_mood = int(Shot::Sorry);
-                    set_pill(nullptr, false);
-                    return;
+    [](void *) {
+        std::string error;
+        const std::string text = asr_finish(&error);
+        post([text, error] {
+            U.recognizing = false;
+            lv_obj_t *draft = U.draft;
+            U.draft = nullptr;
+            if (text.empty()) {
+                if (draft && lv_obj_is_valid(draft)) {
+                    lv_obj_delete(lv_obj_get_parent(lv_obj_get_parent(draft)));
                 }
-                send(text, true, draft && lv_obj_is_valid(draft) ? draft : nullptr);
-            });
-            vTaskDelete(nullptr);
-        },
-        "swifty-fin", 6144, nullptr, 4, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                update_empty();
+                add_note(error.empty() ? "I didn't catch that." : error);
+                set_mood(Mood::Idle);
+                U.react_failed = true, U.react_len = 0, U.react_mood = int(Shot::Sorry);
+                set_pill(nullptr, false);
+                return;
+            }
+            send(text, true, draft && lv_obj_is_valid(draft) ? draft : nullptr);
+        });
+        vTaskDelete(nullptr);
+    },
+    "swifty-fin", 6144, nullptr, 4, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
 void pill_cb(lv_event_t *e)
 {
     const lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_PRESSED) start_listening();
-    else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) stop_listening();
+    if (code == LV_EVENT_PRESSED) {
+        start_listening();
+    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        stop_listening();
+    }
 }
 
 void wave_timer(lv_timer_t *)
 {
-    if (!U.listening) return;
-    for (int i = BARS - 1; i > 0; --i) U.levels[i] = U.levels[i - 1];
+    if (!U.listening) {
+        return;
+    }
+    for (int i = BARS - 1; i > 0; --i) {
+        U.levels[i] = U.levels[i - 1];
+    }
     U.levels[0] = U.level;
     for (int i = 0; i < BARS; ++i) {
         const int bar = BAR_ORDER[i];
@@ -608,12 +684,16 @@ void wave_timer(lv_timer_t *)
 // ---- attachments -----------------------------------------------------------------------
 void attach(const Jpeg &jpeg)
 {
-    if (U.attached.size() >= 2) U.attached.erase(U.attached.begin());
+    if (U.attached.size() >= 2) {
+        U.attached.erase(U.attached.begin());
+    }
     U.attached.push_back(jpeg);
     lv_obj_clean(U.attach_row);
     for (const Jpeg &p : U.attached) {
         Image *img = decode(p->data(), p->size(), 56, 56);
-        if (!img) continue;
+        if (!img) {
+            continue;
+        }
         lv_obj_t *t = show_image(U.attach_row, img, 12);
         lv_obj_set_style_border_width(t, 2, 0);
         lv_obj_set_style_border_color(t, lv_color_hex(SKY), 0);
@@ -633,36 +713,44 @@ void camera_cb(lv_event_t *e)
         U.hooks.pick_photo();
         return;
     }
-    if (taking.exchange(true)) return;
-    if (U.hooks.camera_ready) U.hooks.camera_ready();
+    if (taking.exchange(true)) {
+        return;
+    }
+    if (U.hooks.camera_ready) {
+        U.hooks.camera_ready();
+    }
     U.status = "Taking a photo";
     shoot(Shot::Send);
     xTaskCreatePinnedToCoreWithCaps(
-        [](void *arg) {
-            const bool newest = arg != nullptr;
-            const int index = newest ? -1 : camera_app_take_photo(15000);
-            uint8_t *jpeg = nullptr;
-            size_t size = 0;
-            Jpeg photo;
-            if ((newest || index >= 0) && camera_app_photo_jpeg(newest ? -1 : index, &jpeg, &size)) {
-                photo = std::make_shared<std::vector<uint8_t>>(jpeg, jpeg + size);
-                heap_caps_free(jpeg);
+    [](void *arg) {
+        const bool newest = arg != nullptr;
+        const int index = newest ? -1 : camera_app_take_photo(15000);
+        uint8_t *jpeg = nullptr;
+        size_t size = 0;
+        Jpeg photo;
+        if ((newest || index >= 0) && camera_app_photo_jpeg(newest ? -1 : index, &jpeg, &size)) {
+            photo = std::make_shared<std::vector<uint8_t>>(jpeg, jpeg + size);
+            heap_caps_free(jpeg);
+        }
+        post([photo] {
+            taking = false;
+            U.status = "Ready";
+            if (photo) attach(photo);
+            else {
+                add_note("The camera didn't take a photo. Is the camera module in the left slot?");
             }
-            post([photo] {
-                taking = false;
-                U.status = "Ready";
-                if (photo) attach(photo);
-                else add_note("The camera didn't take a photo. Is the camera module in the left slot?");
-            });
-            vTaskDelete(nullptr);
-        },
-        "swifty-cam", 6144, latest ? reinterpret_cast<void *>(1) : nullptr, 4, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        });
+        vTaskDelete(nullptr);
+    },
+    "swifty-cam", 6144, latest ? reinterpret_cast<void *>(1) : nullptr, 4, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
 // ---- typing ----------------------------------------------------------------------------
 void close_entry()
 {
-    if (U.entry) lv_obj_delete(U.entry);
+    if (U.entry) {
+        lv_obj_delete(U.entry);
+    }
     U.entry = U.entry_ta = nullptr;
 }
 
@@ -670,13 +758,17 @@ const Accent SKY_ACCENT = {SKY_HI, SKY_DEEP, SKY, 0x041428, 0x12305A, 0x060E1C};
 
 void open_entry(lv_event_t *)
 {
-    if (U.entry) return;
+    if (U.entry) {
+        return;
+    }
     U.entry = box(U.screen, 0, 0, W, W);
     lv_obj_set_style_bg_color(U.entry, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(U.entry, LV_OPA_COVER, 0);
     lv_obj_add_flag(U.entry, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t *close = field_button(U.entry, 56, 30, 92, 36, "Cancel", 15, TEXT2);
-    lv_obj_add_event_cb(close, [](lv_event_t *) { post(close_entry); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(close, [](lv_event_t *) {
+        post(close_entry);
+    }, LV_EVENT_CLICKED, nullptr);
     label(U.entry, "Ask Swifty", 156, 34, 220, TEXT, 22, true, LV_TEXT_ALIGN_CENTER);
     U.entry_ta = lv_textarea_create(U.entry);
     lv_obj_set_pos(U.entry_ta, 24, 84);
@@ -723,7 +815,9 @@ lv_obj_t *round_button(lv_obj_t *parent, int x, int y, int size, const char *gly
 
 void new_chat(lv_event_t *)
 {
-    if (agent_busy() || U.listening || U.recognizing) return;
+    if (agent_busy() || U.listening || U.recognizing) {
+        return;
+    }
     agent_reset();
     lv_obj_clean(U.chat);
     U.attached.clear();
@@ -736,8 +830,8 @@ void refresh_hint()
 {
     const Config c = config();
     lv_label_set_text(U.empty_hint, !c.llm_ready() ? "Load my settings with tools/mosaico-config.py to start."
-                                    : c.asr_ready() ? "Hold the mic or the AI key and ask me anything. Tap the camera to show me something."
-                                                    : "Type to me, or tap the camera to show me something.");
+                      : c.asr_ready() ? "Hold the mic or the AI key and ask me anything. Tap the camera to show me something."
+                      : "Type to me, or tap the camera to show me something.");
 }
 
 void build(lv_obj_t *s)
@@ -762,11 +856,15 @@ void build(lv_obj_t *s)
     lv_obj_set_pos(U.figure, (W - FIG) / 2, -4);
     lv_image_set_src(U.figure, &U.fig_dsc[0]);
     lv_obj_add_flag(U.figure, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(U.figure, [](lv_event_t *) { shoot(Shot::Poke); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(U.figure, [](lv_event_t *) {
+        shoot(Shot::Poke);
+    }, LV_EVENT_CLICKED, nullptr);
 
     lv_obj_t *back = round_button(s, 56, 40, 48, "back");
     lv_obj_add_event_cb(back, [](lv_event_t *) {
-        if (U.hooks.exit) U.hooks.exit();
+        if (U.hooks.exit) {
+            U.hooks.exit();
+        }
     }, LV_EVENT_CLICKED, nullptr);
     lv_obj_t *fresh = round_button(s, 376, 40, 48, "pencil");
     lv_obj_add_event_cb(fresh, new_chat, LV_EVENT_CLICKED, nullptr);
@@ -832,8 +930,12 @@ void build(lv_obj_t *s)
             std::lock_guard<std::mutex> g(U.lock);
             todo.swap(U.posts);
         }
-        for (auto &fn : todo) fn();
-        if (U.reply_dirty && lv_tick_elaps(U.reply_drawn) > 140) render_reply(false);
+        for (auto &fn : todo) {
+            fn();
+        }
+        if (U.reply_dirty && lv_tick_elaps(U.reply_drawn) > 140) {
+            render_reply(false);
+        }
     }, 30, nullptr);
     // Below LVGL's draw thread (3) and the camera (4): the bird takes the CPU
     // that is left. At or above them it starved LVGL, which then held the
@@ -857,14 +959,18 @@ esp_err_t say_rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t ca
 
 extern "C" void swifty_app_init(const swifty_hooks_t *hooks)
 {
-    if (hooks) U.hooks = *hooks;
+    if (hooks) {
+        U.hooks = *hooks;
+    }
     config_start();
     agent_start();
     esp_iris_rpc_register(0x4744, 41, say_rpc, nullptr);
     // Test hook: method 42, payload 1 starts listening and 0 stops, as the mic pill.
     esp_iris_rpc_register(0x4744, 42, [](const esp_iris_rpc_request_t *request, uint8_t *, size_t, size_t *size, void *) {
         *size = 0;
-        if (!U.built || request->payload_size < 1) return ESP_ERR_INVALID_STATE;
+        if (!U.built || request->payload_size < 1) {
+            return ESP_ERR_INVALID_STATE;
+        }
         const bool on = request->payload[0];
         post([on] { on ? start_listening() : stop_listening(); });
         return ESP_OK;
@@ -873,7 +979,9 @@ extern "C" void swifty_app_init(const swifty_hooks_t *hooks)
 
 extern "C" void swifty_app_open(lv_obj_t *screen)
 {
-    if (U.hooks.camera_ready) U.hooks.camera_ready();  // so take_photo works from the agent's task
+    if (U.hooks.camera_ready) {
+        U.hooks.camera_ready();    // so take_photo works from the agent's task
+    }
     if (!U.built) {
         U.built = true;
         build(screen);
@@ -891,10 +999,14 @@ extern "C" void swifty_app_config_section(const char *name, swifty_section_apply
 
 extern "C" void swifty_app_attach_photo(int index)
 {
-    if (!U.built) return;
+    if (!U.built) {
+        return;
+    }
     uint8_t *jpeg = nullptr;
     size_t size = 0;
-    if (!camera_app_photo_jpeg(index, &jpeg, &size)) return;
+    if (!camera_app_photo_jpeg(index, &jpeg, &size)) {
+        return;
+    }
     attach(std::make_shared<std::vector<uint8_t>>(jpeg, jpeg + size));
     heap_caps_free(jpeg);
     shoot(Shot::Pleased);
@@ -919,9 +1031,14 @@ extern "C" void swifty_app_set_active(bool active)
 
 extern "C" void swifty_app_talk(bool pressed)
 {
-    if (!U.built) return;
-    if (pressed) start_listening();
-    else stop_listening();
+    if (!U.built) {
+        return;
+    }
+    if (pressed) {
+        start_listening();
+    } else {
+        stop_listening();
+    }
 }
 
 extern "C" void swifty_app_summary(swifty_summary_t *out)
@@ -939,11 +1056,17 @@ extern "C" void swifty_app_summary(swifty_summary_t *out)
 extern "C" const lv_image_dsc_t *swifty_app_portrait(int size)
 {
     static lv_image_dsc_t dsc = {};
-    if (dsc.data) return &dsc;
+    if (dsc.data) {
+        return &dsc;
+    }
     auto *px = static_cast<uint8_t *>(heap_caps_calloc(1, size_t(size) * size * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (!px) return nullptr;
+    if (!px) {
+        return nullptr;
+    }
     Figure fig(size, 2);
-    for (int i = 0; i < 90; ++i) fig.step(1 / 30.f);  // settled
+    for (int i = 0; i < 90; ++i) {
+        fig.step(1 / 30.f);    // settled
+    }
     fig.render(px);
     dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
     dsc.header.cf = LV_COLOR_FORMAT_ARGB8888;

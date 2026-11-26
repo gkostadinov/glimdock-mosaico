@@ -55,7 +55,7 @@ struct {
     int radius = DEFAULT_RADIUS, brightness = 80;
     ShellApp current = ShellApp::Launcher;
     lv_obj_t *launcher = nullptr, *glim_screen = nullptr, *camera_screen = nullptr, *swifty_screen = nullptr,
-             *files_screen = nullptr, *tools_screen = nullptr, *gallery_screen = nullptr;
+              *files_screen = nullptr, *tools_screen = nullptr, *gallery_screen = nullptr;
     lv_obj_t *home_screen = nullptr, *home_frame = nullptr;
     lv_indev_read_cb_t touch_read = nullptr;
     bool touch_pressed = false;
@@ -152,7 +152,6 @@ void set_brightness(int percent, bool save)
 
 void start_apps();
 
-
 // A brightness change for a moment (screen light, screen flash); -1 restores
 // the person's setting. It is a panel command on the frames' SPI link, so it
 // waits for the frame being sent.
@@ -189,16 +188,21 @@ void start_wifi()
 bool is_control(lv_obj_t *o)
 {
     for (int depth = 0; o && depth < 4; ++depth) {
-        if (lv_obj_has_flag(o, LV_OBJ_FLAG_USER_1)) return false;
+        if (lv_obj_has_flag(o, LV_OBJ_FLAG_USER_1)) {
+            return false;
+        }
         const uint32_t n = lv_obj_get_event_count(o);
         for (uint32_t i = 0; i < n; ++i) {
             const lv_event_dsc_t *e = lv_obj_get_event_dsc(o, i);
             const uint32_t f = e ? (e->filter & ~uint32_t(LV_EVENT_PREPROCESS)) : 0;
             if (f == LV_EVENT_CLICKED || f == LV_EVENT_SHORT_CLICKED || f == LV_EVENT_SINGLE_CLICKED ||
-                f == LV_EVENT_VALUE_CHANGED || f == LV_EVENT_LONG_PRESSED)
+                    f == LV_EVENT_VALUE_CHANGED || f == LV_EVENT_LONG_PRESSED) {
                 return true;
+            }
         }
-        if (!lv_obj_has_flag(o, LV_OBJ_FLAG_EVENT_BUBBLE)) return false;
+        if (!lv_obj_has_flag(o, LV_OBJ_FLAG_EVENT_BUBBLE)) {
+            return false;
+        }
         o = lv_obj_get_parent(o);
     }
     return false;
@@ -230,7 +234,9 @@ struct {
 void read_battery()
 {
     const int64_t now = esp_timer_get_time();
-    if (battery.failed || now < battery.next) return;
+    if (battery.failed || now < battery.next) {
+        return;
+    }
     battery.next = now + 10 * 1000000LL;
     if (!battery.dev) {
         i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
@@ -245,13 +251,19 @@ void read_battery()
     }
     auto word = [](uint8_t command, int *out) {
         uint8_t v[2] = {};
-        if (i2c_master_transmit_receive(battery.dev, &command, 1, v, 2, 50) != ESP_OK) return false;
+        if (i2c_master_transmit_receive(battery.dev, &command, 1, v, 2, 50) != ESP_OK) {
+            return false;
+        }
         *out = int16_t(v[0] | v[1] << 8);
         return true;
     };
     int soc = 0, current = 0;
-    if (word(0x2C, &soc) && soc >= 0 && soc <= 100) battery.pct = soc;
-    if (word(0x0C, &current)) battery.charging = current > 15;
+    if (word(0x2C, &soc) && soc >= 0 && soc <= 100) {
+        battery.pct = soc;
+    }
+    if (word(0x0C, &current)) {
+        battery.charging = current > 15;
+    }
 }
 
 void refresh_launcher(lv_timer_t *)
@@ -270,7 +282,8 @@ void refresh_launcher(lv_timer_t *)
     if (displayClockTm(time(nullptr), zone, local)) {
         static const char *const days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
         static const char *const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                                              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+                                             "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+                                            };
         snprintf(clock, sizeof(clock), "%02d:%02d", local.tm_hour, local.tm_min);
         snprintf(date, sizeof(date), "%s %d %s", days[local.tm_wday % 7], local.tm_mday, months[local.tm_mon % 12]);
     }
@@ -302,18 +315,30 @@ void refresh_launcher(lv_timer_t *)
                        camera, swifty, files);
 }
 
-void go_launcher_async(void *) { shell_show(ShellApp::Launcher); }
+void go_launcher_async(void *)
+{
+    shell_show(ShellApp::Launcher);
+}
 
 // ESP-Iris RPC 0x4744/30: open an app (payload: 0 launcher, 1 Glimdock, 2 Home,
 // 3 Camera), for development and testing from the Mac.
-void open_async(void *app) { shell_show(ShellApp(uintptr_t(app))); }
+void open_async(void *app)
+{
+    shell_show(ShellApp(uintptr_t(app)));
+}
 esp_err_t open_rpc(const esp_iris_rpc_request_t *request, uint8_t *, size_t, size_t *size, void *)
 {
     *size = 0;
-    if (request->payload_size < 1 || request->payload[0] >= SHELL_APPS) return ESP_ERR_INVALID_ARG;
-    if (!bsp_display_lock(1000)) return ESP_ERR_TIMEOUT;
+    if (request->payload_size < 1 || request->payload[0] >= SHELL_APPS) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!bsp_display_lock(1000)) {
+        return ESP_ERR_TIMEOUT;
+    }
     // Tools may name its tab too (a second byte: 0 torch ... 4 the Interaction board).
-    if (request->payload_size >= 2 && request->payload[0] == uint8_t(ShellApp::Tools)) tools_app_select(request->payload[1]);
+    if (request->payload_size >= 2 && request->payload[0] == uint8_t(ShellApp::Tools)) {
+        tools_app_select(request->payload[1]);
+    }
     lv_async_call(open_async, reinterpret_cast<void *>(uintptr_t(request->payload[0])));
     bsp_display_unlock();
     return ESP_OK;
@@ -334,15 +359,25 @@ void ai_key_clicked(void *, void *)
 const char *glimdock_apply(const char *json, size_t length)
 {
     JsonDocument doc;
-    if (deserializeJson(doc, json, length) || !doc.is<JsonObject>()) return "expected an object";
+    if (deserializeJson(doc, json, length) || !doc.is<JsonObject>()) {
+        return "expected an object";
+    }
     static const char *const KEYS[] = {"ssid", "password", "endpoint", "token", "setup_token", "ca"};
     for (JsonPair kv : doc.as<JsonObject>()) {
         bool known = false;
-        for (const char *k : KEYS) known |= !strcmp(k, kv.key().c_str());
-        if (!known) return "unknown key (use ssid, password, endpoint, token, setup_token, ca)";
-        if (!kv.value().is<const char *>()) return "values must be strings";
+        for (const char *k : KEYS) {
+            known |= !strcmp(k, kv.key().c_str());
+        }
+        if (!known) {
+            return "unknown key (use ssid, password, endpoint, token, setup_token, ca)";
+        }
+        if (!kv.value().is<const char *>()) {
+            return "values must be strings";
+        }
     }
-    auto field = [&](const char *key) { return doc[key].is<const char *>() ? doc[key].as<const char *>() : nullptr; };
+    auto field = [&](const char *key) {
+        return doc[key].is<const char *>() ? doc[key].as<const char *>() : nullptr;
+    };
     const glimdock_connection_t c = {field("ssid"), field("password"), field("endpoint"), field("token"), field("setup_token"), field("ca")};
     const char *error = glimdock_app_store_connection(&c);
     return error ? error : "restart";  // network.cpp reads its settings at start
@@ -378,11 +413,17 @@ void pair_async(void *arg)
 const char *home_apply(const char *json, size_t length)
 {
     JsonDocument doc;
-    if (deserializeJson(doc, json, length) || !doc.is<JsonObject>()) return "expected an object";
+    if (deserializeJson(doc, json, length) || !doc.is<JsonObject>()) {
+        return "expected an object";
+    }
     for (JsonPair kv : doc.as<JsonObject>())
-        if (strcmp(kv.key().c_str(), "hub") && strcmp(kv.key().c_str(), "pairing_code")) return "unknown key (use hub, pairing_code)";
+        if (strcmp(kv.key().c_str(), "hub") && strcmp(kv.key().c_str(), "pairing_code")) {
+            return "unknown key (use hub, pairing_code)";
+        }
     const char *hub = doc["hub"] | "", *code = doc["pairing_code"] | "";
-    if (!*hub || !*code) return "hub and pairing_code are both needed (make a code in Swifty Home: Displays, Pair)";
+    if (!*hub || !*code) {
+        return "hub and pairing_code are both needed (make a code in Swifty Home: Displays, Pair)";
+    }
     auto *r = new PairRequest{};
     strlcpy(r->hub, hub, sizeof(r->hub));
     strlcpy(r->code, code, sizeof(r->code));
@@ -413,7 +454,9 @@ std::atomic<bool> ai_holding{false};
 void swifty_listen_async(void *on)
 {
     if (on) {
-        if (shell.current != ShellApp::Swifty) shell_show(ShellApp::Swifty);
+        if (shell.current != ShellApp::Swifty) {
+            shell_show(ShellApp::Swifty);
+        }
         swifty_app_talk(true);
     } else {
         swifty_app_talk(false);
@@ -441,7 +484,9 @@ void ai_key_hold(void *, void *)
 
 void ai_key_up(void *, void *)
 {
-    if (!ai_holding.exchange(false)) return;
+    if (!ai_holding.exchange(false)) {
+        return;
+    }
     if (bsp_display_lock(1000)) {
         lv_async_call(swifty_listen_async, nullptr);
         bsp_display_unlock();
@@ -534,7 +579,9 @@ namespace agent_tools {
 // Runs f on the LVGL task (under its lock, from Swifty's task) and waits.
 template <typename F> bool on_ui(F f, int timeout_ms = 3000)
 {
-    if (!bsp_display_lock(timeout_ms)) return false;
+    if (!bsp_display_lock(timeout_ms)) {
+        return false;
+    }
     f();
     bsp_display_unlock();
     return true;
@@ -543,7 +590,9 @@ template <typename F> bool on_ui(F f, int timeout_ms = 3000)
 JsonDocument args(const char *json)
 {
     JsonDocument d;
-    if (json && *json) deserializeJson(d, json);
+    if (json && *json) {
+        deserializeJson(d, json);
+    }
     return d;
 }
 
@@ -556,7 +605,9 @@ void open_app(const char *a, char *out, size_t cap)
     static const char *const TOOLS[] = {"torch", "level", "compass", "calculator", "interact"};
     int tool_index = -1;
     for (int t = 0; t < 5; ++t)
-        if (tool == TOOLS[t]) tool_index = t;
+        if (tool == TOOLS[t]) {
+            tool_index = t;
+        }
     for (int i = 0; i < SHELL_APPS; ++i)
         if (name == APP_NAMES[i]) {
             on_ui([i, tool_index] {
@@ -604,7 +655,9 @@ void set_brightness_tool(const char *a, char *out, size_t cap)
 void glimdock_tool(const char *a, char *out, size_t cap)
 {
     std::string topic = args(a)["topic"] | "";
-    if (topic == "all") topic.clear();
+    if (topic == "all") {
+        topic.clear();
+    }
     glimdock_app_report(topic.c_str(), out, cap);
 }
 
@@ -618,8 +671,11 @@ void home_control(const char *a, char *out, size_t cap)
     const JsonDocument d = args(a);
     const std::string action = d["action"] | "", target = d["target"] | "";
     std::string value;
-    if (d["value"].is<const char *>()) value = d["value"].as<const char *>();
-    else if (!d["value"].isNull()) value = std::to_string(d["value"].as<int>());
+    if (d["value"].is<const char *>()) {
+        value = d["value"].as<const char *>();
+    } else if (!d["value"].isNull()) {
+        value = std::to_string(d["value"].as<int>());
+    }
     if (!on_ui([&] { home_app_command(action.c_str(), target.c_str(), value.c_str(), out, cap); }))
         snprintf(out, cap, "The screen is busy; try again.");
 }
@@ -669,14 +725,19 @@ void level(const char *, char *out, size_t cap)
 void time_zone_tool(const char *a, char *out, size_t cap)
 {
     const std::string want = args(a)["zone"] | "";
-    if (want == "automatic") time_zone_set(-1);
-    else {
+    if (want == "automatic") {
+        time_zone_set(-1);
+    } else {
         int z = -1;
         for (int i = 0; i < time_zone_count(); ++i)
-            if (!strcasecmp(want.c_str(), time_zone_name(i))) z = i;
+            if (!strcasecmp(want.c_str(), time_zone_name(i))) {
+                z = i;
+            }
         if (z < 0) {
             std::string names = "automatic";
-            for (int i = 0; i < time_zone_count(); ++i) names += std::string(", ") + time_zone_name(i);
+            for (int i = 0; i < time_zone_count(); ++i) {
+                names += std::string(", ") + time_zone_name(i);
+            }
             snprintf(out, cap, "The clocks know: %s.", names.c_str());
             return;
         }
@@ -688,7 +749,10 @@ void time_zone_tool(const char *a, char *out, size_t cap)
 }
 
 // The Interaction sub-board (Tools): these wait on its worker, not the UI.
-void board_state(const char *, char *out, size_t cap) { tools_board_report(out, cap); }
+void board_state(const char *, char *out, size_t cap)
+{
+    tools_board_report(out, cap);
+}
 
 void board_lights(const char *a, char *out, size_t cap)
 {
@@ -777,7 +841,9 @@ void reset()
     D.since = esp_timer_get_time();
     D.last = D.worst = D.worst_at = 0;
     D.over100 = D.over300 = 0;
-    for (int i = 0; i < 3; ++i) D.cpu[i][0] = 0, D.cpu_at[i] = 0;
+    for (int i = 0; i < 3; ++i) {
+        D.cpu[i][0] = 0, D.cpu_at[i] = 0;
+    }
 }
 
 void cpu_window()  // the health task
@@ -796,10 +862,14 @@ esp_err_t rpc(const esp_iris_rpc_request_t *, uint8_t *out, size_t cap, size_t *
     int n = snprintf(o, cap, "LVGL loop: worst gap %lld ms at %lld s, gaps over 100 ms %d, over 300 ms %d; CPU %% of a core:",
                      (long long)(D.worst / 1000), (long long)(D.worst_at / 1000000), D.over100, D.over300);
     for (int i = 0; i < 3 && n > 0 && size_t(n) < cap; ++i)
-        if (D.cpu[i][0]) n += snprintf(o + n, cap - n, " [to %llds] %s;", (long long)(D.cpu_at[i] / 1000000), D.cpu[i]);
+        if (D.cpu[i][0]) {
+            n += snprintf(o + n, cap - n, " [to %llds] %s;", (long long)(D.cpu_at[i] / 1000000), D.cpu[i]);
+        }
     if (n > 0 && size_t(n) + 8 < cap) {
         n += snprintf(o + n, cap - n, " camera: ");
-        if (n > 0 && size_t(n) < cap) camera_app_webcam_stats(o + n, cap - n, false);
+        if (n > 0 && size_t(n) < cap) {
+            camera_app_webcam_stats(o + n, cap - n, false);
+        }
         n = int(strnlen(o, cap));
     }
     *size = n < 0 ? 0 : std::min(cap, size_t(n));
@@ -819,8 +889,11 @@ void health_task(void *)
         // and a reconnect would restart the computer's setup of the camera.
         static bool webcam_was = false;
         if (usb_webcam_owns_usb()) {
-            if (!webcam_was) perf_cpu_window(nullptr, 0);  // the first window starts now
-            else webcam_diag::cpu_window();
+            if (!webcam_was) {
+                perf_cpu_window(nullptr, 0);    // the first window starts now
+            } else {
+                webcam_diag::cpu_window();
+            }
             webcam_was = true;
             was_mounted = true;
             continue;
@@ -836,7 +909,9 @@ void health_task(void *)
                  unsigned(heap_caps_get_free_size(MALLOC_CAP_DMA)),
                  unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_DMA)),
                  unsigned(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)), cam.streaming ? "streaming" : "off");
-        if (was_mounted && !mounted) ESP_LOGW("health", "USB link lost");
+        if (was_mounted && !mounted) {
+            ESP_LOGW("health", "USB link lost");
+        }
         was_mounted = mounted;
         // Not configured by the host 10 s after boot (and every 30 s after):
         // after a software restart the pull-up can stay on through boot, so the
@@ -844,8 +919,9 @@ void health_task(void *)
         // port (no USB until Vibe Mode). A soft disconnect makes it enumerate
         // afresh; with no cable it changes nothing, and a working link is left.
         static int unmounted = 0;
-        if (mounted) unmounted = 0;
-        else if (unmounted++ % 3 == 0) {
+        if (mounted) {
+            unmounted = 0;
+        } else if (unmounted++ % 3 == 0) {
             ESP_LOGW("health", "USB not configured by the host: reconnecting");
             tud_disconnect();
             vTaskDelay(pdMS_TO_TICKS(600));
@@ -866,7 +942,9 @@ void start_apps()
     boot_stage("apps running");
     log_memory("Home started");
     // Display SPI transfers need 7.5 KB DMA blocks: report the first minute.
-    lv_timer_t *watch = lv_timer_create([](lv_timer_t *) { log_memory("running"); }, 15000, nullptr);
+    lv_timer_t *watch = lv_timer_create([](lv_timer_t *) {
+        log_memory("running");
+    }, 15000, nullptr);
     lv_timer_set_repeat_count(watch, 4);
 }
 }  // namespace
@@ -899,7 +977,9 @@ void use_internal_draw_buffers(lv_display_t *display)
 // --wrap=esp_crt_bundle_detach (CMakeLists): undo only this connection's setup.
 extern "C" void __wrap_esp_crt_bundle_detach(mbedtls_ssl_config *conf)
 {
-    if (!conf) return;
+    if (!conf) {
+        return;
+    }
     mbedtls_ssl_conf_verify(conf, nullptr, nullptr);
 #if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY)
     mbedtls_ssl_conf_ca_cb(conf, nullptr, nullptr);
@@ -933,7 +1013,9 @@ void worker(void *arg)
 {
     if (arg) {
         vTaskDelay(pdMS_TO_TICKS(500));  // let a reply over ESP-Iris go out first
-        if (usb_webcam_start() == ESP_OK) camera_app_set_frame_sink(usb_webcam_push, view);
+        if (usb_webcam_start() == ESP_OK) {
+            camera_app_set_frame_sink(usb_webcam_push, view);
+        }
     } else {
         camera_app_set_frame_sink(nullptr, nullptr);
         usb_webcam_stop();
@@ -962,9 +1044,15 @@ void watch(lv_timer_t *)
     }
     if (D.last) {
         const int64_t gap = now - D.last;
-        if (gap > D.worst) D.worst = gap, D.worst_at = now - D.since;
-        if (gap > 100000) ++D.over100;
-        if (gap > 300000) ++D.over300;
+        if (gap > D.worst) {
+            D.worst = gap, D.worst_at = now - D.since;
+        }
+        if (gap > 100000) {
+            ++D.over100;
+        }
+        if (gap > 300000) {
+            ++D.over300;
+        }
     }
     D.last = now;
     static int64_t suspended_since = 0;
@@ -981,7 +1069,9 @@ void watch(lv_timer_t *)
 
 void set(bool on)  // the LVGL task
 {
-    if (switching != -1 || on == usb_webcam_active()) return;
+    if (switching != -1 || on == usb_webcam_active()) {
+        return;
+    }
     if (on) {
         static lv_timer_t *watcher = lv_timer_create(watch, 20, nullptr);
         (void)watcher;
@@ -1008,20 +1098,30 @@ esp_err_t test_rpc(const esp_iris_rpc_request_t *request, uint8_t *, size_t, siz
     if (!off_timer) {
         esp_timer_create_args_t args = {};
         args.callback = [](void *) {
-            if (!bsp_display_lock(1000)) return;
-            lv_async_call([](void *) { set(false); }, nullptr);
+            if (!bsp_display_lock(1000)) {
+                return;
+            }
+            lv_async_call([](void *) {
+                set(false);
+            }, nullptr);
             bsp_display_unlock();
         };
         args.name = "webcam-off";
-        if (esp_timer_create(&args, &off_timer) != ESP_OK) return ESP_FAIL;
+        if (esp_timer_create(&args, &off_timer) != ESP_OK) {
+            return ESP_FAIL;
+        }
     }
     esp_timer_stop(off_timer);
     if (seconds <= 0) {
         set(false);
         return ESP_OK;
     }
-    if (!bsp_display_lock(1000)) return ESP_ERR_TIMEOUT;
-    lv_async_call([](void *) { set(true); }, nullptr);
+    if (!bsp_display_lock(1000)) {
+        return ESP_ERR_TIMEOUT;
+    }
+    lv_async_call([](void *) {
+        set(true);
+    }, nullptr);
     bsp_display_unlock();
     esp_timer_start_once(off_timer, uint64_t(seconds) * 1000000ULL);
     return ESP_OK;
@@ -1038,8 +1138,9 @@ bool status(char *text, size_t cap)
         strlcpy(text, "Off", cap);
         return false;
     }
-    if (!usb_webcam_streaming()) strlcpy(text, "On \xC2\xB7 choose \"ESP-Mosaico Camera\" on the computer", cap);
-    else {
+    if (!usb_webcam_streaming()) {
+        strlcpy(text, "On \xC2\xB7 choose \"ESP-Mosaico Camera\" on the computer", cap);
+    } else {
         int w = 0, h = 0;
         usb_webcam_format(&w, &h);
         snprintf(text, cap, "Streaming %dx%d to the computer \xC2\xB7 %d fps", w, h, usb_webcam_fps());
@@ -1098,7 +1199,9 @@ extern "C" esp_err_t mosaico_shell_start(void)
         return ESP_ERR_TIMEOUT;
     }
     boot_stage("draw buffers");
-    if (!frame_sync_start(display)) use_internal_draw_buffers(display);
+    if (!frame_sync_start(display)) {
+        use_internal_draw_buffers(display);
+    }
     perf_start(display);
     boot_stage("screens");
     // Camera: a full-panel viewfinder.
@@ -1131,7 +1234,9 @@ extern "C" esp_err_t mosaico_shell_start(void)
         agent_tools::register_all();
     }
     // Files and Tools: plain black full-panel screens.
-    for (lv_obj_t **scr : {&shell.files_screen, &shell.tools_screen, &shell.gallery_screen}) {
+    for (lv_obj_t **scr : {
+                &shell.files_screen, &shell.tools_screen, &shell.gallery_screen
+            }) {
         *scr = lv_obj_create(nullptr);
         lv_obj_remove_style_all(*scr);
         lv_obj_set_style_bg_color(*scr, lv_color_black(), 0);
@@ -1184,21 +1289,23 @@ extern "C" esp_err_t mosaico_shell_start(void)
         }
     }
     shell.launcher = launcher_ui_build({shell_show, save_radius, set_brightness, haptics_set_enabled, orientation_set_enabled,
-                                        [](int left, int right) {
-                                            Preferences p;
-                                            if (p.begin(PREFS, false)) {
-                                                p.putUChar("w0", uint8_t(left));
-                                                p.putUChar("w1", uint8_t(right));
-                                                p.end();
-                                            }
-                                        },
-                                        [](int step) {
-                                            time_zone_step(step);
-                                            refresh_launcher(nullptr);  // the new choice and clock at once
-                                        },
-                                        camera_app_set_auto_facing},
-                                       shell.radius, shell.brightness, haptics_enabled(), orientation_enabled(),
-                                       swifty_app_portrait(168), widgets[0], widgets[1]);
+                                        [](int left, int right)
+    {
+        Preferences p;
+        if (p.begin(PREFS, false)) {
+            p.putUChar("w0", uint8_t(left));
+            p.putUChar("w1", uint8_t(right));
+            p.end();
+        }
+    },
+    [](int step)
+    {
+        time_zone_step(step);
+        refresh_launcher(nullptr);  // the new choice and clock at once
+    },
+    camera_app_set_auto_facing},
+    shell.radius, shell.brightness, haptics_enabled(), orientation_enabled(),
+         swifty_app_portrait(168), widgets[0], widgets[1]);
     home_app_set_exit_handler([] { shell_show(ShellApp::Launcher); });
     lv_indev_t *touch = bsp_display_get_input_dev();
     if (touch) {
@@ -1207,7 +1314,9 @@ extern "C" esp_err_t mosaico_shell_start(void)
         // A pulse when a tap is a click on a control (LVGL sends no click for a
         // scroll), or a long press that does something: not for every touch.
         lv_indev_add_event_cb(touch, [](lv_event_t *e) {
-            if (is_control(static_cast<lv_obj_t *>(lv_event_get_param(e)))) haptics_pulse(HapticPulse::Tap);
+            if (is_control(static_cast<lv_obj_t *>(lv_event_get_param(e)))) {
+                haptics_pulse(HapticPulse::Tap);
+            }
         }, LV_EVENT_CLICKED, nullptr);
         // A finger wobbles more than LVGL's 10 px (under 1 mm on this dense
         // panel) during a tap; past that the tap became a scroll and was lost,
@@ -1254,7 +1363,9 @@ extern "C" esp_err_t mosaico_shell_start(void)
     // 46: the last webcam JPEG, payload a 32-bit offset (little-endian); 0 bytes at its end.
     esp_iris_rpc_register(0x4744, 46, [](const esp_iris_rpc_request_t *request, uint8_t *out, size_t cap, size_t *size, void *) {
         uint32_t offset = 0;
-        if (request->payload_size >= 4) memcpy(&offset, request->payload, 4);
+        if (request->payload_size >= 4) {
+            memcpy(&offset, request->payload, 4);
+        }
         *size = usb_webcam_last_frame(offset, out, std::min<size_t>(cap, 960));
         return ESP_OK;
     }, nullptr);

@@ -21,31 +21,85 @@ constexpr float PI = 3.14159265358979f, TAU = PI * 2;
 struct V3 {
     float x, y, z;
 };
-inline V3 operator+(V3 a, V3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
-inline V3 operator-(V3 a, V3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
-inline V3 operator*(V3 a, float k) { return {a.x * k, a.y * k, a.z * k}; }
-inline V3 operator*(V3 a, V3 b) { return {a.x * b.x, a.y * b.y, a.z * b.z}; }
-inline float dot(V3 a, V3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-inline V3 mixv(V3 a, V3 b, float k) { return a + (b - a) * k; }
+inline V3 operator+(V3 a, V3 b)
+{
+    return {a.x + b.x, a.y + b.y, a.z + b.z};
+}
+inline V3 operator-(V3 a, V3 b)
+{
+    return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+inline V3 operator*(V3 a, float k)
+{
+    return {a.x * k, a.y * k, a.z * k};
+}
+inline V3 operator*(V3 a, V3 b)
+{
+    return {a.x * b.x, a.y * b.y, a.z * b.z};
+}
+inline float dot(V3 a, V3 b)
+{
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+inline V3 mixv(V3 a, V3 b, float k)
+{
+    return a + (b - a) * k;
+}
 
-inline float mixf(float a, float b, float k) { return a + (b - a) * k; }
-inline float clampf(float v, float a, float b) { return v < a ? a : v > b ? b : v; }
-inline float sat(float v) { return clampf(v, 0, 1); }
-inline float seg(float v, float a, float b) { return sat((v - a) / (b - a)); }
-inline float ease(float v) { return v * v * (3 - 2 * v); }
+inline float mixf(float a, float b, float k)
+{
+    return a + (b - a) * k;
+}
+inline float clampf(float v, float a, float b)
+{
+    return v < a ? a : v > b ? b : v;
+}
+inline float sat(float v)
+{
+    return clampf(v, 0, 1);
+}
+inline float seg(float v, float a, float b)
+{
+    return sat((v - a) / (b - a));
+}
+inline float ease(float v)
+{
+    return v * v * (3 - 2 * v);
+}
 inline float smooth(float e0, float e1, float x)
 {
     const float t = sat((x - e0) / (e1 - e0));
     return t * t * (3 - 2 * t);
 }
-inline float stepf(float edge, float x) { return x < edge ? 0.f : 1.f; }
-inline float fract(float v) { return v - floorf(v); }
-inline float len2(float x, float y) { return sqrtf(x * x + y * y); }
+inline float stepf(float edge, float x)
+{
+    return x < edge ? 0.f : 1.f;
+}
+inline float fract(float v)
+{
+    return v - floorf(v);
+}
+inline float len2(float x, float y)
+{
+    return sqrtf(x * x + y * y);
+}
 // Integer powers by multiplication (powf is slow on the board).
-inline float p2(float v) { return v * v; }
-inline float p3(float v) { return v * v * v; }
-inline float p5(float v) { return p2(p2(v)) * v; }
-inline float p8(float v) { return p2(p2(p2(v))); }
+inline float p2(float v)
+{
+    return v * v;
+}
+inline float p3(float v)
+{
+    return v * v * v;
+}
+inline float p5(float v)
+{
+    return p2(p2(v)) * v;
+}
+inline float p8(float v)
+{
+    return p2(p2(p2(v)));
+}
 inline float p30(float v)
 {
     const float v2 = v * v, v4 = v2 * v2, v8 = v4 * v4, v16 = v8 * v8;
@@ -56,7 +110,10 @@ inline float p40(float v)
     const float v8 = p8(v), v32 = p2(p2(v8));
     return v32 * v8;
 }
-inline V3 hexc(uint32_t h) { return {float(h >> 16) / 255, float((h >> 8) & 255) / 255, float(h & 255) / 255}; }
+inline V3 hexc(uint32_t h)
+{
+    return {float(h >> 16) / 255, float((h >> 8) & 255) / 255, float(h & 255) / 255};
+}
 
 // ---- matrices: column-major, as WebGL reads them -------------------------------------------
 using M4 = std::array<float, 16>;
@@ -66,8 +123,9 @@ M4 mul(const M4 &a, const M4 &b)
 {
     M4 o;
     for (int c = 0; c < 4; c++)
-        for (int r = 0; r < 4; r++)
+        for (int r = 0; r < 4; r++) {
             o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+        }
     return o;
 }
 
@@ -83,7 +141,10 @@ M4 trs(float x, float y, float z, float rx, float ry, float rz, float sx, float 
             x, y, z, 1};
 }
 
-M4 trs(float x, float y, float z, float rx, float ry, float rz, float s) { return trs(x, y, z, rx, ry, rz, s, s, s); }
+M4 trs(float x, float y, float z, float rx, float ry, float rz, float s)
+{
+    return trs(x, y, z, rx, ry, rz, s, s, s);
+}
 
 // What turns a surface direction the way the matrix turns the surface.
 M3 nmat(const M4 &m)
@@ -122,7 +183,9 @@ Part surf(int nu, int nv, F f, H hint)
             if (l < 1e-7f) {
                 x = h.x, y = h.y, z = h.z;
                 l = sqrtf(x * x + y * y + z * z);
-                if (l == 0) l = 1;
+                if (l == 0) {
+                    l = 1;
+                }
             } else if (x * h.x + y * h.y + z * h.z < 0) {
                 l = -l;
             }
@@ -137,44 +200,59 @@ Part surf(int nu, int nv, F f, H hint)
 }
 
 // The wing's outline, measured off the drawing: s runs from the shoulder to the tip.
-float lead(float s) { return .24f * (1 - ease(seg(s, .2f, .8f))) - .05f * sinf(PI * seg(s, .5f, 1.35f)); }
+float lead(float s)
+{
+    return .24f * (1 - ease(seg(s, .2f, .8f))) - .05f * sinf(PI * seg(s, .5f, 1.35f));
+}
 float trail(float s)
 {
     float e = -.62f * sqrtf(std::max(0.f, 1 - powf(sat(s / 1.35f), 1.6f))) * (s < .3f ? sat(.85f + .5f * s) : 1);
-    if (s < .5425f) e += .09f * (1 - sqrtf(fabsf(sinf(PI * (.41f - s) / .265f))));
+    if (s < .5425f) {
+        e += .09f * (1 - sqrtf(fabsf(sinf(PI * (.41f - s) / .265f))));
+    }
     return e;
 }
 
 void shapes()
 {
-    if (!VS.empty()) return;
+    if (!VS.empty()) {
+        return;
+    }
     auto ball = [](float u, float v) {
         const float a = u * TAU, f = sat(v) * PI, x = sinf(f) * cosf(a), y = cosf(f), z = sinf(f) * sinf(a);
         return P6{x, y, z, x, y, z};
     };
-    auto ball_hint = [](const P6 &p, float, float) { return V3{p[0], p[1], p[2]}; };
+    auto ball_hint = [](const P6 & p, float, float) {
+        return V3{p[0], p[1], p[2]};
+    };
     BALL = surf(30, 18, ball, ball_hint);
     EYEBALL = surf(16, 10, ball, ball_hint);  // the eyes are small: fewer facets
     LEAF = surf(10, 12,
-                [](float u, float v) {
-                    v = sat(v);
-                    const float r = powf(sinf(PI * powf(v, .75f)), .9f), a = u * TAU;
-                    return P6{r * cosf(a), v, r * sinf(a), r * cosf(a), v * 2 - 1, r * sinf(a)};
-                },
-                [](const P6 &p, float, float v) { return V3{p[0], v - .4f, p[2]}; });
+    [](float u, float v) {
+        v = sat(v);
+        const float r = powf(sinf(PI * powf(v, .75f)), .9f), a = u * TAU;
+        return P6{r * cosf(a), v, r * sinf(a), r * cosf(a), v * 2 - 1, r * sinf(a)};
+    },
+    [](const P6 & p, float, float v) {
+        return V3{p[0], v - .4f, p[2]};
+    });
     WING = surf(12, 40,
-                [](float u, float v) {
-                    const float s = mixf(-.3f, 1.35f, sat(v)), a = u * TAU, x = mixf(trail(s), lead(s), cosf(a) * .5f + .5f);
-                    return P6{x, s, sinf(a) * .075f * (1 - .5f * sat(s / 1.35f)) * sat((1.35f - s) * 5), x, s, sinf(a)};
-                },
-                [](const P6 &p, float u, float) { return V3{cosf(u * TAU) * .4f, 0, p[5]}; });
+    [](float u, float v) {
+        const float s = mixf(-.3f, 1.35f, sat(v)), a = u * TAU, x = mixf(trail(s), lead(s), cosf(a) * .5f + .5f);
+        return P6{x, s, sinf(a) * .075f * (1 - .5f * sat(s / 1.35f)) * sat((1.35f - s) * 5), x, s, sinf(a)};
+    },
+    [](const P6 & p, float u, float) {
+        return V3{cosf(u * TAU) * .4f, 0, p[5]};
+    });
     auto hoop = [](float r) {
         return surf(56, 4,
-                    [r](float u, float v) {
-                        const float a = u * TAU, q = v * TAU, k = 1 + r * cosf(q);
-                        return P6{k * cosf(a), r * sinf(q), k * sinf(a), u, 0, 0};
-                    },
-                    [](const P6 &p, float u, float) { return V3{p[0] - cosf(u * TAU), p[1], p[2] - sinf(u * TAU)}; });
+        [r](float u, float v) {
+            const float a = u * TAU, q = v * TAU, k = 1 + r * cosf(q);
+            return P6{k * cosf(a), r * sinf(q), k * sinf(a), u, 0, 0};
+        },
+        [](const P6 & p, float u, float) {
+            return V3{p[0] - cosf(u * TAU), p[1], p[2] - sinf(u * TAU)};
+        });
     };
     HOOP = hoop(.014f);
     HAZE = hoop(.05f);
@@ -188,18 +266,19 @@ void shapes()
 // ---- colours ----------------------------------------------------------------------------------
 const V3 ONE{1, 1, 1}, BLUE{.45f, .5f, .84f}, WARM{.9f, .6f, .5f};
 const V3 TAIL[2] = {hexc(0x1A2F9E), hexc(0x2C6BF5)}, TUFT[2] = {hexc(0x45BDFF), hexc(0x2E9BF5)},
-         CREST[2] = {hexc(0x9AF8FF), hexc(0x4CC8FF)}, BEAK[2] = {hexc(0xFF9338), hexc(0xFFD76E)},
-         CHIN[2] = {hexc(0xD9661F), hexc(0xF0862E)}, MOUTH[2] = {hexc(0x8A2A3A), hexc(0x5A1524)},
-         GOLD[2] = {hexc(0xFFFBE0), hexc(0xFFCF4D)};
+                                                               CREST[2] = {hexc(0x9AF8FF), hexc(0x4CC8FF)}, BEAK[2] = {hexc(0xFF9338), hexc(0xFFD76E)},
+                                                                                                                      CHIN[2] = {hexc(0xD9661F), hexc(0xF0862E)}, MOUTH[2] = {hexc(0x8A2A3A), hexc(0x5A1524)},
+                                                                                                                              GOLD[2] = {hexc(0xFFFBE0), hexc(0xFFCF4D)};
 // The dark sheet's ink: orbit cream and cyan, the glow, and the sparks.
 const V3 INK[5] = {hexc(0xFFF4C2), hexc(0x8BE9FF), {.3f, .55f, 1}, {1, 1, 1}, hexc(0xBFE9FF)};
 
 // ---- springs: each joint's pull and how soon it settles ---------------------------------------
 enum J { X, Y, YAW, PIT, ROL, SQ, WL, WR, WS, WC, WT, TF, TW, TS, EO, EH, ES, EQ, EW, BK, LX, LY, BL, RO, GL, OP, FA, FF, NJ };
 const float KS[NJ][2] = {{70, .62f},  {70, .55f},  {90, .7f},   {90, .7f},   {90, .5f},   {260, .42f}, {130, .55f},
-                         {130, .55f}, {60, .8f},   {110, .4f},  {90, .6f},   {150, .35f}, {120, .2f},  {90, .28f},
-                         {420, 1},    {260, .8f},  {160, 1},    {200, .7f},  {200, .5f},  {900, .8f},  {240, .8f},
-                         {240, .8f},  {30, 1},     {30, 1},     {40, 1},     {26, 1},     {40, 1},     {30, 1}};
+    {130, .55f}, {60, .8f},   {110, .4f},  {90, .6f},   {150, .35f}, {120, .2f},  {90, .28f},
+    {420, 1},    {260, .8f},  {160, 1},    {200, .7f},  {200, .5f},  {900, .8f},  {240, .8f},
+    {240, .8f},  {30, 1},     {30, 1},     {40, 1},     {26, 1},     {40, 1},     {30, 1}
+};
 
 struct Uniforms {
     int k = 0;
@@ -329,7 +408,7 @@ struct Figure::Impl {
                      smooth(-x, x, h - lw) * smooth(-x, x, le - .07f - h) * (1 - smooth(1, 1.03f, s)));
             c = mixv(c, {.435f, .706f, 1},
                      .5f * (1 - smooth(.01f, .016f + x, fabsf(fract((.41f - s) / .265f + .5f) - .5f) * .265f)) * stepf(h, lw) *
-                         stepf(s, .5f) * stepf(-.2f, s));
+                     stepf(s, .5f) * stepf(-.2f, s));
             c = lit(c, {.45f, .5f, .84f}, n, .2f) * meet(1, w);
             break;
         }
@@ -362,7 +441,9 @@ struct Figure::Impl {
     {
         const M3 nm = nmat(m);
         const M4 mvp = mul(view, m);
-        if (int(verts.size()) < mesh.vcount) verts.resize(mesh.vcount);
+        if (int(verts.size()) < mesh.vcount) {
+            verts.resize(mesh.vcount);
+        }
         const float half = rw * .5f;
         for (int i = 0; i < mesh.vcount; ++i) {
             const float *s = &VS[size_t(mesh.vfrom + i) * 9];
@@ -397,20 +478,27 @@ struct Figure::Impl {
             v.w[0] = wx * iw, v.w[1] = wy * iw, v.w[2] = wz * iw;
         }
         const uint16_t *idx = &IS[size_t(mesh.ifrom)];
-        for (int t = 0; t < mesh.icount; t += 3)
+        for (int t = 0; t < mesh.icount; t += 3) {
             tri(verts[idx[t] - mesh.vfrom], verts[idx[t + 1] - mesh.vfrom], verts[idx[t + 2] - mesh.vfrom], u, blend, depth_test);
+        }
     }
 
     void tri(const Vert &a, const Vert &b, const Vert &c, const Uniforms &u, bool blend, bool depth_test)
     {
         // Opaque surfaces facing away are hidden behind their own front:
         // skip them before any pixel work (normals are divided by w > 0).
-        if (!blend && a.n[2] < -.25f * a.iw && b.n[2] < -.25f * b.iw && c.n[2] < -.25f * c.iw) return;
+        if (!blend && a.n[2] < -.25f * a.iw && b.n[2] < -.25f * b.iw && c.n[2] < -.25f * c.iw) {
+            return;
+        }
         const float area = (b.sx - a.sx) * (c.sy - a.sy) - (b.sy - a.sy) * (c.sx - a.sx);
-        if (!(fabsf(area) >= 1e-6f && fabsf(area) < 1e7f)) return;  // degenerate, or behind the eye
+        if (!(fabsf(area) >= 1e-6f && fabsf(area) < 1e7f)) {
+            return;    // degenerate, or behind the eye
+        }
         const int x0 = std::max(0, int(floorf(std::min({a.sx, b.sx, c.sx})))), x1 = std::min(rw - 1, int(ceilf(std::max({a.sx, b.sx, c.sx}))));
         const int y0 = std::max(0, int(floorf(std::min({a.sy, b.sy, c.sy})))), y1 = std::min(rw - 1, int(ceilf(std::max({a.sy, b.sy, c.sy}))));
-        if (x0 > x1 || y0 > y1) return;
+        if (x0 > x1 || y0 > y1) {
+            return;
+        }
         const float inv = 1 / area;
         for (int y = y0; y <= y1; ++y) {
             const float py = y + .5f;
@@ -419,13 +507,19 @@ struct Figure::Impl {
                 const float w0 = ((b.sx - px) * (c.sy - py) - (b.sy - py) * (c.sx - px)) * inv;
                 const float w1 = ((c.sx - px) * (a.sy - py) - (c.sy - py) * (a.sx - px)) * inv;
                 const float w2 = 1 - w0 - w1;
-                if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+                if (w0 < 0 || w1 < 0 || w2 < 0) {
+                    continue;
+                }
                 const float z = w0 * a.sz + w1 * b.sz + w2 * c.sz;
                 float &zb = depth[size_t(y) * rw + x];
-                if (depth_test && z >= zb) continue;
+                if (depth_test && z >= zb) {
+                    continue;
+                }
                 const float iw = 1 / (w0 * a.iw + w1 * b.iw + w2 * c.iw);
-                auto lerp = [&](const float *pa, const float *pb, const float *pc, float *out) {
-                    for (int i = 0; i < 3; ++i) out[i] = (w0 * pa[i] + w1 * pb[i] + w2 * pc[i]) * iw;
+                auto lerp = [&](const float * pa, const float * pb, const float * pc, float * out) {
+                    for (int i = 0; i < 3; ++i) {
+                        out[i] = (w0 * pa[i] + w1 * pb[i] + w2 * pc[i]) * iw;
+                    }
                 };
                 float n[3], o[3], w[3];
                 lerp(a.n, b.n, c.n, n);
@@ -436,10 +530,14 @@ struct Figure::Impl {
                 float col[4];
                 shade(u, nn, o, w, col);
                 uint8_t *dst = &color[(size_t(y) * rw + x) * 4];
-                auto to8 = [](float v) { return uint8_t(v <= 0 ? 0 : v >= 1 ? 255 : int(v * 255 + .5f)); };
+                auto to8 = [](float v) {
+                    return uint8_t(v <= 0 ? 0 : v >= 1 ? 255 : int(v * 255 + .5f));
+                };
                 if (blend) {
                     const float keep = 1 - clampf(col[3], 0, 1);
-                    for (int i = 0; i < 3; ++i) dst[i] = to8(col[i] + dst[i] / 255.f * keep);
+                    for (int i = 0; i < 3; ++i) {
+                        dst[i] = to8(col[i] + dst[i] / 255.f * keep);
+                    }
                     dst[3] = to8(col[3] + dst[3] / 255.f * keep);
                 } else {
                     dst[0] = to8(col[0]), dst[1] = to8(col[1]), dst[2] = to8(col[2]), dst[3] = 255;
@@ -475,11 +573,17 @@ struct Figure::Impl {
             ws = mixf(.6f, .1f, o), gl = .5f;
         } else if (fid.on) {
             const float f = clock - fid.t;
-            if (f > 1.2f) fid.on = false;
-            else if (fid.k < 1) fa = .36f, ff = 26, y = .06f;
-            else if (fid.k < 2) rol = .22f * fid.s;
-            else if (fid.k < 3) lx = .6f, ly = -.5f, yaw = .2f, pit = .08f;
-            else if (!fid.f) fid.f = 1, Vv[TW] += 8 * fid.s, blink = .001f;
+            if (f > 1.2f) {
+                fid.on = false;
+            } else if (fid.k < 1) {
+                fa = .36f, ff = 26, y = .06f;
+            } else if (fid.k < 2) {
+                rol = .22f * fid.s;
+            } else if (fid.k < 3) {
+                lx = .6f, ly = -.5f, yaw = .2f, pit = .08f;
+            } else if (!fid.f) {
+                fid.f = 1, Vv[TW] += 8 * fid.s, blink = .001f;
+            }
         }
         if (shot.on) {
             auto once = [&](int b, auto fn) {
@@ -491,7 +595,9 @@ struct Figure::Impl {
             switch (shot.n) {
             case Shot::Hello:
                 eh = seg(u, .1f, .25f) * (1 - seg(u, .95f, 1.2f));
-                if (u > .15f && u < .95f) wr = .3f + .38f * sinf(u * 24), wt = .2f;
+                if (u > .15f && u < .95f) {
+                    wr = .3f + .38f * sinf(u * 24), wt = .2f;
+                }
                 ws = .05f, rol = .1f, yaw = .12f, bl = 1, bk = u > .12f && u < .4f ? .6f : 0, gl = .7f, tf = .6f;
                 break;
             case Shot::Send:
@@ -526,7 +632,9 @@ struct Figure::Impl {
                 rol = (u < 1.25f ? .42f : -.3f) * w, yaw = -.12f * side * w, eq = .5f * side * w, ew = .5f * w;
                 once(1, [&] { Vv[TF] += 9, Vv[TW] += 5; });
                 wl += .12f * w, wr -= .18f * w, lx = .45f * sinf(u * 5.5f) * w, ly = .15f * w, tf = .4f * w;
-                if (fabsf(u - .5f) < .07f || fabsf(u - .78f) < .07f) eo = 0;
+                if (fabsf(u - .5f) < .07f || fabsf(u - .78f) < .07f) {
+                    eo = 0;
+                }
                 break;
             }
             case Shot::Poke:
@@ -538,7 +646,9 @@ struct Figure::Impl {
                 }
                 break;
             }
-            if (u > shot.d) shot.on = false;
+            if (u > shot.d) {
+                shot.on = false;
+            }
         }
         const float t[NJ] = {x, y, yaw, pit, rol, sq, wl, wr, ws, wc, wt, tf, 0, 0, eo, eh, es, eq, ew, bk, lx, ly, bl, ro, gl, 1, fa, ff};
         memcpy(T, t, sizeof(T));
@@ -561,14 +671,19 @@ struct Figure::Impl {
         ring += dt * (st == Mood::Think ? 3.6f : st == Mood::Listen ? 2 : .7f);
         if (blink > 0) {
             blink += dt / .15f;
-            if (blink >= 1) blink = 0;
+            if (blink >= 1) {
+                blink = 0;
+            }
         } else if (clock > next_blink) {
             blink = .001f;
             next_blink = clock + (dice(0, 1) < .2f ? .28f : dice(2.2f, 5.5f));
         }
         if (clock > next_gaze) {
-            if (dice(0, 1) < .45f) gaze[0] = gaze[1] = 0;
-            else gaze[0] = dice(-.5f, .5f), gaze[1] = dice(-.2f, .3f);
+            if (dice(0, 1) < .45f) {
+                gaze[0] = gaze[1] = 0;
+            } else {
+                gaze[0] = dice(-.5f, .5f), gaze[1] = dice(-.2f, .3f);
+            }
             next_gaze = clock + dice(.8f, 2.8f);
         }
         if (st == Mood::Idle && clock > next_fid) {
@@ -581,8 +696,12 @@ struct Figure::Impl {
                 Vv[k] += ((T[k] - P[k]) * KS[k][0] - 2 * KS[k][1] * sqrtf(KS[k][0]) * Vv[k]) * dt / 2;
                 P[k] += Vv[k] * dt / 2;
             }
-        for (auto &b : bits) b.t += dt, b.x += b.vx * dt, b.y += b.vy * dt, b.vy -= 3.5f * dt;
-        bits.erase(std::remove_if(bits.begin(), bits.end(), [](const Bit &b) { return b.t >= b.d; }), bits.end());
+        for (auto &b : bits) {
+            b.t += dt, b.x += b.vx * dt, b.y += b.vy * dt, b.vy -= 3.5f * dt;
+        }
+        bits.erase(std::remove_if(bits.begin(), bits.end(), [](const Bit & b) {
+            return b.t >= b.d;
+        }), bits.end());
     }
 
     void bake_halo()
@@ -601,13 +720,18 @@ struct Figure::Impl {
 
     void draw()
     {
-        if (glow && halo.size() == color.size()) memcpy(color.data(), halo.data(), color.size());
-        else std::fill(color.begin(), color.end(), 0);
+        if (glow && halo.size() == color.size()) {
+            memcpy(color.data(), halo.data(), color.size());
+        } else {
+            std::fill(color.begin(), color.end(), 0);
+        }
         std::fill(depth.begin(), depth.end(), 1e30f);
         const float flap = P[FA] * sinf(ph), by = P[Y] + .045f * sinf(clock * 1.9f) - P[FA] * .1f * cosf(ph),
                     bx = P[X] + .02f * sinf(clock * 1.1f), q = 1 + P[SQ] + .012f * sinf(clock * 2.6f);
         const M4 R = trs(bx, by, 0, P[PIT], P[YAW] + spin, P[ROL], 1 / sqrtf(q), q, 1 / sqrtf(q));
-        auto B = [&](const M4 &m) { return mul(R, m); };
+        auto B = [&](const M4 & m) {
+            return mul(R, m);
+        };
         const float bl = sinf(PI * blink);
         uC[0] = bx, uC[1] = by, uC[2] = 0;
         uG[0] = P[LX], uG[1] = P[LY], uG[2] = P[BL];
@@ -731,10 +855,22 @@ void Figure::react(Shot mood, bool failed, int text_length)
     d->talk = d->clock + (failed ? .9f : clampf(text_length / 26.f, .9f, 3.4f)) + (d->shot.on ? d->shot.d * .6f : 0);
 }
 
-void Figure::set_glow(bool glow) { d->glow = glow; }
-void Figure::set_level(float level) { d->level_in = sat(level); }
-void Figure::step(float dt) { d->step(std::min(dt, .034f)); }
-int Figure::size() const { return d->size; }
+void Figure::set_glow(bool glow)
+{
+    d->glow = glow;
+}
+void Figure::set_level(float level)
+{
+    d->level_in = sat(level);
+}
+void Figure::step(float dt)
+{
+    d->step(std::min(dt, .034f));
+}
+int Figure::size() const
+{
+    return d->size;
+}
 
 void Figure::render(uint8_t *bgra)
 {

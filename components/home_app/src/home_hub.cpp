@@ -26,8 +26,14 @@ Hub hub;
 namespace {
 constexpr uint32_t POLL_MS = 3000, IDLE_POLL_MS = 15000, LISTS_MS = 60000;
 
-struct Job { uint32_t id; HttpRequest request; };
-struct Done { uint32_t id; HttpResponse response; };
+struct Job {
+    uint32_t id;
+    HttpRequest request;
+};
+struct Done {
+    uint32_t id;
+    HttpResponse response;
+};
 
 // One worker serializes HTTP, as the Lua worker did.
 std::mutex mutex;
@@ -106,7 +112,9 @@ void Hub::bump(const std::string &message, int connected)
 bool Hub::fresh(const std::string &what)
 {
     size_t &seen = seen_[what];
-    if (seen == body_hash_) return false;
+    if (seen == body_hash_) {
+        return false;
+    }
     seen = body_hash_;
     return true;
 }
@@ -157,25 +165,41 @@ std::string Hub::error_message(int code, const DocPtr &doc, const std::string &e
 
 void Hub::load_lists()
 {
-    request("GET", "/catalog", nullptr, [this](int code, const DocPtr &doc, const std::string &) {
-        if (code != 200 || !doc) return;
+    request("GET", "/catalog", nullptr, [this](int code, const DocPtr & doc, const std::string &) {
+        if (code != 200 || !doc) {
+            return;
+        }
         catalog.clear();
         for (JsonObjectConst action : (*doc)["actions"].as<JsonArrayConst>()) {
             catalog[action["id"] | ""] = action["flow"] | "";
         }
-        if (fresh("catalog")) bump();
+        if (fresh("catalog")) {
+            bump();
+        }
     });
-    request("GET", "/devices", nullptr, [this](int code, const DocPtr &doc, const std::string &) {
-        if (code == 200 && doc && fresh("devices")) { devices = doc; bump(); }
+    request("GET", "/devices", nullptr, [this](int code, const DocPtr & doc, const std::string &) {
+        if (code == 200 && doc && fresh("devices")) {
+            devices = doc;
+            bump();
+        }
     });
-    request("GET", "/rooms", nullptr, [this](int code, const DocPtr &doc, const std::string &) {
-        if (code == 200 && doc && fresh("rooms")) { rooms = doc; bump(); }
+    request("GET", "/rooms", nullptr, [this](int code, const DocPtr & doc, const std::string &) {
+        if (code == 200 && doc && fresh("rooms")) {
+            rooms = doc;
+            bump();
+        }
     });
-    request("GET", "/scenes", nullptr, [this](int code, const DocPtr &doc, const std::string &) {
-        if (code == 200 && doc && fresh("scenes")) { scenes = doc; bump(); }
+    request("GET", "/scenes", nullptr, [this](int code, const DocPtr & doc, const std::string &) {
+        if (code == 200 && doc && fresh("scenes")) {
+            scenes = doc;
+            bump();
+        }
     });
-    request("GET", "/me", nullptr, [this](int code, const DocPtr &doc, const std::string &) {
-        if (code == 200 && doc && fresh("me")) { me = doc; bump(); }
+    request("GET", "/me", nullptr, [this](int code, const DocPtr & doc, const std::string &) {
+        if (code == 200 && doc && fresh("me")) {
+            me = doc;
+            bump();
+        }
     });
 }
 
@@ -216,7 +240,7 @@ bool Hub::poll()
         if (!state_inflight_ && int32_t(now - next_state_) >= 0) {
             next_state_ = now + (active_ ? POLL_MS : IDLE_POLL_MS);
             state_inflight_ = true;
-            request("GET", "/state", nullptr, [this](int code, const DocPtr &doc, const std::string &error) {
+            request("GET", "/state", nullptr, [this](int code, const DocPtr & doc, const std::string & error) {
                 state_inflight_ = false;
                 if (code == 200 && doc) {
                     status.last_ok = now_ms();
@@ -247,7 +271,9 @@ void Hub::tick_timers()
         if (int32_t(now - timers_[i].at) >= 0) {
             auto fn = std::move(timers_[i].fn);
             timers_.erase(timers_.begin() + long(i));
-            if (fn) fn();
+            if (fn) {
+                fn();
+            }
         }
     }
 }
@@ -272,26 +298,26 @@ void Hub::pair(const std::string &hub_url, const std::string &code, std::functio
     body["code"] = code;
     body["name"] = "Mosaico";
     request("POST", "/auth/display/exchange", &body,
-            [this, base, done](int status_code, const DocPtr &doc, const std::string &error) {
-                if (status_code == 200 && doc && (*doc)["token"].is<const char *>()) {
-                    cfg.hub = base;
-                    cfg.token = (*doc)["token"].as<const char *>();
-                    cfg.name = (*doc)["display"]["name"] | "Wall display";
-                    save();
-                    refresh();
-                    bump("Paired as " + cfg.name, 0);
-                    done(true, std::string());
-                    return;
-                }
-                JsonObjectConst e = doc ? (*doc)["error"].as<JsonObjectConst>() : JsonObjectConst();
-                std::string message = !error.empty()           ? "Could not reach the hub"
-                                      : status_code == 403      ? "That code is wrong, used or expired. Make a new one."
-                                      : status_code == 429      ? "Too many tries. Wait a minute."
-                                      : e["message"].is<const char *>() ? std::string(e["message"].as<const char *>())
-                                                                        : "Hub answered " + std::to_string(status_code);
-                done(false, message);
-            },
-            true, base);
+    [this, base, done](int status_code, const DocPtr & doc, const std::string & error) {
+        if (status_code == 200 && doc && (*doc)["token"].is<const char *>()) {
+            cfg.hub = base;
+            cfg.token = (*doc)["token"].as<const char *>();
+            cfg.name = (*doc)["display"]["name"] | "Wall display";
+            save();
+            refresh();
+            bump("Paired as " + cfg.name, 0);
+            done(true, std::string());
+            return;
+        }
+        JsonObjectConst e = doc ? (*doc)["error"].as<JsonObjectConst>() : JsonObjectConst();
+        std::string message = !error.empty()           ? "Could not reach the hub"
+                              : status_code == 403      ? "That code is wrong, used or expired. Make a new one."
+                              : status_code == 429      ? "Too many tries. Wait a minute."
+                              : e["message"].is<const char *>() ? std::string(e["message"].as<const char *>())
+                              : "Hub answered " + std::to_string(status_code);
+        done(false, message);
+    },
+    true, base);
 }
 
 void Hub::unpair()
@@ -316,13 +342,17 @@ void Hub::follow(const std::string &run_id, RunHandler done, int tries)
         return;
     }
     after(600, [this, run_id, done, tries] {
-        request("GET", "/actions/runs/" + run_id, nullptr, [this, run_id, done, tries](int code, const DocPtr &doc,
-                                                                                         const std::string &) {
-            if (code != 200 || !doc) return;
+        request("GET", "/actions/runs/" + run_id, nullptr, [this, run_id, done, tries](int code, const DocPtr & doc,
+        const std::string &) {
+            if (code != 200 || !doc) {
+                return;
+            }
             if (strcmp((*doc)["phase"] | "", "commanded") == 0) {
                 follow(run_id, done, tries - 1);
             } else {
-                if (done) done(doc, std::string());
+                if (done) {
+                    done(doc, std::string());
+                }
                 next_state_ = 0;
             }
         });
@@ -337,10 +367,14 @@ void Hub::execute(const std::string &action, const std::string &target, JsonDocu
     body["params"] = params.is<JsonObject>() ? params.as<JsonObject>() : body["params"].to<JsonObject>();
     body["channel"] = "panel";
     body["request_id"] = request_id();
-    request("POST", "/actions/execute", &body, [this, done](int code, const DocPtr &doc, const std::string &error) {
+    request("POST", "/actions/execute", &body, [this, done](int code, const DocPtr & doc, const std::string & error) {
         if ((code == 200 || code == 202) && doc) {
-            if (done) done(doc, std::string());
-            if (code == 202 && (*doc)["run_id"].is<const char *>()) follow((*doc)["run_id"].as<const char *>(), done, 100);
+            if (done) {
+                done(doc, std::string());
+            }
+            if (code == 202 && (*doc)["run_id"].is<const char *>()) {
+                follow((*doc)["run_id"].as<const char *>(), done, 100);
+            }
             next_state_ = 0;
         } else if (done) {
             done(nullptr, error_message(code, doc, error));
@@ -355,7 +389,7 @@ void Hub::prepare(const std::string &action, const std::string &target, JsonDocu
     body["target"] = target;
     body["params"] = params.is<JsonObject>() ? params.as<JsonObject>() : body["params"].to<JsonObject>();
     body["channel"] = "panel";
-    request("POST", "/actions/prepare", &body, [done](int code, const DocPtr &doc, const std::string &error) {
+    request("POST", "/actions/prepare", &body, [done](int code, const DocPtr & doc, const std::string & error) {
         if (code == 200 && doc && (*doc)["prepared_id"].is<const char *>()) {
             done(doc, std::string());
         } else {
@@ -378,10 +412,12 @@ void Hub::confirm(const DocPtr &prep, RunHandler done)
     body["confirmation"] = (*prep)["confirmation"];
     body["channel"] = "panel";
     body["request_id"] = request_id();
-    request("POST", "/actions/confirm", &body, [this, done](int code, const DocPtr &doc, const std::string &error) {
+    request("POST", "/actions/confirm", &body, [this, done](int code, const DocPtr & doc, const std::string & error) {
         if ((code == 200 || code == 202) && doc) {
             done(doc, std::string());
-            if (code == 202 && (*doc)["run_id"].is<const char *>()) follow((*doc)["run_id"].as<const char *>(), done, 100);
+            if (code == 202 && (*doc)["run_id"].is<const char *>()) {
+                follow((*doc)["run_id"].as<const char *>(), done, 100);
+            }
             next_state_ = 0;
         } else {
             done(nullptr, error_message(code, doc, error));
