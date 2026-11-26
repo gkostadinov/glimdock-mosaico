@@ -187,7 +187,7 @@ struct {
     bool built = false;
     swifty_hooks_t hooks = {};
     std::atomic<bool> active{false};
-    lv_obj_t *screen = nullptr, *figure = nullptr, *chat = nullptr, *empty = nullptr, *empty_hint = nullptr,
+    lv_obj_t *screen = nullptr, *figure = nullptr, *chat = nullptr, *fade = nullptr, *empty = nullptr, *empty_hint = nullptr,
               *pill = nullptr, *pill_label = nullptr, *pill_icon = nullptr, *wave = nullptr, *bars[BARS] = {},
                                                                                                            *camera_btn = nullptr, *keys_btn = nullptr, *attach_row = nullptr, *entry = nullptr, *entry_ta = nullptr;
     // the reply being written
@@ -302,6 +302,9 @@ void scroll_end(bool animate = true)
 void update_empty()
 {
     const bool empty = lv_obj_get_child_count(U.chat) == 0;
+    if (empty && U.fade) {
+        set_hidden(U.fade, true);
+    }
     if (empty) {
         lv_obj_remove_flag(U.empty, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -998,6 +1001,19 @@ void build(lv_obj_t *s)
     lv_obj_set_flex_flow(U.chat, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(U.chat, 10, 0);
     lv_obj_set_style_pad_bottom(U.chat, 8, 0);
+    // The chat's top edge fades out while there is more above, instead of
+    // cutting a line of text in half. Black to clear, over the chat.
+    U.fade = box(s, CHAT_X, CHAT_Y, CHAT_W, 18);
+    lv_obj_set_style_bg_color(U.fade, lv_color_black(), 0);
+    lv_obj_set_style_bg_grad_color(U.fade, lv_color_black(), 0);
+    lv_obj_set_style_bg_grad_dir(U.fade, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_main_opa(U.fade, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_grad_opa(U.fade, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(U.fade, LV_OPA_COVER, 0);
+    lv_obj_add_flag(U.fade, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(U.chat, [](lv_event_t *) {
+        set_hidden(U.fade, lv_obj_get_scroll_top(U.chat) <= 0);
+    }, LV_EVENT_SCROLL, nullptr);
 
     U.empty = box(s, CHAT_X, CHAT_Y + 6, CHAT_W, CHAT_H - 6);
     label(U.empty, "Hi, I'm Swifty", 0, 4, CHAT_W, TEXT, 26, true, LV_TEXT_ALIGN_CENTER);
