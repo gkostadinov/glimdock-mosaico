@@ -24,11 +24,17 @@
 #include "lvgl.h"
 #include "model.h"
 
-namespace home { void home_preview_open(int); void home_preview_theme(int); }
+namespace home {
+void home_preview_open(int);
+void home_preview_theme(int);
+}
 extern std::string home_fixture_dir;
 
 uint32_t nativeClock = 1000;
-uint32_t millis() { return nativeClock; }
+uint32_t millis()
+{
+    return nativeClock;
+}
 Snapshot *publishedSnapshot = nullptr;
 SemaphoreHandle_t dataMutex = nullptr;
 NetworkState networkState;
@@ -39,12 +45,17 @@ void boardLvglInit() {}
 void startNetwork() {}
 bool readSnapshot(Snapshot &out, NetworkState &state)
 {
-    if (!publishedSnapshot) return false;
+    if (!publishedSnapshot) {
+        return false;
+    }
     out = *publishedSnapshot;
     state = networkState;
     return true;
 }
-bool requestNodeSelection(const char *) { return false; }
+bool requestNodeSelection(const char *)
+{
+    return false;
+}
 bool readConnectionSettings(ConnectionSettings &out)
 {
     out = ConnectionSettings{};
@@ -54,12 +65,15 @@ bool readConnectionSettings(ConnectionSettings &out)
     out.displayTokenSaved = true;
     return true;
 }
-bool requestConnectionUpdate(const ConnectionUpdate &) { return true; }
+bool requestConnectionUpdate(const ConnectionUpdate &)
+{
+    return true;
+}
 bool readNodeConfiguration(NodeConfiguration &out)
 {
     out = NodeConfiguration{};
     out.available = true;
-    strcpy(out.version, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    strcpy(out.version, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");  // pragma: allowlist secret (demo)
     strcpy(out.localId, "local");
     strcpy(out.localName, "Collector host");
     strcpy(out.localType, "proxmox");
@@ -73,16 +87,30 @@ bool readNodeConfiguration(NodeConfiguration &out)
         strcpy(n.name, names[i]);
         strcpy(n.type, types[i]);
         strcpy(n.platform, platforms[i]);
-        if (i == 1) strcpy(n.url, "http://printer.lan:7125");
+        if (i == 1) {
+            strcpy(n.url, "http://printer.lan:7125");
+        }
         n.hasSecret = i == 1;
         n.enabled = i != 2;
     }
     return true;
 }
-bool requestNodeConfiguration() { return true; }
-bool requestNodeUpsert(const NodeConfigDraft &, const char *) { return true; }
-bool requestNodeDelete(const char *, const char *) { return true; }
-const char *homelabPlatformSsid() { return "HomeWiFi"; }
+bool requestNodeConfiguration()
+{
+    return true;
+}
+bool requestNodeUpsert(const NodeConfigDraft &, const char *)
+{
+    return true;
+}
+bool requestNodeDelete(const char *, const char *)
+{
+    return true;
+}
+const char *homelabPlatformSsid()
+{
+    return "HomeWiFi";
+}
 
 namespace {
 constexpr int SIZE = 480;
@@ -95,8 +123,9 @@ void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
     const uint16_t *source = reinterpret_cast<uint16_t *>(pixels);
     const int stride = area->x2 - area->x1 + 1;
     for (int y = area->y1; y <= area->y2; ++y)
-        for (int x = area->x1; x <= area->x2; ++x)
+        for (int x = area->x1; x <= area->x2; ++x) {
             framebuffer[y * SIZE + x] = source[(y - area->y1) * stride + x - area->x1];
+        }
     lv_display_flush_ready(display);
 }
 
@@ -112,7 +141,8 @@ void save(const std::string &name, lv_display_t *display)
     out << "P6\n" << SIZE << " " << SIZE << "\n255\n";
     for (uint16_t v : framebuffer) {
         const uint8_t px[3] = {uint8_t(((v >> 11) & 31) * 255 / 31), uint8_t(((v >> 5) & 63) * 255 / 63),
-                               uint8_t((v & 31) * 255 / 31)};
+                               uint8_t((v & 31) * 255 / 31)
+                              };
         out.write(reinterpret_cast<const char *>(px), 3);
     }
     std::cout << name << ".ppm\n";
@@ -141,7 +171,9 @@ const lv_image_dsc_t *swifty_portrait(int size)
     static lv_image_dsc_t dsc{};
     px.assign(size_t(size) * size * 4, 0);
     swifty::Figure fig(size, 2);
-    for (int i = 0; i < 90; ++i) fig.step(1 / 30.f);
+    for (int i = 0; i < 90; ++i) {
+        fig.step(1 / 30.f);
+    }
     fig.render(px.data());
     dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
     dsc.header.cf = LV_COLOR_FORMAT_ARGB8888;
@@ -247,7 +279,10 @@ int main(int argc, char **argv)
     render_launcher(radius);
     {
         tools_hooks_t th = {};
-        th.gravity = [](float *x, float *y, float *z) { *x = 0.06f, *y = -0.03f, *z = 0.99f; return true; };
+        th.gravity = [](float * x, float * y, float * z) {
+            *x = 0.06f, *y = -0.03f, *z = 0.99f;
+            return true;
+        };
         tools_app_init(&th);
         lv_obj_t *tools = lv_obj_create(nullptr);
         lv_obj_remove_style_all(tools);
@@ -274,11 +309,16 @@ int main(int argc, char **argv)
     glim_ui_start(glim);
     // Pages: 0 systems, 1 clock, 2 settings, 3 overview, 4 guests, 5 storage,
     // 6 sensors, 7 health, 8 job, 9 temps. Demo nodes: 0 host, 1 printer, 2 Mac.
-    const struct { int page, node; bool demo; const char *name; } shots[] = {
+    const struct {
+        int page, node;
+        bool demo;
+        const char *name;
+    } shots[] = {
         {0, -1, false, "glim-setup"}, {0, -1, true, "glim-systems"}, {1, -1, true, "glim-clock"},
         {2, -1, true, "glim-settings"}, {3, 0, true, "glim-overview"}, {4, 0, true, "glim-guests"},
         {5, 0, true, "glim-storage"}, {6, 0, true, "glim-sensors"}, {7, 0, true, "glim-health"},
-        {8, 1, true, "glim-printer-job"}, {9, 1, true, "glim-printer-temps"}, {3, 2, true, "glim-mac"}};
+        {8, 1, true, "glim-printer-job"}, {9, 1, true, "glim-printer-temps"}, {3, 2, true, "glim-mac"}
+    };
     for (const auto &shot : shots) {
         if (!shot.demo) {  // not set up: no collector, no data
             publishedSnapshot = nullptr;
@@ -323,7 +363,8 @@ int main(int argc, char **argv)
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
         const std::pair<int, const char *> pages[] = {{2, "home"}, {3, "home-lights"}, {4, "home-music"},
-                                                      {5, "home-pets"}, {7, "home-settings"}, {0, "home-pair"}};
+            {5, "home-pets"}, {7, "home-settings"}, {0, "home-pair"}
+        };
         home::home_preview_theme(1);  // AMOLED
         for (auto &page : pages) {
             home::home_preview_open(page.first);

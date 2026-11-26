@@ -71,7 +71,9 @@ HttpResponse attempt(const HttpRequest &request, bool *reused)
 {
     HttpResponse out;
     const std::string origin = origin_of(request.url);
-    if (conn.client && (conn.origin != origin || conn.timeout_ms != request.timeout_ms)) drop();
+    if (conn.client && (conn.origin != origin || conn.timeout_ms != request.timeout_ms)) {
+        drop();
+    }
     *reused = conn.client != nullptr;
     if (!conn.client) {
         esp_http_client_config_t config = {};
@@ -94,7 +96,9 @@ HttpResponse attempt(const HttpRequest &request, bool *reused)
     }
     esp_http_client_handle_t client = conn.client;
     esp_http_client_set_method(client, request.method == "POST" ? HTTP_METHOD_POST : HTTP_METHOD_GET);
-    for (const std::string &name : conn.headers) esp_http_client_delete_header(client, name.c_str());
+    for (const std::string &name : conn.headers) {
+        esp_http_client_delete_header(client, name.c_str());
+    }
     conn.headers.clear();
     for (const auto &header : request.headers) {
         esp_http_client_set_header(client, header.first.c_str(), header.second.c_str());
@@ -102,7 +106,7 @@ HttpResponse attempt(const HttpRequest &request, bool *reused)
     }
     esp_err_t err = esp_http_client_open(client, int(request.body.size()));
     if (err == ESP_OK && !request.body.empty() &&
-        esp_http_client_write(client, request.body.data(), int(request.body.size())) != int(request.body.size())) {
+            esp_http_client_write(client, request.body.data(), int(request.body.size())) != int(request.body.size())) {
         err = ESP_FAIL;
     }
     if (err == ESP_OK && esp_http_client_fetch_headers(client) < 0) {
@@ -123,7 +127,9 @@ HttpResponse attempt(const HttpRequest &request, bool *reused)
             drop();
             return out;
         }
-        if (got == 0) break;
+        if (got == 0) {
+            break;
+        }
         if (out.body.size() + size_t(got) > MAX_BODY) {
             out.body.clear();
             out.error = "response too large";
@@ -133,7 +139,9 @@ HttpResponse attempt(const HttpRequest &request, bool *reused)
         }
         out.body.append(chunk, size_t(got));
     }
-    if (!esp_http_client_is_complete_data_received(client)) drop();  // can't reuse a half-read response
+    if (!esp_http_client_is_complete_data_received(client)) {
+        drop();    // can't reuse a half-read response
+    }
     return out;
 }
 }  // namespace
@@ -142,7 +150,9 @@ HttpResponse http_perform(const HttpRequest &request)
 {
     bool reused = false;
     HttpResponse out = attempt(request, &reused);
-    if (out.code == 0 && reused) out = attempt(request, &reused);  // the kept connection had gone stale
+    if (out.code == 0 && reused) {
+        out = attempt(request, &reused);    // the kept connection had gone stale
+    }
     return out;
 }
 

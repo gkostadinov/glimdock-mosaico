@@ -16,17 +16,32 @@ struct sslclient_context {
 
 class WiFiClientSecure : public WiFiClient {
 public:
-    ~WiFiClientSecure() override { stop(); }
-    void setCACert(const char *pem) { ca_ = pem ? pem : ""; }
+    ~WiFiClientSecure() override
+    {
+        stop();
+    }
+    void setCACert(const char *pem)
+    {
+        ca_ = pem ? pem : "";
+    }
     // Arduino takes seconds here.
-    void setHandshakeTimeout(unsigned long seconds) { sslclient->handshake_timeout = seconds * 1000UL; }
+    void setHandshakeTimeout(unsigned long seconds)
+    {
+        sslclient->handshake_timeout = seconds * 1000UL;
+    }
     using WiFiClient::connect;
     int connect(const char *host, uint16_t port, int32_t timeout_ms) override;
-    int read(uint8_t *buffer, size_t size) override { return WiFiClient::read(buffer, size); }
+    int read(uint8_t *buffer, size_t size) override
+    {
+        return WiFiClient::read(buffer, size);
+    }
     using WiFiClient::read;
     uint8_t connected() override;
     void stop() override;
-    bool secure() const override { return true; }
+    bool secure() const override
+    {
+        return true;
+    }
 
 protected:
     bool fill() override;

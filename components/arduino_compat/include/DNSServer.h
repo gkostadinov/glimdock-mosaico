@@ -7,7 +7,10 @@
 
 class DNSServer {
 public:
-    ~DNSServer() { stop(); }
+    ~DNSServer()
+    {
+        stop();
+    }
     bool start(uint16_t port, const String &domain, IPAddress address);
     void stop();
     void processNextRequest();

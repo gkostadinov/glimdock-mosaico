@@ -39,8 +39,13 @@ using RunHandler = std::function<void(const DocPtr &run, const std::string &mess
 
 class Hub {
 public:
-    struct Config { std::string hub, token, name; } cfg;
-    struct Prefs { int theme = 1; std::string room; } prefs;  // theme 0 light, 1 dark (AMOLED), 2 auto
+    struct Config {
+        std::string hub, token, name;
+    } cfg;
+    struct Prefs {
+        int theme = 1;
+        std::string room;
+    } prefs;  // theme 0 light, 1 dark (AMOLED), 2 auto
     struct Status {
         bool connected = false;
         std::string message = "Not paired";
@@ -53,21 +58,33 @@ public:
     std::map<std::string, std::string> catalog;  // action id -> flow
 
     void start();
-    bool paired() const { return !cfg.hub.empty() && !cfg.token.empty(); }
+    bool paired() const
+    {
+        return !cfg.hub.empty() && !cfg.token.empty();
+    }
     void save();
-    void set_active(bool active) { active_ = active; }
+    void set_active(bool active)
+    {
+        active_ = active;
+    }
     // Delivers finished requests and schedules polling. True if anything changed.
     bool poll();
     void tick_timers();
     void after(uint32_t ms, std::function<void()> fn);
-    void refresh() { next_state_ = next_lists_ = 0; }
+    void refresh()
+    {
+        next_state_ = next_lists_ = 0;
+    }
 
     void pair(const std::string &hub_url, const std::string &code, std::function<void(bool, const std::string &)> done);
     void unpair();
     void execute(const std::string &action, const std::string &target, JsonDocument params, RunHandler done);
     void prepare(const std::string &action, const std::string &target, JsonDocument params, RunHandler done);
     void confirm(const DocPtr &prepared, RunHandler done);
-    bool can(const std::string &action) const { return catalog.count(action) != 0; }
+    bool can(const std::string &action) const
+    {
+        return catalog.count(action) != 0;
+    }
     std::string flow(const std::string &action) const;
     static std::string error_message(int code, const DocPtr &doc, const std::string &error);
 
@@ -87,7 +104,10 @@ private:
     std::map<std::string, size_t> seen_;
     bool fresh(const std::string &what);
     std::map<uint32_t, Handler> pending_;
-    struct Timer { uint32_t at; std::function<void()> fn; };
+    struct Timer {
+        uint32_t at;
+        std::function<void()> fn;
+    };
     std::vector<Timer> timers_;
 };
 

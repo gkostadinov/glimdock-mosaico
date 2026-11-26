@@ -37,11 +37,16 @@ const Accent AMBER = {0xF7CE7E, 0xB07A1E, 0xF0B858, 0x2A1A05, 0x3C2C14, 0x140E06
 const Accent GREEN = {0x8EE6B5, 0x2E7D4F, 0x7AD6A0, 0x06200F, 0x163626, 0x08140C};
 
 namespace {
-lv_color_t hex(uint32_t c) { return lv_color_hex(c); }
-
+lv_color_t hex(uint32_t c)
+{
+    return lv_color_hex(c);
+}
 
 template <typename T>
-T *state_of(lv_obj_t *o) { return static_cast<T *>(lv_obj_get_user_data(o)); }
+T *state_of(lv_obj_t *o)
+{
+    return static_cast<T *>(lv_obj_get_user_data(o));
+}
 
 template <typename T>
 void delete_state(lv_event_t *e)
@@ -51,12 +56,24 @@ void delete_state(lv_event_t *e)
 
 const lv_font_t *symbols(int px)
 {
-    if (px >= 40) return &lv_font_montserrat_48;
-    if (px >= 28) return &lv_font_montserrat_32;
-    if (px >= 22) return &lv_font_montserrat_24;
-    if (px >= 18) return &lv_font_montserrat_20;
-    if (px >= 15) return &lv_font_montserrat_16;
-    if (px >= 13) return &lv_font_montserrat_14;
+    if (px >= 40) {
+        return &lv_font_montserrat_48;
+    }
+    if (px >= 28) {
+        return &lv_font_montserrat_32;
+    }
+    if (px >= 22) {
+        return &lv_font_montserrat_24;
+    }
+    if (px >= 18) {
+        return &lv_font_montserrat_20;
+    }
+    if (px >= 15) {
+        return &lv_font_montserrat_16;
+    }
+    if (px >= 13) {
+        return &lv_font_montserrat_14;
+    }
     return &lv_font_montserrat_12;
 }
 }  // namespace
@@ -68,11 +85,15 @@ const lv_font_t *font(int px, bool semi)
     px = std::max(6, px);
     const int key = px * 2 + (semi ? 1 : 0);
     auto it = cache.find(key);
-    if (it != cache.end()) return it->second;
+    if (it != cache.end()) {
+        return it->second;
+    }
     const uint8_t *start = semi ? inter_semibold_ttf_start : inter_regular_ttf_start;
     const uint8_t *end = semi ? inter_semibold_ttf_end : inter_regular_ttf_end;
     lv_font_t *f = lv_tiny_ttf_create_data_ex(start, size_t(end - start), px, LV_FONT_KERNING_NORMAL, px >= 40 ? 64 : 384);  // glyphs kept rendered: a miss redraws from the outline
-    if (!f) return symbols(px);
+    if (!f) {
+        return symbols(px);
+    }
     f->fallback = symbols(px);
     cache[key] = f;
     return f;
@@ -119,7 +140,9 @@ lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int w, uint32_
     lv_obj_set_style_text_font(l, f, 0);
     lv_obj_set_style_text_color(l, hex(color), 0);
     lv_obj_set_style_text_align(l, align, 0);
-    if (px >= 30) lv_obj_set_style_text_letter_space(l, -1, 0);
+    if (px >= 30) {
+        lv_obj_set_style_text_letter_space(l, -1, 0);
+    }
     if (w > 0) {
         lv_obj_set_width(l, w);
         lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
@@ -190,7 +213,9 @@ void press_fx(lv_obj_t *o)
         ready = true;
         lv_style_transition_dsc_init(&back, props, lv_anim_path_overshoot, 220, 0, nullptr);
         lv_style_transition_dsc_init(&in, props, lv_anim_path_ease_out, 60, 0, nullptr);
-        for (lv_style_t *s : {&normal_small, &pressed_small, &normal_big, &pressed_big}) lv_style_init(s);
+        for (lv_style_t *s : {
+                    &normal_small, &pressed_small, &normal_big, &pressed_big
+                }) lv_style_init(s);
         lv_style_set_transition(&normal_small, &back);
         lv_style_set_transition(&normal_big, &back);
         lv_style_set_transition(&pressed_small, &in);
@@ -234,9 +259,20 @@ lv_obj_t *field_button(lv_obj_t *parent, int x, int y, int w, int h, const char 
 
 // ---- toggle -------------------------------------------------------------------
 namespace {
-struct ToggleState { bool on; const Accent *a; float k; lv_obj_t *knob; };
-void anim_x(void *o, int32_t v) { lv_obj_set_x(static_cast<lv_obj_t *>(o), v); }
-void anim_w(void *o, int32_t v) { lv_obj_set_width(static_cast<lv_obj_t *>(o), v); }
+struct ToggleState {
+    bool on;
+    const Accent *a;
+    float k;
+    lv_obj_t *knob;
+};
+void anim_x(void *o, int32_t v)
+{
+    lv_obj_set_x(static_cast<lv_obj_t *>(o), v);
+}
+void anim_w(void *o, int32_t v)
+{
+    lv_obj_set_width(static_cast<lv_obj_t *>(o), v);
+}
 
 void toggle_style(lv_obj_t *t, ToggleState *s)
 {
@@ -276,7 +312,10 @@ lv_obj_t *toggle(lv_obj_t *parent, int x, int y, bool on, const Accent &a, float
     return t;
 }
 
-bool toggle_on(lv_obj_t *t) { return state_of<ToggleState>(t)->on; }
+bool toggle_on(lv_obj_t *t)
+{
+    return state_of<ToggleState>(t)->on;
+}
 
 void toggle_set(lv_obj_t *t, bool on, bool anim)
 {
@@ -303,7 +342,10 @@ void toggle_set(lv_obj_t *t, bool on, bool anim)
 namespace {
 bool entry_animations = true;
 }
-void set_entry_animations(bool on) { entry_animations = on; }
+void set_entry_animations(bool on)
+{
+    entry_animations = on;
+}
 
 lv_obj_t *bar(lv_obj_t *parent, int x, int y, int w, int h, int pct, const Accent &a, bool grow)
 {
@@ -314,7 +356,9 @@ lv_obj_t *bar(lv_obj_t *parent, int x, int y, int w, int h, int pct, const Accen
     lv_obj_t *fill = box(track, 0, 0, fw, h, LV_RADIUS_CIRCLE);
     lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(fill, hex(a.glow), 0);
-    if (fw < 1) lv_obj_add_flag(fill, LV_OBJ_FLAG_HIDDEN);
+    if (fw < 1) {
+        lv_obj_add_flag(fill, LV_OBJ_FLAG_HIDDEN);
+    }
     if (grow && entry_animations && fw > 0) {
         lv_obj_set_width(fill, 1);
         lv_anim_t an;
@@ -360,7 +404,9 @@ void capsule_clicked(lv_event_t *e)
     lv_area_t a;
     lv_obj_get_coords(c, &a);
     const int index = std::clamp(int((p.x - a.x1 - s->pad) / std::max(1, s->seg)), 0, s->count - 1);
-    if (index == s->sel) return;
+    if (index == s->sel) {
+        return;
+    }
     capsule_select(c, index, true);
     lv_obj_send_event(c, LV_EVENT_VALUE_CHANGED, nullptr);
 }
@@ -382,7 +428,9 @@ lv_obj_t *capsule(lv_obj_t *parent, int x, int y, int w, int h, const char *cons
     lv_obj_add_event_cb(c, delete_state<CapsuleState>, LV_EVENT_DELETE, s);
     s->ind = box(c, s->pad + std::max(0, s->sel) * s->seg, s->pad, s->seg, h - 2 * s->pad, LV_RADIUS_CIRCLE);
     style_fill(s->ind, a, true);
-    if (s->sel < 0) lv_obj_add_flag(s->ind, LV_OBJ_FLAG_HIDDEN);
+    if (s->sel < 0) {
+        lv_obj_add_flag(s->ind, LV_OBJ_FLAG_HIDDEN);
+    }
     lv_obj_set_style_shadow_width(s->ind, 16, 0);
     const lv_font_t *f = font(px, true);
     for (int i = 0; i < count; ++i) {
@@ -394,14 +442,18 @@ lv_obj_t *capsule(lv_obj_t *parent, int x, int y, int w, int h, const char *cons
     return c;
 }
 
-int capsule_selected(lv_obj_t *c) { return state_of<CapsuleState>(c)->sel; }
+int capsule_selected(lv_obj_t *c)
+{
+    return state_of<CapsuleState>(c)->sel;
+}
 
 void capsule_select(lv_obj_t *c, int index, bool anim)
 {
     CapsuleState *s = state_of<CapsuleState>(c);
     index = std::clamp(index, 0, s->count - 1);
-    for (int i = 0; i < s->count; ++i)
+    for (int i = 0; i < s->count; ++i) {
         lv_obj_set_style_text_color(s->labels[i], hex(i == index ? s->a->ink : TEXT2), 0);
+    }
     const bool was_hidden = lv_obj_has_flag(s->ind, LV_OBJ_FLAG_HIDDEN);
     s->sel = index;
     lv_obj_remove_flag(s->ind, LV_OBJ_FLAG_HIDDEN);
@@ -497,18 +549,25 @@ const lv_image_dsc_t *icon_mask(const home_icons::Icon *ic, int size, int width)
     struct Key {
         const home_icons::Icon *icon;
         int size, width;
-        bool operator<(const Key &o) const { return std::tie(icon, size, width) < std::tie(o.icon, o.size, o.width); }
+        bool operator<(const Key &o) const
+        {
+            return std::tie(icon, size, width) < std::tie(o.icon, o.size, o.width);
+        }
     };
     static std::map<Key, lv_image_dsc_t *> cache;
     const Key key{ic, size, width};
     auto it = cache.find(key);
-    if (it != cache.end()) return it->second;
+    if (it != cache.end()) {
+        return it->second;
+    }
 #ifdef ESP_PLATFORM
     auto *px = static_cast<uint8_t *>(heap_caps_calloc(1, size_t(size) * size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
 #else
     auto *px = static_cast<uint8_t *>(calloc(1, size_t(size) * size));
 #endif
-    if (!px) return nullptr;
+    if (!px) {
+        return nullptr;
+    }
     auto *dsc = new lv_image_dsc_t{};
     const float k = float(size) / 24.0f, r = width / 2.0f;
     struct Seg {
@@ -551,7 +610,9 @@ void draw_icon_mask(lv_layer_t *layer, const lv_area_t &a, const home_icons::Ico
 {
     const int size = std::max(1, int(lv_area_get_width(&a)));
     const lv_image_dsc_t *mask = icon_mask(ic, size, std::max(1, width));
-    if (!mask) return;
+    if (!mask) {
+        return;
+    }
     lv_draw_image_dsc_t d;
     lv_draw_image_dsc_init(&d);
     d.src = mask;
@@ -567,8 +628,12 @@ lv_obj_t *icon(lv_obj_t *parent, const char *name, int x, int y, int size, uint3
     lv_obj_t *o = box(parent, x, y, size, size);
     const home_icons::Icon *found = home_icons::find(name);
     for (const auto &ic : extra)
-        if (!strcmp(ic.name, name)) found = &ic;
-    if (!found) return o;
+        if (!strcmp(ic.name, name)) {
+            found = &ic;
+        }
+    if (!found) {
+        return o;
+    }
     lv_obj_set_style_line_color(o, hex(color), 0);
     lv_obj_set_style_line_opa(o, LV_OPA_COVER, 0);
     lv_obj_set_style_line_width(o, std::max(1, int(lroundf(stroke * size / 24.0f))), 0);
@@ -590,7 +655,9 @@ void draw_spark(lv_event_t *e)
 {
     lv_obj_t *o = lv_event_get_current_target_obj(e);
     SparkState *s = state_of<SparkState>(o);
-    if (s->n < 2) return;
+    if (s->n < 2) {
+        return;
+    }
     lv_layer_t *layer = lv_event_get_layer(e);
     lv_area_t a;
     lv_obj_get_coords(o, &a);
@@ -609,17 +676,23 @@ void draw_spark(lv_event_t *e)
     r.bg_opa = 38;
     for (int32_t x = 0; x < limit; x += 3) {
         lv_area_t col = {a.x1 + x, int32_t(lroundf(yat(float(x) + 1))), std::min(a.x1 + x + 2, a.x2), a.y2};
-        if (col.y1 < col.y2) lv_draw_rect(layer, &r, &col);
+        if (col.y1 < col.y2) {
+            lv_draw_rect(layer, &r, &col);
+        }
     }
     lv_draw_line_dsc_t line;
     lv_draw_line_dsc_init(&line);
     line.color = hex(s->color);
     line.width = 3;
     line.round_start = line.round_end = true;
-    for (lv_draw_line_dsc_t *d : {&line}) {
+    for (lv_draw_line_dsc_t *d : {
+                &line
+            }) {
         for (int i = 1; i < s->n; ++i) {
             const float x0 = (i - 1) * step, x1 = std::min(i * step, float(limit));
-            if (x0 >= limit) break;
+            if (x0 >= limit) {
+                break;
+            }
             d->p1 = {lv_value_precise_t(lroundf(a.x1 + x0)), lv_value_precise_t(lroundf(yat(x0)))};
             d->p2 = {lv_value_precise_t(lroundf(a.x1 + x1)), lv_value_precise_t(lroundf(yat(x1)))};
             lv_draw_line(layer, d);
@@ -662,7 +735,9 @@ void spark_set(lv_obj_t *o, const float *values, int count, float max_value)
 {
     SparkState *s = state_of<SparkState>(o);
     count = std::min(count, 64);
-    if (count == s->n && max_value == s->max && !memcmp(values, s->v, sizeof(float) * size_t(count))) return;
+    if (count == s->n && max_value == s->max && !memcmp(values, s->v, sizeof(float) * size_t(count))) {
+        return;
+    }
     memcpy(s->v, values, sizeof(float) * size_t(count));
     s->n = count;
     s->max = max_value > 0 ? max_value : 1;
@@ -671,12 +746,17 @@ void spark_set(lv_obj_t *o, const float *values, int count, float max_value)
 
 // ---- card fill -----------------------------------------------------------------------
 namespace {
-struct FillState { int pct; uint32_t top, bottom; };
+struct FillState {
+    int pct;
+    uint32_t top, bottom;
+};
 
 void draw_fill(lv_event_t *e)
 {
     auto *s = static_cast<FillState *>(lv_event_get_user_data(e));
-    if (s->pct <= 0) return;
+    if (s->pct <= 0) {
+        return;
+    }
     lv_obj_t *o = lv_event_get_current_target_obj(e);
     lv_layer_t *layer = lv_event_get_layer(e);
     lv_area_t a;
@@ -686,8 +766,11 @@ void draw_fill(lv_event_t *e)
     fill.x2 = a.x1 + std::max<int32_t>(1, w * std::min(s->pct, 100) / 100) - 1;
     const lv_area_t saved = layer->_clip_area;
     const lv_area_t clip = {std::max(saved.x1, fill.x1), std::max(saved.y1, fill.y1), std::min(saved.x2, fill.x2),
-                            std::min(saved.y2, fill.y2)};
-    if (clip.x1 > clip.x2 || clip.y1 > clip.y2) return;
+                            std::min(saved.y2, fill.y2)
+                           };
+    if (clip.x1 > clip.x2 || clip.y1 > clip.y2) {
+        return;
+    }
     layer->_clip_area = clip;
     lv_draw_rect_dsc_t d;
     lv_draw_rect_dsc_init(&d);
@@ -737,7 +820,9 @@ void stagger(lv_obj_t *parent, uint32_t delay_ms, uint32_t step_ms)
     uint32_t k = 0;
     for (uint32_t i = 0; i < n; ++i) {
         lv_obj_t *child = lv_obj_get_child(parent, int32_t(i));
-        if (lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) continue;
+        if (lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
+            continue;
+        }
         lv_anim_delete(child, rise);
         rise(child, 0);
         lv_anim_t a;

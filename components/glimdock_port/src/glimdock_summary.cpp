@@ -27,7 +27,9 @@ uint32_t last_sample = 0;
 
 uint8_t node_state(const NodeDescriptor &n)
 {
-    if (!strcmp(n.status, "offline") || !strcmp(n.summary.status, "offline")) return 2;
+    if (!strcmp(n.status, "offline") || !strcmp(n.summary.status, "offline")) {
+        return 2;
+    }
     const char *s = n.summary.status[0] ? n.summary.status : n.status;
     return !strcmp(s, "healthy") ? 0 : 1;
 }
@@ -55,17 +57,20 @@ void fill(glimdock_summary_t *out, const Snapshot &s, const NetworkState &net)
         for (int i = 0; i < s.nNodes; ++i) {
             const NodeDescriptor &n = s.nodes[i];
             const uint8_t state = node_state(n);
-            if (state == 0) ++out->healthy;
+            if (state == 0) {
+                ++out->healthy;
+            }
             cpu[i] = n.summary.available ? n.summary.cpu : NAN;
             mem[i] = n.summary.available ? n.summary.memory : NAN;
             if (out->item_count < 3) {
                 auto &item = out->items[out->item_count++];
                 strlcpy(item.name, n.name[0] ? n.name : n.id, sizeof(item.name));
                 item.state = state;
-                if (isfinite(n.summary.progress) && n.summary.printState[0] && !strcmp(n.summary.printState, "printing"))
+                if (isfinite(n.summary.progress) && n.summary.printState[0] && !strcmp(n.summary.printState, "printing")) {
                     snprintf(item.note, sizeof(item.note), "%d%%", int(lroundf(n.summary.progress)));
-                else if (isfinite(n.summary.cpu))
+                } else if (isfinite(n.summary.cpu)) {
                     snprintf(item.note, sizeof(item.note), "%d%%", int(lroundf(n.summary.cpu)));
+                }
             }
         }
         out->cpu = average(cpu, s.nNodes);
@@ -80,9 +85,9 @@ void fill(glimdock_summary_t *out, const Snapshot &s, const NetworkState &net)
             item.state = out->fresh ? 0 : 1;
         }
     }
-    if (!s.valid)
+    if (!s.valid) {
         strlcpy(out->status, net.message[0] ? net.message : "Connecting to the collector\xE2\x80\xA6", sizeof(out->status));
-    else if (s.nNodes)
+    } else if (s.nNodes)
         snprintf(out->status, sizeof(out->status), "%d of %d systems healthy%s", out->healthy, out->nodes,
                  s.demo ? " \xC2\xB7 demo" : out->fresh ? " \xC2\xB7 live" : "");
     else
@@ -91,7 +96,10 @@ void fill(glimdock_summary_t *out, const Snapshot &s, const NetworkState &net)
 }
 }  // namespace
 
-void glimdock_summary_mark_started() { started_flag = true; }
+void glimdock_summary_mark_started()
+{
+    started_flag = true;
+}
 
 extern "C" void glimdock_app_summary(glimdock_summary_t *out)
 {
@@ -101,7 +109,9 @@ extern "C" void glimdock_app_summary(glimdock_summary_t *out)
     // Only the fields the summary needs, read under the publisher's lock.
     static Snapshot *copy = nullptr;
     static NetworkState net;
-    if (!copy) copy = new (std::nothrow) Snapshot();
+    if (!copy) {
+        copy = new (std::nothrow) Snapshot();
+    }
     bool have = false;
     if (copy && publishedSnapshot) {
 #ifdef HOMELAB_NATIVE_PREVIEW
@@ -125,8 +135,11 @@ extern "C" void glimdock_app_summary(glimdock_summary_t *out)
     const uint32_t now = millis();
     if (isfinite(out->cpu) && (history_count == 0 || now - last_sample >= 2000)) {
         last_sample = now;
-        if (history_count == 32) memmove(history, history + 1, sizeof(float) * 31);
-        else ++history_count;
+        if (history_count == 32) {
+            memmove(history, history + 1, sizeof(float) * 31);
+        } else {
+            ++history_count;
+        }
         history[history_count - 1] = out->cpu;
     }
     memcpy(out->history, history, sizeof(history));
@@ -148,8 +161,16 @@ struct Text {
     }
 };
 
-std::string pct(float v) { return isfinite(v) ? std::to_string(int(lroundf(v))) + "%" : "?"; }
-std::string gib(double bytes) { char b[24]; snprintf(b, sizeof(b), "%.1f GiB", bytes / 1073741824.0); return isfinite(bytes) ? b : "?"; }
+std::string pct(float v)
+{
+    return isfinite(v) ? std::to_string(int(lroundf(v))) + "%" : "?";
+}
+std::string gib(double bytes)
+{
+    char b[24];
+    snprintf(b, sizeof(b), "%.1f GiB", bytes / 1073741824.0);
+    return isfinite(bytes) ? b : "?";
+}
 
 template <typename T> T *psram_object()
 {
@@ -184,9 +205,15 @@ void fleet(Text &t, const Snapshot &s)
         t.add("- %s (%s %s): %s", n.name[0] ? n.name : n.id, n.platform, n.type, m.status[0] ? m.status : n.status);
         if (m.available) {
             t.add(", CPU %s, memory %s", pct(m.cpu).c_str(), pct(m.memory).c_str());
-            if (isfinite(m.temp)) t.add(", %d C", int(lroundf(m.temp)));
-            if (m.guests >= 0) t.add(", %d guests", int(m.guests));
-            if (m.printState[0]) t.add(", printer %s %s", m.printState, pct(m.progress).c_str());
+            if (isfinite(m.temp)) {
+                t.add(", %d C", int(lroundf(m.temp)));
+            }
+            if (m.guests >= 0) {
+                t.add(", %d guests", int(m.guests));
+            }
+            if (m.printState[0]) {
+                t.add(", printer %s %s", m.printState, pct(m.progress).c_str());
+            }
         }
         t.add("\n");
     }
@@ -195,15 +222,27 @@ void fleet(Text &t, const Snapshot &s)
 void system(Text &t, const Snapshot &s)
 {
     t.add("Shown system %s%s: CPU %s", s.node.name[0] ? s.node.name : s.host, s.demo ? " (demo data)" : "", pct(s.cpu).c_str());
-    if (isfinite(s.load[0])) t.add(", load %.2f %.2f %.2f", double(s.load[0]), double(s.load[1]), double(s.load[2]));
-    if (isfinite(s.memUsed) && s.memTotal > 0) t.add(", memory %s of %s", gib(s.memUsed).c_str(), gib(s.memTotal).c_str());
-    if (isfinite(s.temp)) t.add(", %d C", int(lroundf(s.temp)));
-    if (isfinite(s.watts)) t.add(", %d W", int(lroundf(s.watts)));
-    if (isfinite(s.uptime)) t.add(", up %d days", int(s.uptime / 86400));
+    if (isfinite(s.load[0])) {
+        t.add(", load %.2f %.2f %.2f", double(s.load[0]), double(s.load[1]), double(s.load[2]));
+    }
+    if (isfinite(s.memUsed) && s.memTotal > 0) {
+        t.add(", memory %s of %s", gib(s.memUsed).c_str(), gib(s.memTotal).c_str());
+    }
+    if (isfinite(s.temp)) {
+        t.add(", %d C", int(lroundf(s.temp)));
+    }
+    if (isfinite(s.watts)) {
+        t.add(", %d W", int(lroundf(s.watts)));
+    }
+    if (isfinite(s.uptime)) {
+        t.add(", up %d days", int(s.uptime / 86400));
+    }
     t.add(".\n");
     if (s.nGuests) {
         int running = 0;
-        for (int i = 0; i < s.nGuests; ++i) running += !strcmp(s.guests[i].status, "running");
+        for (int i = 0; i < s.nGuests; ++i) {
+            running += !strcmp(s.guests[i].status, "running");
+        }
         t.add("Guests (%d running of %d):", running, s.nGuests);
         for (int i = 0; i < s.nGuests && i < 24; ++i)
             t.add(" %s %s%s%s;", s.guests[i].name, s.guests[i].status,
@@ -214,8 +253,9 @@ void system(Text &t, const Snapshot &s)
         t.add("Storage %s: %s used of %s (%s)\n", s.pools[i].name, gib(s.pools[i].used).c_str(), gib(s.pools[i].total).c_str(),
               s.pools[i].status);
     for (int i = 0; i < s.nDisks; ++i)
-        if (s.disks[i].health[0] && strcmp(s.disks[i].health, "PASSED") && strcmp(s.disks[i].health, "OK") && strcmp(s.disks[i].health, "healthy"))
+        if (s.disks[i].health[0] && strcmp(s.disks[i].health, "PASSED") && strcmp(s.disks[i].health, "OK") && strcmp(s.disks[i].health, "healthy")) {
             t.add("Disk %s: %s\n", s.disks[i].name, s.disks[i].health);
+        }
     if (s.printer.present)
         t.add("Printer %s: %s %s%s\n", s.printer.name, s.printer.state, s.printer.filename,
               isfinite(s.printer.progress) ? (" " + pct(s.printer.progress)).c_str() : "");
@@ -228,7 +268,9 @@ void alerts(Text &t, const Snapshot &s)
         return;
     }
     t.add("%d alert(s):\n", s.nAlerts);
-    for (int i = 0; i < s.nAlerts; ++i) t.add("- %s: %s\n", s.alerts[i].severity, s.alerts[i].message);
+    for (int i = 0; i < s.nAlerts; ++i) {
+        t.add("- %s: %s\n", s.alerts[i].severity, s.alerts[i].message);
+    }
 }
 
 void agents(Text &t, const ops::Snapshot &o, const ops::Network &net)
@@ -240,9 +282,15 @@ void agents(Text &t, const ops::Snapshot &o, const ops::Network &net)
     for (int i = 0; i < o.nSystems; ++i) {
         const ops::System &y = o.systems[i];
         t.add("%s (%s): %s", y.name, y.provider, y.status);
-        if (y.board && isfinite(y.needsYou)) t.add(", %d card(s) need you", int(y.needsYou));
-        if (isfinite(y.running)) t.add(", %d running", int(y.running));
-        if (isfinite(y.queued)) t.add(", %d queued", int(y.queued));
+        if (y.board && isfinite(y.needsYou)) {
+            t.add(", %d card(s) need you", int(y.needsYou));
+        }
+        if (isfinite(y.running)) {
+            t.add(", %d running", int(y.running));
+        }
+        if (isfinite(y.queued)) {
+            t.add(", %d queued", int(y.queued));
+        }
         t.add("\n");
     }
     int shown = 0;
@@ -254,7 +302,9 @@ void agents(Text &t, const ops::Snapshot &o, const ops::Network &net)
     shown = 0;
     for (int i = 0; i < o.nTasks && shown < 16; ++i) {
         const ops::Task &k = o.tasks[i];
-        if (k.lane == 5) continue;  // done
+        if (k.lane == 5) {
+            continue;    // done
+        }
         ++shown;
         t.add("- card \"%s\" (%s%s%s)%s%s\n", k.title, k.lane >= 0 && k.lane < ops::LANES ? ops::LANE_LABELS[k.lane] : k.state,
               k.project[0] ? ", " : "", k.project, k.attention[0] ? " needs you: " : "", k.attention);
@@ -267,28 +317,46 @@ extern "C" void glimdock_app_report(const char *topic, char *out, size_t capacit
     const std::string want = topic ? topic : "";
     static Snapshot *snap = nullptr;
     static ops::Snapshot *ops_snap = nullptr;
-    if (!snap) snap = psram_object<Snapshot>();
-    if (!ops_snap) ops_snap = psram_object<ops::Snapshot>();
+    if (!snap) {
+        snap = psram_object<Snapshot>();
+    }
+    if (!ops_snap) {
+        ops_snap = psram_object<ops::Snapshot>();
+    }
     Text t;
-    if (!started_flag) t.add("Glimdock has not started yet (open it once).\n");
+    if (!started_flag) {
+        t.add("Glimdock has not started yet (open it once).\n");
+    }
     NetworkState net;
     bool have = false;
-    for (int i = 0; snap && i < 50 && !(have = readSnapshot(*snap, net)); ++i) pause_ms(10);
+    for (int i = 0; snap && i < 50 && !(have = readSnapshot(*snap, net)); ++i) {
+        pause_ms(10);
+    }
     if (want != "agents") {
-        if (!have || !snap->valid)
+        if (!have || !snap->valid) {
             t.add("No homelab data yet: %s\n", net.message[0] ? net.message : "connecting to the collector");
-        else {
-            if (!net.wifi && !snap->demo) t.add("(Last known data: the collector is not answering.)\n");
-            if (want.empty() || want == "fleet") fleet(t, *snap);
-            if (want.empty() || want == "system") system(t, *snap);
+        } else {
+            if (!net.wifi && !snap->demo) {
+                t.add("(Last known data: the collector is not answering.)\n");
+            }
+            if (want.empty() || want == "fleet") {
+                fleet(t, *snap);
+            }
+            if (want.empty() || want == "system") {
+                system(t, *snap);
+            }
             alerts(t, *snap);
         }
     }
     if (want.empty() || want == "agents") {
         ops::Network on;
         bool got = false;
-        for (int i = 0; ops_snap && i < 50 && !(got = readOperations(*ops_snap, on)); ++i) pause_ms(10);
-        if (got) agents(t, *ops_snap, on);
+        for (int i = 0; ops_snap && i < 50 && !(got = readOperations(*ops_snap, on)); ++i) {
+            pause_ms(10);
+        }
+        if (got) {
+            agents(t, *ops_snap, on);
+        }
     }
     strlcpy(out, t.s.c_str(), capacity);
 }

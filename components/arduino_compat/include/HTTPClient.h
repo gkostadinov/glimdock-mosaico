@@ -26,22 +26,49 @@ typedef enum {
 
 class HTTPClient {
 public:
-    ~HTTPClient() { end(); }
+    ~HTTPClient()
+    {
+        end();
+    }
     bool begin(WiFiClient &client, const String &url);
     void end();
-    void useHTTP10(bool enabled) { http10_ = enabled; }
+    void useHTTP10(bool enabled)
+    {
+        http10_ = enabled;
+    }
     void setReuse(bool) {}
-    void setConnectTimeout(int32_t ms) { connect_timeout_ms_ = ms; }
-    void setTimeout(uint16_t ms) { timeout_ms_ = ms; }
+    void setConnectTimeout(int32_t ms)
+    {
+        connect_timeout_ms_ = ms;
+    }
+    void setTimeout(uint16_t ms)
+    {
+        timeout_ms_ = ms;
+    }
     void setFollowRedirects(followRedirects_t) {}  // redirects are never followed
     void addHeader(const String &name, const String &value);
     void collectHeaders(const char *keys[], size_t count);
     String header(const char *name);
-    int GET() { return send("GET", nullptr, 0); }
-    int POST(const String &payload) { return send("POST", reinterpret_cast<const uint8_t *>(payload.c_str()), payload.length()); }
-    int POST(const uint8_t *payload, size_t size) { return send("POST", payload, size); }
-    int getSize() { return size_; }
-    WiFiClient *getStreamPtr() { return client_ && client_->connected() ? client_ : nullptr; }
+    int GET()
+    {
+        return send("GET", nullptr, 0);
+    }
+    int POST(const String &payload)
+    {
+        return send("POST", reinterpret_cast<const uint8_t *>(payload.c_str()), payload.length());
+    }
+    int POST(const uint8_t *payload, size_t size)
+    {
+        return send("POST", payload, size);
+    }
+    int getSize()
+    {
+        return size_;
+    }
+    WiFiClient *getStreamPtr()
+    {
+        return client_ && client_->connected() ? client_ : nullptr;
+    }
 
 private:
     int send(const char *method, const uint8_t *payload, size_t size);

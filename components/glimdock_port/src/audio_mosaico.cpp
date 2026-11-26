@@ -95,10 +95,22 @@ bool boardAudioInit(bool sound_enabled)
     return true;
 }
 
-bool boardAudioReady() { return ready; }
-void boardAudioEnable(bool value) { enabled.store(value); }
-void boardAudioVolume(unsigned value) { volume.store(clampSoundVolume(value)); }
-uint8_t boardAudioVolume() { return volume.load(); }
+bool boardAudioReady()
+{
+    return ready;
+}
+void boardAudioEnable(bool value)
+{
+    enabled.store(value);
+}
+void boardAudioVolume(unsigned value)
+{
+    volume.store(clampSoundVolume(value));
+}
+uint8_t boardAudioVolume()
+{
+    return volume.load();
+}
 
 bool boardAudioPlay(AudioCue cue)
 {

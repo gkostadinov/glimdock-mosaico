@@ -67,7 +67,10 @@ Snapshot read_snapshot()
     return snap;
 }
 
-bool searching() { return visible || mode != OFF || esp_timer_get_time() < wanted_until; }
+bool searching()
+{
+    return visible || mode != OFF || esp_timer_get_time() < wanted_until;
+}
 
 uint32_t hue_rgb(float h)  // h in degrees, full saturation and value
 {
@@ -94,7 +97,9 @@ uint32_t scale(uint32_t c, float k)
 void save_mode()
 {
     nvs_handle_t h;
-    if (nvs_open("tools", NVS_READWRITE, &h) != ESP_OK) return;
+    if (nvs_open("tools", NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
     nvs_set_u8(h, "ledmode", uint8_t(mode.load()));
     nvs_set_u32(h, "ledrgb", colour.load());
     nvs_commit(h);
@@ -126,9 +131,13 @@ void worker(void *)
                 mosaico_interact_close(board);
                 board = nullptr;
             } else if (err != ESP_OK) {
-                if (board) mosaico_interact_close(board);  // a half-open board
+                if (board) {
+                    mosaico_interact_close(board);    // a half-open board
+                }
                 board = nullptr;
-                if (err != ESP_ERR_TIMEOUT && err != ESP_ERR_NOT_FOUND) ESP_LOGW(TAG, "open: %s", esp_err_to_name(err));
+                if (err != ESP_ERR_TIMEOUT && err != ESP_ERR_NOT_FOUND) {
+                    ESP_LOGW(TAG, "open: %s", esp_err_to_name(err));
+                }
             }
             if (!board) {
                 next_try = esp_timer_get_time() + (asked ? 1000000 : 5000000);
@@ -162,7 +171,9 @@ void worker(void *)
 
         if (const uint32_t req = ir_request.exchange(0)) {
             const esp_err_t err = mosaico_interact_ir_send_nec(board, uint8_t(req >> 8), uint8_t(req));
-            if (err != ESP_OK) ESP_LOGW(TAG, "IR 0x%02X/0x%02X: %s", unsigned((req >> 8) & 0xFF), unsigned(req & 0xFF), esp_err_to_name(err));
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "IR 0x%02X/0x%02X: %s", unsigned((req >> 8) & 0xFF), unsigned(req & 0xFF), esp_err_to_name(err));
+            }
             ir_result = err == ESP_OK ? 1 : -1;
             ir_answered = ir_asked.load();
         }
@@ -174,7 +185,9 @@ void worker(void *)
             snap.left = in.left_pressed;
             snap.right = in.right_pressed;
             snap.motion = in.motion_detected;
-            if (in.motion_detected) snap.motion_at = now;
+            if (in.motion_detected) {
+                snap.motion_at = now;
+            }
             snap.light = in.light_level;
             snap.light_raw = in.light_raw;
         }
@@ -188,10 +201,14 @@ void worker(void *)
         }
         case RAINBOW:
             hue = fmodf(hue + 9.0f, 360.0f);
-            for (int i = 0; i < LEDS; ++i) frame[i] = hue_rgb(hue + i * (360.0f / LEDS));
+            for (int i = 0; i < LEDS; ++i) {
+                frame[i] = hue_rgb(hue + i * (360.0f / LEDS));
+            }
             break;
         case NIGHT:
-            if (read && in.motion_detected && in.light_level < NIGHT_DARK) night_until = now + NIGHT_US;
+            if (read && in.motion_detected && in.light_level < NIGHT_DARK) {
+                night_until = now + NIGHT_US;
+            }
             if (now < night_until) {
                 const float left = float(night_until - now) / 3e6f;  // fades over its last three seconds
                 std::fill(frame, frame + LEDS, scale(0xFFA040, std::min(1.0f, left)));
@@ -218,7 +235,9 @@ void worker(void *)
 void set_mode(int m, uint32_t c)
 {
     mode = std::clamp(m, 0, MODES - 1);
-    if (c) colour = c;
+    if (c) {
+        colour = c;
+    }
     save_mode();
 }
 
@@ -229,7 +248,9 @@ bool send_ir(uint8_t address, uint8_t command, int wait_ms)
     const uint32_t n = ++ir_asked;
     ir_request = 0x10000u | uint32_t(address) << 8 | command;
     for (int waited = 0; waited < wait_ms; waited += 50) {
-        if (ir_answered.load() == n) return ir_result == 1;
+        if (ir_answered.load() == n) {
+            return ir_result == 1;
+        }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
     return false;
@@ -253,28 +274,34 @@ struct Key {
     uint8_t command;
 };
 constexpr Key LG_KEYS[] = {{"power", 0x08},   {"volume_up", 0x02}, {"volume_down", 0x03}, {"mute", 0x09},
-                           {"input", 0x0B},   {"ok", 0x44},        {"up", 0x40},          {"down", 0x41},
-                           {"left", 0x07},    {"right", 0x06},     {"back", 0x28},        {"home", 0x7C},
-                           {"channel_up", 0x00}, {"channel_down", 0x01}};
+    {"input", 0x0B},   {"ok", 0x44},        {"up", 0x40},          {"down", 0x41},
+    {"left", 0x07},    {"right", 0x06},     {"back", 0x28},        {"home", 0x7C},
+    {"channel_up", 0x00}, {"channel_down", 0x01}
+};
 constexpr uint8_t LG_ADDRESS = 0x04;
 
 // ---- the pane (LVGL task) ------------------------------------------------------------------
 struct {
     const Accent *acc = nullptr;
     lv_obj_t *status = nullptr, *card[3] = {}, *lamp[3] = {}, *note[3] = {}, *light = nullptr, *light_bar = nullptr,
-             *modes = nullptr, *leds[LEDS] = {}, *remote = nullptr;
+                                                                         *modes = nullptr, *leds[LEDS] = {}, *remote = nullptr;
     int64_t remote_note_until = 0;
     uint32_t waiting_for = 0;  // an IR send from the pane whose answer is still to show
 } U;
 
-void mode_cb(lv_event_t *e) { set_mode(capsule_selected(lv_event_get_current_target_obj(e)), 0); }
+void mode_cb(lv_event_t *e)
+{
+    set_mode(capsule_selected(lv_event_get_current_target_obj(e)), 0);
+}
 
 // Tapping the lights: the next colour (and the colour mode).
 void leds_cb(lv_event_t *)
 {
     const uint32_t c = colour.load();
     size_t i = 0;
-    while (i < sizeof(PALETTE) / sizeof(*PALETTE) && PALETTE[i] != c) ++i;
+    while (i < sizeof(PALETTE) / sizeof(*PALETTE) && PALETTE[i] != c) {
+        ++i;
+    }
     set_mode(COLOUR, PALETTE[(i + 1) % (sizeof(PALETTE) / sizeof(*PALETTE))]);
 }
 
@@ -308,20 +335,29 @@ void set_lamp(lv_obj_t *lamp, bool on, uint32_t colour_on)
 
 void start()
 {
-    if (task) return;
+    if (task) {
+        return;
+    }
     nvs_handle_t h;
     if (nvs_open("tools", NVS_READONLY, &h) == ESP_OK) {
         uint8_t m = 0;
         uint32_t c = 0;
-        if (nvs_get_u8(h, "ledmode", &m) == ESP_OK && m < MODES) mode = m;
-        if (nvs_get_u32(h, "ledrgb", &c) == ESP_OK && c) colour = c;
+        if (nvs_get_u8(h, "ledmode", &m) == ESP_OK && m < MODES) {
+            mode = m;
+        }
+        if (nvs_get_u32(h, "ledrgb", &c) == ESP_OK && c) {
+            colour = c;
+        }
         nvs_close(h);
     }
     // Only the driver's calls: the stack can live in PSRAM. Below LVGL's draw tasks.
     xTaskCreatePinnedToCoreWithCaps(worker, "interact", 6144, nullptr, 2, &task, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
-void set_visible(bool v) { visible = v; }
+void set_visible(bool v)
+{
+    visible = v;
+}
 
 void build(lv_obj_t *p, const Accent &a)
 {
@@ -377,7 +413,9 @@ void build(lv_obj_t *p, const Accent &a)
 
 void update()
 {
-    if (!U.status) return;
+    if (!U.status) {
+        return;
+    }
     const Snapshot s = read_snapshot();
     const int64_t now = esp_timer_get_time();
     char text[96];
@@ -390,17 +428,26 @@ void update()
     lv_label_set_text(U.status, text);
     const bool on[3] = {s.present && s.left, s.present && s.motion, s.present && s.right};
     const uint32_t colours[3] = {0xFF5050, 0x60E080, 0x5090FF};
-    for (int i = 0; i < 3; ++i) set_lamp(U.lamp[i], on[i], colours[i]);
+    for (int i = 0; i < 3; ++i) {
+        set_lamp(U.lamp[i], on[i], colours[i]);
+    }
     lv_label_set_text(U.note[0], !s.present ? "" : s.left ? "Pressed" : "Touch or press");
     lv_label_set_text(U.note[2], !s.present ? "" : s.right ? "Pressed" : "Touch or press");
-    if (!s.present) lv_label_set_text(U.note[1], "");
-    else if (s.motion) lv_label_set_text(U.note[1], "Now");
-    else if (!s.motion_at) lv_label_set_text(U.note[1], "None yet");
-    else {
+    if (!s.present) {
+        lv_label_set_text(U.note[1], "");
+    } else if (s.motion) {
+        lv_label_set_text(U.note[1], "Now");
+    } else if (!s.motion_at) {
+        lv_label_set_text(U.note[1], "None yet");
+    } else {
         const int ago = int((now - s.motion_at) / 1000000);
-        if (ago < 60) snprintf(text, sizeof(text), "%d s ago", ago);
-        else if (ago < 3600) snprintf(text, sizeof(text), "%d min ago", ago / 60);
-        else snprintf(text, sizeof(text), "%d h ago", ago / 3600);
+        if (ago < 60) {
+            snprintf(text, sizeof(text), "%d s ago", ago);
+        } else if (ago < 3600) {
+            snprintf(text, sizeof(text), "%d min ago", ago / 60);
+        } else {
+            snprintf(text, sizeof(text), "%d h ago", ago / 3600);
+        }
         lv_label_set_text(U.note[1], text);
     }
     if (s.present && s.light >= 0) {
@@ -411,7 +458,9 @@ void update()
         lv_label_set_text(U.light, "--");
         bar_set(U.light_bar, 0);
     }
-    if (capsule_selected(U.modes) != mode.load()) capsule_select(U.modes, mode.load(), true);
+    if (capsule_selected(U.modes) != mode.load()) {
+        capsule_select(U.modes, mode.load(), true);
+    }
     for (int i = 0; i < LEDS; ++i) {
         const uint32_t c = s.present ? s.leds[i] : 0;
         lv_obj_set_style_bg_color(U.leds[i], lv_color_hex(c ? c : 0x202020), 0);
@@ -445,9 +494,13 @@ extern "C" void tools_board_report(char *out, size_t cap)
     }
     const int64_t now = esp_timer_get_time();
     char motion[48];
-    if (s.motion) strlcpy(motion, "motion now", sizeof(motion));
-    else if (!s.motion_at) strlcpy(motion, "no motion seen since it was found", sizeof(motion));
-    else snprintf(motion, sizeof(motion), "last motion %lld s ago", (long long)((now - s.motion_at) / 1000000));
+    if (s.motion) {
+        strlcpy(motion, "motion now", sizeof(motion));
+    } else if (!s.motion_at) {
+        strlcpy(motion, "no motion seen since it was found", sizeof(motion));
+    } else {
+        snprintf(motion, sizeof(motion), "last motion %lld s ago", (long long)((now - s.motion_at) / 1000000));
+    }
     snprintf(out, cap,
              "Interaction board in the %s slot (%s buttons): left %s, right %s; %s; light %d%% (relative, %s); "
              "lights mode %s, colour #%06lX. Its infrared LED works as an LG TV remote.",
@@ -463,13 +516,18 @@ extern "C" bool tools_board_lights(const char *mode_name, const char *colour_nam
         const char *name;
         uint32_t rgb;
     } COLOURS[] = {{"orange", 0xFF8A40}, {"red", 0xFF3020},   {"green", 0x30FF50},  {"blue", 0x3070FF},
-                   {"purple", 0xA050FF}, {"white", 0xFFFFFF}, {"cyan", 0x30E0FF},   {"pink", 0xFF50A0},
-                   {"yellow", 0xFFD020}, {"warm", 0xFFA040},  {"warm white", 0xFFA040}};
+        {"purple", 0xA050FF}, {"white", 0xFFFFFF}, {"cyan", 0x30E0FF},   {"pink", 0xFF50A0},
+        {"yellow", 0xFFD020}, {"warm", 0xFFA040},  {"warm white", 0xFFA040}
+    };
     uint32_t rgb = 0;
     if (colour_name && *colour_name) {
-        if (colour_name[0] == '#' && strlen(colour_name) == 7) rgb = uint32_t(strtoul(colour_name + 1, nullptr, 16));
+        if (colour_name[0] == '#' && strlen(colour_name) == 7) {
+            rgb = uint32_t(strtoul(colour_name + 1, nullptr, 16));
+        }
         for (const auto &c : COLOURS)
-            if (!strcasecmp(colour_name, c.name)) rgb = c.rgb;
+            if (!strcasecmp(colour_name, c.name)) {
+                rgb = c.rgb;
+            }
         if (!rgb) {
             snprintf(out, cap, "Unknown colour \"%s\": use a name (red, green, blue, ...) or #RRGGBB.", colour_name);
             return false;
@@ -477,8 +535,12 @@ extern "C" bool tools_board_lights(const char *mode_name, const char *colour_nam
     }
     int m = rgb && (!mode_name || !*mode_name) ? COLOUR : -1;
     for (int i = 0; mode_name && i < MODES; ++i)
-        if (!strcasecmp(mode_name, MODE_KEYS[i]) || !strcasecmp(mode_name, MODE_NAMES[i])) m = i;
-    if (mode_name && !strcasecmp(mode_name, "color")) m = COLOUR;
+        if (!strcasecmp(mode_name, MODE_KEYS[i]) || !strcasecmp(mode_name, MODE_NAMES[i])) {
+            m = i;
+        }
+    if (mode_name && !strcasecmp(mode_name, "color")) {
+        m = COLOUR;
+    }
     if (m < 0) {
         snprintf(out, cap, "Unknown mode: use off, react, rainbow, night or colour.");
         return false;
@@ -498,10 +560,14 @@ extern "C" bool tools_board_ir(const char *key, int address, int command, char *
     bool found = false;
     if (key && *key) {
         for (const auto &k : LG_KEYS)
-            if (!strcasecmp(key, k.name)) c = k.command, found = true;
+            if (!strcasecmp(key, k.name)) {
+                c = k.command, found = true;
+            }
         if (!found) {
             std::string names;
-            for (const auto &k : LG_KEYS) names += names.empty() ? k.name : std::string(", ") + k.name;
+            for (const auto &k : LG_KEYS) {
+                names += names.empty() ? k.name : std::string(", ") + k.name;
+            }
             snprintf(out, cap, "Unknown key \"%s\". LG TV keys: %s.", key, names.c_str());
             return false;
         }
@@ -513,7 +579,10 @@ extern "C" bool tools_board_ir(const char *key, int address, int command, char *
         return false;
     }
     const bool ok = send_ir(a, c, 4000);
-    if (ok) snprintf(out, cap, "Sent %s (NEC 0x%02X/0x%02X) from the Interaction board's infrared LED.", key && *key ? key : "the code", a, c);
-    else snprintf(out, cap, "Could not send: %s", read_snapshot().present ? "the infrared LED failed." : "no Interaction board is plugged in.");
+    if (ok) {
+        snprintf(out, cap, "Sent %s (NEC 0x%02X/0x%02X) from the Interaction board's infrared LED.", key && *key ? key : "the code", a, c);
+    } else {
+        snprintf(out, cap, "Could not send: %s", read_snapshot().present ? "the infrared LED failed." : "no Interaction board is plugged in.");
+    }
     return ok;
 }

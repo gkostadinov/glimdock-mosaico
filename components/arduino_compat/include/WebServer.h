@@ -15,19 +15,29 @@ class WebServer {
 public:
     using Handler = std::function<void()>;
     explicit WebServer(int port = 80) : port_(port) {}
-    ~WebServer() { stop(); }
+    ~WebServer()
+    {
+        stop();
+    }
     void begin();
     void stop();
     void handleClient();
     void on(const String &uri, HTTPMethod method, Handler handler);
-    void onNotFound(Handler handler) { not_found_ = std::move(handler); }
+    void onNotFound(Handler handler)
+    {
+        not_found_ = std::move(handler);
+    }
     String arg(const String &name) const;
     bool hasArg(const String &name) const;
     void sendHeader(const String &name, const String &value, bool first = false);
     void send(int code, const char *content_type, const String &body);
 
 private:
-    struct Route { std::string uri; HTTPMethod method; Handler handler; };
+    struct Route {
+        std::string uri;
+        HTTPMethod method;
+        Handler handler;
+    };
     void parse_arguments(const std::string &encoded);
 
     int port_;

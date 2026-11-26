@@ -46,8 +46,15 @@ public:
     wifi_mode_t getMode();
     bool disconnect(bool wifi_off = false);
     bool reconnect();
-    bool persistent(bool) { return true; }  // always RAM-only
-    bool setAutoReconnect(bool enabled) { auto_reconnect_ = enabled; return true; }
+    bool persistent(bool)
+    {
+        return true;    // always RAM-only
+    }
+    bool setAutoReconnect(bool enabled)
+    {
+        auto_reconnect_ = enabled;
+        return true;
+    }
     bool setSleep(bool enabled);
     IPAddress localIP();
     String SSID();

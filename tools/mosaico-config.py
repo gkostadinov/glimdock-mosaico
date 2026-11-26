@@ -37,6 +37,7 @@ never appear on a command line or in a log: they reach the Mosaico CLI
 in-process (service 0x4744, method 40). --status prints addresses and which
 keys are set, never the keys.
 """
+
 import argparse
 import base64
 import contextlib
@@ -85,10 +86,22 @@ TEMPLATE = {
     },
     "files": {
         "shares": [
-            {"name": "Share", "host": "NAS-IP-ADDRESS", "share": "share", "user": "NAS-USER",
-             "password": "NAS-PASSWORD", "path": ""},
-            {"name": "Media", "host": "NAS-IP-ADDRESS", "share": "media", "user": "NAS-USER",
-             "password": "NAS-PASSWORD", "path": ""},
+            {
+                "name": "Share",
+                "host": "NAS-IP-ADDRESS",
+                "share": "share",
+                "user": "NAS-USER",
+                "password": "NAS-PASSWORD",  # pragma: allowlist secret (a placeholder)
+                "path": "",
+            },
+            {
+                "name": "Media",
+                "host": "NAS-IP-ADDRESS",
+                "share": "media",
+                "user": "NAS-USER",
+                "password": "NAS-PASSWORD",  # pragma: allowlist secret (a placeholder)
+                "path": "",
+            },
         ],
         "photos": {"share": "Media", "path": "Photos"},
     },
@@ -98,6 +111,7 @@ TEMPLATE = {
 def mosaico():
     sys.path.insert(0, str(WORKSPACE / "submodule/esp-mosaico-utils/mosaico-tools/tools"))
     from mosaico_cli.cli import main  # noqa: E402
+
     return main
 
 
@@ -109,8 +123,10 @@ def cli_run(main, argv):
 
 
 def rpc(main, payload: bytes) -> bytes:
-    code, out = cli_run(main, ["--json", "iris", "rpc", "--project", str(PROJECT), str(SERVICE), str(METHOD),
-                               "--payload-hex", payload.hex()])
+    code, out = cli_run(
+        main,
+        ["--json", "iris", "rpc", "--project", str(PROJECT), str(SERVICE), str(METHOD), "--payload-hex", payload.hex()],
+    )
     if code != 0:
         raise RuntimeError("the board did not answer")
     return base64.b64decode(json.loads(out)["response"].get("payload_base64") or "")
@@ -157,8 +173,11 @@ def load(path: str) -> dict:
                 if any(not isinstance(v, str) for v in x.values()) or not x.get("host") or not x.get("share"):
                     raise ValueError("files.shares: each share needs host and share, all values strings")
             photos = section.get("photos", {})
-            if not isinstance(photos, dict) or set(photos) - {"share", "path"} or \
-                    any(not isinstance(v, str) for v in photos.values()):
+            if (
+                not isinstance(photos, dict)
+                or set(photos) - {"share", "path"}
+                or any(not isinstance(v, str) for v in photos.values())
+            ):
                 raise ValueError('files.photos: expected {"share": "...", "path": "..."}')
         elif any(not isinstance(v, str) for v in section.values()):
             raise ValueError(f"{name}: values must be strings")
@@ -176,7 +195,7 @@ def send(main, config: dict) -> str:
         for start in range(0, len(frame), CHUNK):
             if reply != b"ok":
                 break
-            reply = rpc(main, b"\2" + bytes(frame[start:start + CHUNK]))
+            reply = rpc(main, b"\2" + bytes(frame[start : start + CHUNK]))
         if reply == b"ok":
             reply = rpc(main, b"\3")
     except Exception:  # noqa: BLE001
@@ -210,13 +229,17 @@ def follow_pairing(main) -> bool:
                 break
         time.sleep(1.5)
     ok = note.startswith("paired")
-    print(f"Home: {note or 'no answer'}" if ok else f"Home not paired: {note.removeprefix('failed: ') or 'no answer'}",
-          file=sys.stdout if ok else sys.stderr)
+    print(
+        f"Home: {note or 'no answer'}" if ok else f"Home not paired: {note.removeprefix('failed: ') or 'no answer'}",
+        file=sys.stdout if ok else sys.stderr,
+    )
     return ok
 
 
 def private_reader(path: str) -> bool:
-    spec = importlib.util.spec_from_file_location("private_reader_mosaico", Path(__file__).with_name("private-reader-mosaico.py"))
+    spec = importlib.util.spec_from_file_location(
+        "private_reader_mosaico", Path(__file__).with_name("private-reader-mosaico.py")
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     for attempt in range(6):  # Glimdock starts a little after the board

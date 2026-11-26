@@ -29,15 +29,17 @@ constexpr float del_0[] = {8.5f, 5.5f, 21, 5.5f, 21, 18.5f, 8.5f, 18.5f, 2.5f, 1
 constexpr float del_1[] = {11.5f, 9, 17.5f, 15}, del_2[] = {17.5f, 9, 11.5f, 15};
 constexpr home_icons::Path del_paths[] = {{del_0, 6}, {del_1, 2}, {del_2, 2}};
 constexpr home_icons::Icon SHIFT = {"kb-shift", shift_paths, 1}, LOCK = {"kb-lock", lock_paths, 2},
-                           DELETE = {"kb-delete", del_paths, 3};
+          DELETE = {"kb-delete", del_paths, 3};
 
 const char *const LOWER[3] = {"qwertyuiop", "asdfghjkl", "zxcvbnm"};
 const char *const NUM[3][10] = {{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
-                                {"-", "/", ":", ";", "(", ")", "$", "&", "@", "\""},
-                                {".", ",", "?", "!", "'", nullptr}};
+    {"-", "/", ":", ";", "(", ")", "$", "&", "@", "\""},
+    {".", ",", "?", "!", "'", nullptr}
+};
 const char *const SYM[3][10] = {{"[", "]", "{", "}", "#", "%", "^", "*", "+", "="},
-                                {"_", "\\", "|", "~", "<", ">", "\xE2\x82\xAC", "\xC2\xA3", "\xC2\xA5", "\xE2\x80\xA2"},
-                                {".", ",", "?", "!", "'", nullptr}};
+    {"_", "\\", "|", "~", "<", ">", "\xE2\x82\xAC", "\xC2\xA3", "\xC2\xA5", "\xE2\x80\xA2"},
+    {".", ",", "?", "!", "'", nullptr}
+};
 void (*haptic_tick)() = nullptr;
 
 enum class Layout : uint8_t { Letters, Numbers, Symbols };
@@ -56,17 +58,24 @@ struct State {
 
 State *state_of(lv_obj_t *o)
 {
-    while (o && !lv_obj_get_user_data(o)) o = lv_obj_get_parent(o);
+    while (o && !lv_obj_get_user_data(o)) {
+        o = lv_obj_get_parent(o);
+    }
     return o ? static_cast<State *>(lv_obj_get_user_data(o)) : nullptr;
 }
 
-lv_obj_t *key_label(lv_obj_t *k) { return lv_obj_get_child(k, 0); }
+lv_obj_t *key_label(lv_obj_t *k)
+{
+    return lv_obj_get_child(k, 0);
+}
 
 const char *key_text(State *s, int r, int c)
 {
     static char one[2];
     if (s->layout == Layout::Letters) {
-        if (c >= int(strlen(LOWER[r]))) return nullptr;
+        if (c >= int(strlen(LOWER[r]))) {
+            return nullptr;
+        }
         const bool up = s->cfg.caps_only || s->shift_state != Shift::Off;
         one[0] = char(up ? toupper(LOWER[r][c]) : LOWER[r][c]);
         one[1] = 0;
@@ -80,7 +89,9 @@ void paint(lv_obj_t *k, uint32_t bg, uint32_t fg)
 {
     lv_obj_set_style_bg_color(k, lv_color_hex(bg), 0);
     lv_obj_set_style_line_color(k, lv_color_hex(fg), 0);
-    if (lv_obj_get_child_count(k)) lv_obj_set_style_text_color(key_label(k), lv_color_hex(fg), 0);
+    if (lv_obj_get_child_count(k)) {
+        lv_obj_set_style_text_color(key_label(k), lv_color_hex(fg), 0);
+    }
 }
 
 // Centres the visible keys of a row; row 3 sits between shift and delete and
@@ -89,15 +100,23 @@ void reflow(State *s, int r)
 {
     int n = 0;
     for (int c = 0; c < 10; ++c)
-        if (s->rows[r][c] && !lv_obj_has_flag(s->rows[r][c], LV_OBJ_FLAG_HIDDEN)) ++n;
-    if (!n) return;
+        if (s->rows[r][c] && !lv_obj_has_flag(s->rows[r][c], LV_OBJ_FLAG_HIDDEN)) {
+            ++n;
+        }
+    if (!n) {
+        return;
+    }
     int kw = s->kw;
-    if (r == 2) kw = std::min((s->row3_inner - (n - 1) * GAP_X) / n, n < 7 ? s->kw * 3 / 2 : s->kw);
+    if (r == 2) {
+        kw = std::min((s->row3_inner - (n - 1) * GAP_X) / n, n < 7 ? s->kw * 3 / 2 : s->kw);
+    }
     const int row_w = n * kw + (n - 1) * GAP_X;
     int x = (s->w - row_w) / 2;
     for (int c = 0; c < 10; ++c) {
         lv_obj_t *k = s->rows[r][c];
-        if (!k || lv_obj_has_flag(k, LV_OBJ_FLAG_HIDDEN)) continue;
+        if (!k || lv_obj_has_flag(k, LV_OBJ_FLAG_HIDDEN)) {
+            continue;
+        }
         lv_obj_set_x(k, x);
         lv_obj_set_width(k, kw);
         x += kw + GAP_X;
@@ -110,7 +129,9 @@ void refresh(State *s)
     for (int r = 0; r < 3; ++r)
         for (int c = 0; c < 10; ++c) {
             lv_obj_t *k = s->rows[r][c];
-            if (!k) continue;
+            if (!k) {
+                continue;
+            }
             const char *t = key_text(s, r, c);
             if (t) {
                 lv_label_set_text(key_label(k), t);
@@ -119,7 +140,9 @@ void refresh(State *s)
                 lv_obj_add_flag(k, LV_OBJ_FLAG_HIDDEN);
             }
         }
-    for (int r = 1; r < 3; ++r) reflow(s, r);
+    for (int r = 1; r < 3; ++r) {
+        reflow(s, r);
+    }
     const bool letters = s->layout == Layout::Letters;
     // Row 3 on the number pages: "#+=" or "123" where shift sits.
     lv_obj_set_user_data(s->shift, nullptr);
@@ -136,12 +159,16 @@ void refresh(State *s)
 
 void tick()
 {
-    if (haptic_tick) haptic_tick();
+    if (haptic_tick) {
+        haptic_tick();
+    }
 }
 
 void type(State *s, const char *text)
 {
-    if (!s->ta) return;
+    if (!s->ta) {
+        return;
+    }
     lv_textarea_add_text(s->ta, text);
     if (s->layout == Layout::Letters && s->shift_state == Shift::Once) {
         s->shift_state = Shift::Off;
@@ -152,7 +179,9 @@ void type(State *s, const char *text)
 // Automatic capitals: at the start, and after ". ", "! " or "? ".
 void auto_caps(State *s)
 {
-    if (!s->cfg.auto_caps || s->cfg.caps_only || s->layout != Layout::Letters || s->shift_state == Shift::Lock) return;
+    if (!s->cfg.auto_caps || s->cfg.caps_only || s->layout != Layout::Letters || s->shift_state == Shift::Lock) {
+        return;
+    }
     const char *t = s->ta ? lv_textarea_get_text(s->ta) : "";
     const size_t n = strlen(t);
     const bool start = n == 0 || (n >= 2 && t[n - 1] == ' ' && strchr(".!?", t[n - 2]));
@@ -229,10 +258,15 @@ void shift_cb(lv_event_t *e)
         refresh(s);
         return;
     }
-    if (s->cfg.caps_only) return;
+    if (s->cfg.caps_only) {
+        return;
+    }
     const uint32_t now = lv_tick_get();
-    if (s->shift_state == Shift::Once && now - s->last_shift < 350) s->shift_state = Shift::Lock;  // double tap
-    else s->shift_state = s->shift_state == Shift::Off ? Shift::Once : Shift::Off;
+    if (s->shift_state == Shift::Once && now - s->last_shift < 350) {
+        s->shift_state = Shift::Lock;    // double tap
+    } else {
+        s->shift_state = s->shift_state == Shift::Off ? Shift::Once : Shift::Off;
+    }
     s->last_shift = now;
     refresh(s);
 }
@@ -240,9 +274,13 @@ void shift_cb(lv_event_t *e)
 void delete_cb(lv_event_t *e)
 {
     State *s = state_of(lv_obj_get_parent(lv_event_get_current_target_obj(e)));
-    if (!s->ta) return;
+    if (!s->ta) {
+        return;
+    }
     lv_textarea_delete_char(s->ta);
-    if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED_REPEAT) tick();
+    if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED_REPEAT) {
+        tick();
+    }
     auto_caps(s);
 }
 
@@ -257,7 +295,9 @@ void mode_cb(lv_event_t *e)
 void space_cb(lv_event_t *e)
 {
     State *s = state_of(lv_obj_get_parent(lv_event_get_current_target_obj(e)));
-    if (!s->ta) return;
+    if (!s->ta) {
+        return;
+    }
     const char *t = lv_textarea_get_text(s->ta);
     const size_t n = strlen(t);
     const uint32_t now = lv_tick_get();
@@ -279,7 +319,9 @@ void space_cb(lv_event_t *e)
 void action_cb(lv_event_t *e)
 {
     State *s = state_of(lv_obj_get_parent(lv_event_get_current_target_obj(e)));
-    if (s->ta) lv_obj_send_event(s->ta, LV_EVENT_READY, nullptr);
+    if (s->ta) {
+        lv_obj_send_event(s->ta, LV_EVENT_READY, nullptr);
+    }
 }
 
 void draw_glyph(lv_event_t *e)
@@ -287,8 +329,12 @@ void draw_glyph(lv_event_t *e)
     lv_obj_t *k = lv_event_get_current_target_obj(e);
     auto *icon = static_cast<const home_icons::Icon *>(lv_event_get_user_data(e));
     State *s = state_of(lv_obj_get_parent(k));
-    if (icon == &SHIFT && s && s->layout != Layout::Letters) return;  // shows "#+=" / "123" instead
-    if (icon == &SHIFT && s && s->shift_state == Shift::Lock) icon = &LOCK;
+    if (icon == &SHIFT && s && s->layout != Layout::Letters) {
+        return;    // shows "#+=" / "123" instead
+    }
+    if (icon == &SHIFT && s && s->shift_state == Shift::Lock) {
+        icon = &LOCK;
+    }
     lv_area_t a;
     lv_obj_get_coords(k, &a);
     const int size = 26, x = a.x1 + (lv_area_get_width(&a) - size) / 2, y = a.y1 + (lv_area_get_height(&a) - size) / 2;
@@ -313,10 +359,16 @@ lv_obj_t *make_key(State *s, int x, int y, int w, int h, uint32_t bg, const char
     return k;
 }
 
-void free_state(lv_event_t *e) { delete static_cast<State *>(lv_event_get_user_data(e)); }
+void free_state(lv_event_t *e)
+{
+    delete static_cast<State *>(lv_event_get_user_data(e));
+}
 }  // namespace
 
-void keyboard_set_haptic(void (*tick)()) { haptic_tick = tick; }
+void keyboard_set_haptic(void (*tick)())
+{
+    haptic_tick = tick;
+}
 
 lv_obj_t *keyboard(lv_obj_t *parent, lv_obj_t *textarea, int x, int y, int w, int h, const KeyboardConfig &cfg)
 {
@@ -338,7 +390,9 @@ lv_obj_t *keyboard(lv_obj_t *parent, lv_obj_t *textarea, int x, int y, int w, in
         int kx = (w - row_w) / 2;
         for (int c = 0; c < n; ++c) {
             s->rows[r][c] = make_key(s, kx, r * (kh + GAP_Y), kw, kh, KEY, "", 21, false);
-            for (lv_event_code_t code : {LV_EVENT_PRESSED, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST})
+            for (lv_event_code_t code : {
+                        LV_EVENT_PRESSED, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST
+                    })
                 lv_obj_add_event_cb(s->rows[r][c], char_cb, code, nullptr);
             kx += kw + GAP_X;
         }
@@ -351,7 +405,9 @@ lv_obj_t *keyboard(lv_obj_t *parent, lv_obj_t *textarea, int x, int y, int w, in
     lv_obj_add_event_cb(s->shift, shift_cb, LV_EVENT_CLICKED, nullptr);
     s->del = make_key(s, w - side - fw, y3, fw, kh, FN, "", 15, true);
     lv_obj_add_event_cb(s->del, draw_glyph, LV_EVENT_DRAW_MAIN_END, const_cast<home_icons::Icon *>(&DELETE));
-    for (lv_event_code_t code : {LV_EVENT_PRESSED, LV_EVENT_LONG_PRESSED_REPEAT})
+    for (lv_event_code_t code : {
+                LV_EVENT_PRESSED, LV_EVENT_LONG_PRESSED_REPEAT
+            })
         lv_obj_add_event_cb(s->del, delete_cb, code, nullptr);
     {
         const int inner = w - 2 * side - 2 * fw - 2 * GAP_X - 2 * 4;
@@ -361,7 +417,9 @@ lv_obj_t *keyboard(lv_obj_t *parent, lv_obj_t *textarea, int x, int y, int w, in
         int kx = (w - row_w) / 2;
         for (int c = 0; c < n; ++c) {
             s->rows[2][c] = make_key(s, kx, y3, w3, kh, KEY, "", 21, false);
-            for (lv_event_code_t code : {LV_EVENT_PRESSED, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST})
+            for (lv_event_code_t code : {
+                        LV_EVENT_PRESSED, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST
+                    })
                 lv_obj_add_event_cb(s->rows[2][c], char_cb, code, nullptr);
             kx += w3 + GAP_X;
         }
@@ -377,8 +435,12 @@ lv_obj_t *keyboard(lv_obj_t *parent, lv_obj_t *textarea, int x, int y, int w, in
     const int sx = inset + mw + GAP_X, sw = w - inset - aw - GAP_X - sx;
     s->space = make_key(s, sx, y4, sw, kh, KEY, "space", 15, false);
     lv_obj_add_event_cb(s->space, space_cb, LV_EVENT_CLICKED, nullptr);
-    for (lv_obj_t *k : {s->shift, s->del, s->mode, s->action, s->space})
-        for (lv_event_code_t code : {LV_EVENT_PRESSED, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST})
+    for (lv_obj_t *k : {
+                s->shift, s->del, s->mode, s->action, s->space
+            })
+        for (lv_event_code_t code : {
+                    LV_EVENT_PRESSED, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST
+                })
             lv_obj_add_event_cb(k, fn_press, code, nullptr);
     // the magnified key, over the key being pressed
     s->bubble = box(s->kb, 0, 0, 10, 10, 12);

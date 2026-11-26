@@ -50,20 +50,30 @@ struct {
 void load_prefs()
 {
     static bool loaded = false;
-    if (loaded) return;
+    if (loaded) {
+        return;
+    }
     loaded = true;
     nvs_handle_t h;
-    if (nvs_open(PREFS, NVS_READONLY, &h) != ESP_OK) return;
+    if (nvs_open(PREFS, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
     uint8_t v;
-    if (nvs_get_u8(h, "autorot", &v) == ESP_OK) O.enabled = v;
-    if (nvs_get_u8(h, "imumap", &v) == ESP_OK) O.map = v;
+    if (nvs_get_u8(h, "autorot", &v) == ESP_OK) {
+        O.enabled = v;
+    }
+    if (nvs_get_u8(h, "imumap", &v) == ESP_OK) {
+        O.map = v;
+    }
     nvs_close(h);
 }
 
 void save_u8(const char *key, uint8_t v)
 {
     nvs_handle_t h;
-    if (nvs_open(PREFS, NVS_READWRITE, &h) != ESP_OK) return;
+    if (nvs_open(PREFS, NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
     nvs_set_u8(h, key, v);
     nvs_commit(h);
     nvs_close(h);
@@ -84,35 +94,51 @@ int pick(int current)
 {
     float gx, gy;
     gravity(&gx, &gy);
-    if (hypotf(gx, gy) < MIN_TILT_G) return -1;
+    if (hypotf(gx, gy) < MIN_TILT_G) {
+        return -1;
+    }
     float deg = atan2f(gx, gy) * 180.0f / float(M_PI);  // 0 bottom, 90 right
-    if (deg < 0) deg += 360.0f;
+    if (deg < 0) {
+        deg += 360.0f;
+    }
     const int nearest = (int(lroundf(deg / 90.0f)) % 4) * 90;
     float off = fabsf(deg - float(nearest));
-    if (off > 180.0f) off = 360.0f - off;
-    if (nearest != current && off > CAPTURE_DEG) return -1;
+    if (off > 180.0f) {
+        off = 360.0f - off;
+    }
+    if (nearest != current && off > CAPTURE_DEG) {
+        return -1;
+    }
     return nearest;
 }
 
 // ---- the turn ----------------------------------------------------------------------------
 void finish_turn()
 {
-    if (O.overlay) lv_obj_delete(O.overlay);
+    if (O.overlay) {
+        lv_obj_delete(O.overlay);
+    }
     O.overlay = O.image = nullptr;
-    if (O.snapshot) lv_draw_buf_destroy(O.snapshot);
+    if (O.snapshot) {
+        lv_draw_buf_destroy(O.snapshot);
+    }
     O.snapshot = nullptr;
 }
 
 void spin_cb(void *, int32_t p)  // p: 0..1024
 {
-    if (!O.image) return;
+    if (!O.image) {
+        return;
+    }
     const float t = p / 1024.0f;
     lv_image_set_rotation(O.image, int32_t(lroundf(O.from * (1.0f - t))));
 }
 
 void fade_cb(void *, int32_t v)
 {
-    if (O.overlay) lv_obj_set_style_opa(O.overlay, lv_opa_t(v), 0);
+    if (O.overlay) {
+        lv_obj_set_style_opa(O.overlay, lv_opa_t(v), 0);
+    }
 }
 
 void spun_cb(lv_anim_t *)
@@ -123,22 +149,30 @@ void spun_cb(lv_anim_t *)
     lv_anim_set_exec_cb(&a, fade_cb);
     lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
     lv_anim_set_duration(&a, 90);
-    lv_anim_set_completed_cb(&a, [](lv_anim_t *) { finish_turn(); });
+    lv_anim_set_completed_cb(&a, [](lv_anim_t *) {
+        finish_turn();
+    });
     lv_anim_start(&a);
 }
 
 void turn_to(int next)
 {
     const int previous = int(bsp_display_get_rotation());
-    if (next == previous) return;
+    if (next == previous) {
+        return;
+    }
     // Content turns clockwise by the rotation step on the glass; start the
     // overlay that far the other way so the first new frame looks unchanged,
     // the short way round.
     int delta = (next - previous + 360) % 360;
-    if (delta > 180) delta -= 360;
+    if (delta > 180) {
+        delta -= 360;
+    }
     // Freeze rendering while the overlay goes up, so no frame shows it turned
     // on the old orientation.
-    if (esp_lv_adapter_pause(1000) != ESP_OK) return;
+    if (esp_lv_adapter_pause(1000) != ESP_OK) {
+        return;
+    }
     if (bsp_display_lock(1000)) {
         lv_anim_delete(&O, nullptr);
         finish_turn();
@@ -168,7 +202,9 @@ void turn_to(int next)
     frame_sync_wait_idle(200);  // not while a frame is still going out
     const esp_err_t err = bsp_display_set_rotation(bsp_display_rotation_t(next));
     esp_lv_adapter_resume();
-    if (err != ESP_OK) ESP_LOGW(TAG, "rotation %d failed: %s", next, esp_err_to_name(err));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "rotation %d failed: %s", next, esp_err_to_name(err));
+    }
     // The overlay is up and turned: it must be spun or removed, so keep trying
     // for the lock while LVGL is busy.
     bool locked = false;
@@ -209,11 +245,15 @@ void task(void *)
             O.a[2] += k * (z - O.a[2]);
             // Kept while flat or near a diagonal (pick's -1).
             const int board = pick(O.board);
-            if (board >= 0) O.board = board;
+            if (board >= 0) {
+                O.board = board;
+            }
         }
         const int current = int(bsp_display_get_rotation());
         int want = O.forced;
-        if (want < 0) want = O.enabled && O.imu ? pick(current) : (O.enabled ? -1 : 0);
+        if (want < 0) {
+            want = O.enabled && O.imu ? pick(current) : (O.enabled ? -1 : 0);
+        }
         if (want < 0 || want == current) {
             candidate = -1;
             continue;
@@ -224,7 +264,9 @@ void task(void *)
             since = now;
             continue;
         }
-        if (O.forced < 0 && now - since < pdMS_TO_TICKS(SETTLE_MS)) continue;
+        if (O.forced < 0 && now - since < pdMS_TO_TICKS(SETTLE_MS)) {
+            continue;
+        }
         candidate = -1;
         turn_to(want);
     }
@@ -237,12 +279,16 @@ esp_err_t rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capaci
 {
     if (request->payload_size >= 2) {
         const uint8_t cmd = request->payload[0], v = request->payload[1];
-        if (cmd == 1) O.forced = v < 4 ? v * 90 : -1;
-        else if (cmd == 2) orientation_set_enabled(v != 0);
-        else if (cmd == 3) {
+        if (cmd == 1) {
+            O.forced = v < 4 ? v * 90 : -1;
+        } else if (cmd == 2) {
+            orientation_set_enabled(v != 0);
+        } else if (cmd == 3) {
             O.map = v;
             save_u8("imumap", v);
-        } else return ESP_ERR_INVALID_ARG;
+        } else {
+            return ESP_ERR_INVALID_ARG;
+        }
     }
     float gx, gy;
     gravity(&gx, &gy);
@@ -257,13 +303,17 @@ esp_err_t rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capaci
 
 void orientation_start()
 {
-    if (O.task) return;
+    if (O.task) {
+        return;
+    }
     load_prefs();
     if (bsp_imu_init() == ESP_OK) {
         bsp_imu_config_t config = BSP_IMU_CONFIG_DEFAULT();
         O.imu = bsp_imu_start(&config) == ESP_OK;
     }
-    if (!O.imu) ESP_LOGW(TAG, "no IMU; auto-rotate off");
+    if (!O.imu) {
+        ESP_LOGW(TAG, "no IMU; auto-rotate off");
+    }
     esp_iris_rpc_register(RPC_SERVICE, RPC_ORIENT, rpc, nullptr);
     // The turn renders a snapshot of the screen on this task (TrueType glyphs
     // included), which needs as much stack as the LVGL task; it never writes
@@ -301,7 +351,9 @@ int orientation_board_rotation()
 
 bool orientation_gravity(float *x, float *y, float *z)
 {
-    if (!O.imu) return false;
+    if (!O.imu) {
+        return false;
+    }
     *x = O.a[0], *y = O.a[1], *z = O.a[2];
     orientation_to_ui(x, y, z);
     return true;

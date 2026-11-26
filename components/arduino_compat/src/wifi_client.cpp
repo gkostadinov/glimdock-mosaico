@@ -72,7 +72,7 @@ int WiFiClient::connect(const char *host, uint16_t port, int32_t timeout_ms)
         int error = 0;
         socklen_t length = sizeof(error);
         if (select(fd + 1, nullptr, &writable, nullptr, &timeout) <= 0 ||
-            getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) != 0 || error != 0) {
+                getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) != 0 || error != 0) {
             close(fd);
             return 0;
         }

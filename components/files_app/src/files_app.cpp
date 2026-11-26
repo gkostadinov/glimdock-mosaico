@@ -80,16 +80,22 @@ std::recursive_mutex smb_lock;
 void load_shares()
 {
     nvs_handle_t h;
-    if (nvs_open(NS, NVS_READONLY, &h) != ESP_OK) return;
+    if (nvs_open(NS, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
     size_t n = 0;
     std::string text;
     if (nvs_get_str(h, "shares", nullptr, &n) == ESP_OK && n > 1) {
         text.resize(n);
-        if (nvs_get_str(h, "shares", text.data(), &n) != ESP_OK) text.clear();
+        if (nvs_get_str(h, "shares", text.data(), &n) != ESP_OK) {
+            text.clear();
+        }
     }
     nvs_close(h);
     JsonDocument doc;
-    if (text.empty() || deserializeJson(doc, text.c_str())) return;
+    if (text.empty() || deserializeJson(doc, text.c_str())) {
+        return;
+    }
     std::vector<Share> list;
     // Stored as {"shares": [...], "photos": {...}} (or, before, the bare list).
     JsonArrayConst arr = doc.is<JsonArray>() ? doc.as<JsonArrayConst>() : doc["shares"].as<JsonArrayConst>();
@@ -124,10 +130,13 @@ bool text_name(const std::string &n)
 {
     static const char *const EXT[] = {".txt", ".md", ".json", ".log", ".yaml", ".yml", ".csv", ".ini", ".conf", ".cfg",
                                       ".py", ".sh", ".c", ".h", ".cpp", ".js", ".ts", ".toml", ".xml", ".html", ".css",
-                                      ".lua", ".rs", ".go", ".env.example", ".service"};
+                                      ".lua", ".rs", ".go", ".env.example", ".service"
+                                     };
     for (const char *e : EXT) {
         const size_t l = strlen(e);
-        if (n.size() > l && strcasecmp(n.c_str() + n.size() - l, e) == 0) return true;
+        if (n.size() > l && strcasecmp(n.c_str() + n.size() - l, e) == 0) {
+            return true;
+        }
     }
     return n == "README" || n == "LICENSE" || n == "Makefile" || n == "Dockerfile";
 }
@@ -136,7 +145,10 @@ bool text_name(const std::string &n)
 struct Image {
     lv_image_dsc_t dsc = {};
     uint8_t *px = nullptr;
-    ~Image() { heap_caps_free(px); }
+    ~Image()
+    {
+        heap_caps_free(px);
+    }
 };
 
 struct Job {
@@ -169,7 +181,9 @@ struct {
 
 void smb_close()
 {
-    if (!smb.ctx) return;
+    if (!smb.ctx) {
+        return;
+    }
     smb2_disconnect_share(smb.ctx);
     smb2_destroy_context(smb.ctx);
     smb.ctx = nullptr;
@@ -178,7 +192,9 @@ void smb_close()
 
 bool smb_connect(int index, std::string *error)
 {
-    if (smb.ctx && smb.share == index) return true;
+    if (smb.ctx && smb.share == index) {
+        return true;
+    }
     smb_close();
     Share s;
     {
@@ -196,8 +212,12 @@ bool smb_connect(int index, std::string *error)
     }
     smb2_set_timeout(smb.ctx, 5);  // a NAS that does not answer fails in seconds, not half a minute
     smb2_set_security_mode(smb.ctx, SMB2_NEGOTIATE_SIGNING_ENABLED);
-    if (!s.user.empty()) smb2_set_user(smb.ctx, s.user.c_str());
-    if (!s.password.empty()) smb2_set_password(smb.ctx, s.password.c_str());
+    if (!s.user.empty()) {
+        smb2_set_user(smb.ctx, s.user.c_str());
+    }
+    if (!s.password.empty()) {
+        smb2_set_password(smb.ctx, s.password.c_str());
+    }
     std::fill(s.password.begin(), s.password.end(), '\0');
     ESP_LOGI(TAG, "SMB: connecting to %s/%s", s.host.c_str(), s.share.c_str());
     const int64_t t0 = esp_timer_get_time();
@@ -206,8 +226,8 @@ bool smb_connect(int index, std::string *error)
     if (rc < 0) {
         const std::string why = smb2_get_error(smb.ctx);
         *error = why.find("Timeout") != std::string::npos
-                     ? "The NAS doesn't answer from the board's network (" + s.host + "). A router or firewall may block it."
-                     : "Could not open the share: " + why;
+                 ? "The NAS doesn't answer from the board's network (" + s.host + "). A router or firewall may block it."
+                 : "Could not open the share: " + why;
         ESP_LOGW(TAG, "SMB %s/%s: %s", s.host.c_str(), s.share.c_str(), smb2_get_error(smb.ctx));
         smb2_destroy_context(smb.ctx);
         smb.ctx = nullptr;
@@ -220,15 +240,21 @@ bool smb_connect(int index, std::string *error)
 
 std::string join(const std::string &a, const std::string &b)
 {
-    if (a.empty()) return b;
-    if (b.empty()) return a;
+    if (a.empty()) {
+        return b;
+    }
+    if (b.empty()) {
+        return a;
+    }
     return a.back() == '/' ? a + b : a + "/" + b;
 }
 
 std::string smb_path(const Source &src, const std::string &path)
 {
     std::string p = join(src.root, path);
-    while (!p.empty() && p.front() == '/') p.erase(p.begin());
+    while (!p.empty() && p.front() == '/') {
+        p.erase(p.begin());
+    }
     return p;
 }
 
@@ -241,7 +267,9 @@ bool list_dir(const Source &src, const std::string &path, std::vector<Entry> &ou
             return false;
         }
         while (dirent *e = readdir(d)) {
-            if (e->d_name[0] == '.') continue;
+            if (e->d_name[0] == '.') {
+                continue;
+            }
             Entry en;
             en.name = e->d_name;
             struct stat st;
@@ -260,7 +288,9 @@ bool list_dir(const Source &src, const std::string &path, std::vector<Entry> &ou
     }
     std::lock_guard<std::recursive_mutex> g(smb_lock);
     for (int attempt = 0; attempt < 2; ++attempt) {
-        if (!smb_connect(src.share, error)) return false;
+        if (!smb_connect(src.share, error)) {
+            return false;
+        }
         const int64_t t0 = esp_timer_get_time();
         smb2dir *d = smb2_opendir(smb.ctx, smb_path(src, path).c_str());
         ESP_LOGI(TAG, "SMB: opendir \"%s\" %s after %d ms", smb_path(src, path).c_str(), d ? "ok" : smb2_get_error(smb.ctx),
@@ -271,7 +301,9 @@ bool list_dir(const Source &src, const std::string &path, std::vector<Entry> &ou
             continue;
         }
         while (smb2dirent *e = smb2_readdir(smb.ctx, d)) {
-            if (!e->name || e->name[0] == '.') continue;
+            if (!e->name || e->name[0] == '.') {
+                continue;
+            }
             out.push_back({e->name, e->st.smb2_type == SMB2_TYPE_DIRECTORY, e->st.smb2_size, uint32_t(e->st.smb2_mtime)});
         }
         smb2_closedir(smb.ctx, d);
@@ -300,11 +332,15 @@ bool read_file(const Source &src, const std::string &path, size_t max, std::vect
         out.resize(n);
         const bool ok = fread(out.data(), 1, n, f) == n;
         fclose(f);
-        if (!ok) *error = "The file could not be read.";
+        if (!ok) {
+            *error = "The file could not be read.";
+        }
         return ok;
     }
     std::lock_guard<std::recursive_mutex> g(smb_lock);
-    if (!smb_connect(src.share, error)) return false;
+    if (!smb_connect(src.share, error)) {
+        return false;
+    }
     smb2fh *fh = smb2_open(smb.ctx, smb_path(src, path).c_str(), O_RDONLY);
     if (!fh) {
         *error = std::string("The file cannot be opened: ") + smb2_get_error(smb.ctx);
@@ -320,7 +356,9 @@ bool read_file(const Source &src, const std::string &path, size_t max, std::vect
     const uint32_t chunk = std::max<uint32_t>(4096, std::min<uint32_t>(smb2_get_max_read_size(smb.ctx), 256 * 1024));
     while (got < n) {
         const int r = smb2_read(smb.ctx, fh, out.data() + got, uint32_t(std::min<size_t>(chunk, n - got)));
-        if (r <= 0) break;
+        if (r <= 0) {
+            break;
+        }
         got += size_t(r);
     }
     smb2_close(smb.ctx, fh);
@@ -338,7 +376,9 @@ std::shared_ptr<Image> fit(const uint8_t *src, int w, int h, int bpp)
     const int ow = std::max(1, int(w * k)), oh = std::max(1, int(h * k));
     auto img = std::make_shared<Image>();
     img->px = static_cast<uint8_t *>(heap_caps_malloc(size_t(ow) * oh * bpp, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (!img->px) return nullptr;
+    if (!img->px) {
+        return nullptr;
+    }
     for (int y = 0; y < oh; ++y) {
         const int y0 = y * h / oh, y1 = std::max(y0 + 1, (y + 1) * h / oh);
         for (int x = 0; x < ow; ++x) {
@@ -351,7 +391,9 @@ std::shared_ptr<Image> fit(const uint8_t *src, int w, int h, int bpp)
                         const uint16_t v = uint16_t(p[0] | p[1] << 8);
                         acc[0] += v >> 11, acc[1] += (v >> 5) & 63, acc[2] += v & 31;
                     } else {
-                        for (int c = 0; c < 4; ++c) acc[c] += p[c];
+                        for (int c = 0; c < 4; ++c) {
+                            acc[c] += p[c];
+                        }
                     }
                 }
             uint8_t *o = img->px + (size_t(y) * ow + x) * bpp;
@@ -359,7 +401,9 @@ std::shared_ptr<Image> fit(const uint8_t *src, int w, int h, int bpp)
                 const uint16_t v = uint16_t((acc[0] / n) << 11 | (acc[1] / n) << 5 | (acc[2] / n));
                 o[0] = uint8_t(v), o[1] = uint8_t(v >> 8);
             } else {
-                for (int c = 0; c < 4; ++c) o[c] = uint8_t(acc[c] / n);
+                for (int c = 0; c < 4; ++c) {
+                    o[c] = uint8_t(acc[c] / n);
+                }
             }
         }
     }
@@ -381,7 +425,9 @@ std::shared_ptr<Image> decode_jpeg(const std::vector<uint8_t> &data, std::string
     jpeg_dec_io_t io = {};
     jpeg_dec_header_info_t header = {};
     // The size first, to let the decoder scale big photos down (to 1/8).
-    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) return nullptr;
+    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) {
+        return nullptr;
+    }
     io.inbuf = const_cast<uint8_t *>(data.data());
     io.inbuf_len = int(data.size());
     const bool parsed = jpeg_dec_parse_header(dec, &io, &header) == JPEG_ERR_OK;
@@ -396,14 +442,17 @@ std::shared_ptr<Image> decode_jpeg(const std::vector<uint8_t> &data, std::string
         const float kk = std::max(k, std::max(8.0f / w, 8.0f / h));
         cfg.scale.width = uint16_t(std::max(8, int(w * std::min(1.0f, std::max(kk, float(VIEW) / std::max(w, h)))) / 8 * 8));
         cfg.scale.height = uint16_t(std::max(8, int(h * float(cfg.scale.width) / w) / 8 * 8));
-        if (cfg.scale.width * 8 < w || cfg.scale.height * 8 < h)  // the decoder's limit
+        if (cfg.scale.width * 8 < w || cfg.scale.height * 8 < h) { // the decoder's limit
             cfg.scale.width = uint16_t((w / 8 + 7) / 8 * 8), cfg.scale.height = uint16_t((h / 8 + 7) / 8 * 8);
+        }
         w = cfg.scale.width, h = cfg.scale.height;
     } else if (size_t(w) * h > 2048u * 2048u) {
         *error = "This image is too large.";
         return nullptr;
     }
-    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) return nullptr;
+    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) {
+        return nullptr;
+    }
     io = {};
     io.inbuf = const_cast<uint8_t *>(data.data());
     io.inbuf_len = int(data.size());
@@ -413,8 +462,11 @@ std::shared_ptr<Image> decode_jpeg(const std::vector<uint8_t> &data, std::string
         auto *raw = static_cast<uint8_t *>(jpeg_calloc_align(size_t(outlen), 16));
         if (raw) {
             io.outbuf = raw;
-            if (jpeg_dec_process(dec, &io) == JPEG_ERR_OK) img = fit(raw, w, h, 2);
-            else *error = "This JPEG could not be decoded.";
+            if (jpeg_dec_process(dec, &io) == JPEG_ERR_OK) {
+                img = fit(raw, w, h, 2);
+            } else {
+                *error = "This JPEG could not be decoded.";
+            }
             jpeg_free_align(raw);
         } else {
             *error = "Not enough memory for this image.";
@@ -441,8 +493,11 @@ std::shared_ptr<Image> decode_png(const std::vector<uint8_t> &data, std::string 
     const size_t bytes = PNG_IMAGE_SIZE(png);
     auto *raw = static_cast<uint8_t *>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     std::shared_ptr<Image> img;
-    if (raw && png_image_finish_read(&png, nullptr, raw, 0, nullptr)) img = fit(raw, int(png.width), int(png.height), 4);
-    else *error = "This PNG could not be decoded.";
+    if (raw && png_image_finish_read(&png, nullptr, raw, 0, nullptr)) {
+        img = fit(raw, int(png.width), int(png.height), 4);
+    } else {
+        *error = "This PNG could not be decoded.";
+    }
     heap_caps_free(raw);
     png_image_free(&png);
     return img;
@@ -454,10 +509,13 @@ void run(const Job &job)
     r->serial = job.serial;
     r->op = job.op;
     if (job.op == Job::LIST) {
-        if (job.src.kind == Kind::Local && !mosaico_storage_mount()) r->error = mosaico_storage_status();
-        else if (list_dir(job.src, job.path, r->entries, &r->error)) {
-            std::sort(r->entries.begin(), r->entries.end(), [](const Entry &a, const Entry &b) {
-                if (a.dir != b.dir) return a.dir;
+        if (job.src.kind == Kind::Local && !mosaico_storage_mount()) {
+            r->error = mosaico_storage_status();
+        } else if (list_dir(job.src, job.path, r->entries, &r->error)) {
+            std::sort(r->entries.begin(), r->entries.end(), [](const Entry & a, const Entry & b) {
+                if (a.dir != b.dir) {
+                    return a.dir;
+                }
                 return strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
             });
         }
@@ -471,13 +529,17 @@ void run(const Job &job)
                 r->error = "This image is larger than 12 MB.";
             } else if (image) {
                 r->image = data.size() > 3 && data[0] == 0xFF && data[1] == 0xD8 ? decode_jpeg(data, &r->error)
-                                                                                  : decode_png(data, &r->error);
-                if (!r->image && r->error.empty()) r->error = "Not enough memory for this image.";
+                           : decode_png(data, &r->error);
+                if (!r->image && r->error.empty()) {
+                    r->error = "Not enough memory for this image.";
+                }
             } else {
                 r->text.assign(data.begin(), data.end());
                 // Show text only: NULs and other control bytes become dots.
                 for (char &c : r->text)
-                    if (c == '\0' || (uint8_t(c) < 32 && c != '\n' && c != '\t' && c != '\r')) c = '.';
+                    if (c == '\0' || (uint8_t(c) < 32 && c != '\n' && c != '\t' && c != '\r')) {
+                        c = '.';
+                    }
             }
         }
     }
@@ -497,7 +559,9 @@ void worker(void *)
             smb_close();  // idle for a minute: let the share go
             continue;
         }
-        if (job->serial == serial.load()) run(*job);  // skip jobs already superseded
+        if (job->serial == serial.load()) {
+            run(*job);    // skip jobs already superseded
+        }
         delete job;
     }
 }
@@ -505,7 +569,9 @@ void worker(void *)
 void post(Job::Op op, const Source &src, const std::string &path)
 {
     auto *job = new Job{op, src, path, ++serial};
-    if (xQueueSend(jobs, &job, 0) != pdTRUE) delete job;
+    if (xQueueSend(jobs, &job, 0) != pdTRUE) {
+        delete job;
+    }
 }
 
 // ---- photos on the NAS (the camera's store) ----------------------------------------------------
@@ -513,10 +579,13 @@ void post(Job::Op op, const Source &src, const std::string &path)
 int photo_share()
 {
     std::lock_guard<std::mutex> g(cfg_lock);
-    if (shares.empty()) return -1;
+    if (shares.empty()) {
+        return -1;
+    }
     for (size_t i = 0; i < shares.size(); ++i)
-        if (!photo_dest.share.empty() && (photo_dest.share == shares[i].name || photo_dest.share == shares[i].share))
+        if (!photo_dest.share.empty() && (photo_dest.share == shares[i].name || photo_dest.share == shares[i].share)) {
             return int(i);
+        }
     return photo_dest.share.empty() ? 0 : -1;
 }
 
@@ -524,17 +593,25 @@ std::string photo_folder()
 {
     std::lock_guard<std::mutex> g(cfg_lock);
     std::string p = photo_dest.path.empty() ? DEFAULT_PHOTO_PATH : photo_dest.path;
-    while (!p.empty() && (p.front() == '/' || p.front() == '\\')) p.erase(p.begin());
-    while (!p.empty() && (p.back() == '/' || p.back() == '\\')) p.pop_back();
+    while (!p.empty() && (p.front() == '/' || p.front() == '\\')) {
+        p.erase(p.begin());
+    }
+    while (!p.empty() && (p.back() == '/' || p.back() == '\\')) {
+        p.pop_back();
+    }
     return p;
 }
 
 bool safe_name(const char *name)
 {
-    if (!name || !name[0] || strlen(name) > 64) return false;
+    if (!name || !name[0] || strlen(name) > 64) {
+        return false;
+    }
     // Any file name the folder holds (spaces too), but never a path.
     for (const char *c = name; *c; ++c)
-        if (*c == '/' || *c == '\\' || uint8_t(*c) < 0x20) return false;
+        if (*c == '/' || *c == '\\' || uint8_t(*c) < 0x20) {
+            return false;
+        }
     return name[0] != '.';
 }
 
@@ -543,7 +620,9 @@ bool nas_open(std::string *folder)
 {
     const int share = photo_share();
     std::string error;
-    if (share < 0 || !smb_connect(share, &error)) return false;
+    if (share < 0 || !smb_connect(share, &error)) {
+        return false;
+    }
     *folder = photo_folder();
     static int made_for = -1;
     if (made_for != share) {
@@ -551,8 +630,12 @@ bool nas_open(std::string *folder)
         for (size_t start = 0; start <= folder->size();) {
             const size_t slash = folder->find('/', start);
             so_far = folder->substr(0, slash == std::string::npos ? folder->size() : slash);
-            if (!so_far.empty()) smb2_mkdir(smb.ctx, so_far.c_str());  // fails harmlessly when it exists
-            if (slash == std::string::npos) break;
+            if (!so_far.empty()) {
+                smb2_mkdir(smb.ctx, so_far.c_str());    // fails harmlessly when it exists
+            }
+            if (slash == std::string::npos) {
+                break;
+            }
             start = slash + 1;
         }
         made_for = share;
@@ -561,14 +644,21 @@ bool nas_open(std::string *folder)
 }
 }  // namespace
 
-extern "C" bool files_nas_ready(void) { return photo_share() >= 0; }
+extern "C" bool files_nas_ready(void)
+{
+    return photo_share() >= 0;
+}
 
 extern "C" bool files_nas_put(const char *name, const uint8_t *data, size_t size)
 {
-    if (!safe_name(name) || !data) return false;
+    if (!safe_name(name) || !data) {
+        return false;
+    }
     std::lock_guard<std::recursive_mutex> g(smb_lock);
     std::string folder;
-    if (!nas_open(&folder)) return false;
+    if (!nas_open(&folder)) {
+        return false;
+    }
     const std::string path = folder.empty() ? name : folder + "/" + name;
     smb2fh *fh = smb2_open(smb.ctx, path.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
     if (!fh) {
@@ -580,7 +670,9 @@ extern "C" bool files_nas_put(const char *name, const uint8_t *data, size_t size
     const uint32_t chunk = std::max<uint32_t>(4096, std::min<uint32_t>(smb2_get_max_write_size(smb.ctx), 64 * 1024));
     while (sent < size) {
         const int w = smb2_write(smb.ctx, fh, data + sent, uint32_t(std::min<size_t>(chunk, size - sent)));
-        if (w <= 0) break;
+        if (w <= 0) {
+            break;
+        }
         sent += size_t(w);
     }
     smb2_close(smb.ctx, fh);
@@ -597,7 +689,9 @@ extern "C" int files_nas_list(files_photo_t *out, int max)
 {
     std::lock_guard<std::recursive_mutex> g(smb_lock);
     std::string folder;
-    if (!nas_open(&folder)) return -1;
+    if (!nas_open(&folder)) {
+        return -1;
+    }
     smb2dir *d = smb2_opendir(smb.ctx, folder.c_str());
     if (!d) {
         smb_close();
@@ -605,9 +699,15 @@ extern "C" int files_nas_list(files_photo_t *out, int max)
     }
     int n = 0;
     while (smb2dirent *e = smb2_readdir(smb.ctx, d)) {
-        if (n >= max) break;
-        if (!e->name || e->st.smb2_type == SMB2_TYPE_DIRECTORY || !jpeg_name(e->name)) continue;  // the Gallery decodes JPEG
-        if (strlen(e->name) >= sizeof(out[n].name) || e->name[0] == '.') continue;  // would not fit: never a cut name
+        if (n >= max) {
+            break;
+        }
+        if (!e->name || e->st.smb2_type == SMB2_TYPE_DIRECTORY || !jpeg_name(e->name)) {
+            continue;    // the Gallery decodes JPEG
+        }
+        if (strlen(e->name) >= sizeof(out[n].name) || e->name[0] == '.') {
+            continue;    // would not fit: never a cut name
+        }
         strlcpy(out[n].name, e->name, sizeof(out[n].name));
         out[n].size = uint32_t(e->st.smb2_size);
         out[n].mtime = uint32_t(e->st.smb2_mtime);
@@ -619,10 +719,14 @@ extern "C" int files_nas_list(files_photo_t *out, int max)
 
 extern "C" bool files_nas_get(const char *name, uint8_t **data, size_t *size)
 {
-    if (!safe_name(name)) return false;
+    if (!safe_name(name)) {
+        return false;
+    }
     std::lock_guard<std::recursive_mutex> g(smb_lock);
     std::string folder;
-    if (!nas_open(&folder)) return false;
+    if (!nas_open(&folder)) {
+        return false;
+    }
     const std::string path = folder.empty() ? name : folder + "/" + name;
     smb2fh *fh = smb2_open(smb.ctx, path.c_str(), O_RDONLY);
     if (!fh) {
@@ -636,7 +740,9 @@ extern "C" bool files_nas_get(const char *name, uint8_t **data, size_t *size)
     size_t got = 0;
     while (buf && got < n) {
         const int r = smb2_read(smb.ctx, fh, buf + got, uint32_t(std::min<size_t>(64 * 1024, n - got)));
-        if (r <= 0) break;
+        if (r <= 0) {
+            break;
+        }
         got += size_t(r);
     }
     smb2_close(smb.ctx, fh);
@@ -651,10 +757,14 @@ extern "C" bool files_nas_get(const char *name, uint8_t **data, size_t *size)
 
 extern "C" bool files_nas_delete(const char *name)
 {
-    if (!safe_name(name)) return false;
+    if (!safe_name(name)) {
+        return false;
+    }
     std::lock_guard<std::recursive_mutex> g(smb_lock);
     std::string folder;
-    if (!nas_open(&folder)) return false;
+    if (!nas_open(&folder)) {
+        return false;
+    }
     return smb2_unlink(smb.ctx, (folder.empty() ? std::string(name) : folder + "/" + name).c_str()) == 0;
 }
 
@@ -676,10 +786,15 @@ struct {
 std::string human(uint64_t n)
 {
     char t[24];
-    if (n < 1024) snprintf(t, sizeof(t), "%u B", unsigned(n));
-    else if (n < 1024 * 1024) snprintf(t, sizeof(t), "%.0f KB", double(n) / 1024);
-    else if (n < 1024ull * 1024 * 1024) snprintf(t, sizeof(t), "%.1f MB", double(n) / 1048576);
-    else snprintf(t, sizeof(t), "%.1f GB", double(n) / 1073741824.0);
+    if (n < 1024) {
+        snprintf(t, sizeof(t), "%u B", unsigned(n));
+    } else if (n < 1024 * 1024) {
+        snprintf(t, sizeof(t), "%.0f KB", double(n) / 1024);
+    } else if (n < 1024ull * 1024 * 1024) {
+        snprintf(t, sizeof(t), "%.1f MB", double(n) / 1048576);
+    } else {
+        snprintf(t, sizeof(t), "%.1f GB", double(n) / 1073741824.0);
+    }
     return t;
 }
 
@@ -693,7 +808,9 @@ std::vector<Source> make_sources()
         std::string host, share;
         {
             std::lock_guard<std::mutex> g(cfg_lock);
-            if (dest < int(shares.size())) host = shares[size_t(dest)].host, share = shares[size_t(dest)].share;
+            if (dest < int(shares.size())) {
+                host = shares[size_t(dest)].host, share = shares[size_t(dest)].share;
+            }
         }
         out.push_back({Kind::Smb, "Photos", "Camera photos \xC2\xB7 \\\\" + host + "\\" + share + "\\" + folder, folder, dest, true});
     }
@@ -706,7 +823,10 @@ std::vector<Source> make_sources()
     return out;
 }
 
-void build_sources() { U.sources = make_sources(); }
+void build_sources()
+{
+    U.sources = make_sources();
+}
 
 void render();
 void open_viewer();
@@ -715,7 +835,9 @@ void row_cb(lv_event_t *e)
 {
     const int i = int(intptr_t(lv_event_get_user_data(e)));
     if (U.source < 0) {
-        if (i < 0 || i >= int(U.sources.size())) return;
+        if (i < 0 || i >= int(U.sources.size())) {
+            return;
+        }
         U.source = i;
         U.path.clear();
         U.entries.clear();
@@ -724,7 +846,9 @@ void row_cb(lv_event_t *e)
         render();
         return;
     }
-    if (i < 0 || i >= int(U.entries.size())) return;
+    if (i < 0 || i >= int(U.entries.size())) {
+        return;
+    }
     const Entry en = U.entries[size_t(i)];
     if (en.dir) {
         U.path = join(U.path, en.name);
@@ -744,7 +868,9 @@ void row_cb(lv_event_t *e)
 
 void close_viewer()
 {
-    if (!U.viewer) return;
+    if (!U.viewer) {
+        return;
+    }
     lv_obj_add_flag(U.viewer, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clean(U.viewer_body);
     U.image.reset();
@@ -758,7 +884,9 @@ void back_cb(lv_event_t *)
         return;
     }
     if (U.source < 0) {
-        if (U.hooks.exit) U.hooks.exit();
+        if (U.hooks.exit) {
+            U.hooks.exit();
+        }
         return;
     }
     if (U.path.empty()) {
@@ -846,7 +974,9 @@ void render()
         }
         row(i * 64, e.dir ? "folder" : image_name(e.name) ? "image" : "file", e.name.c_str(), detail, i);
     }
-    if (int(U.entries.size()) > shown) label(U.list, "Only the first 200 are shown.", 10, shown * 64 + 4, 380, TEXT3, 14);
+    if (int(U.entries.size()) > shown) {
+        label(U.list, "Only the first 200 are shown.", 10, shown * 64 + 4, 380, TEXT3, 14);
+    }
 }
 
 void open_viewer()
@@ -868,7 +998,9 @@ void show_result(Result &r)
         return;
     }
     U.waiting = 0;
-    if (!U.viewer || lv_obj_has_flag(U.viewer, LV_OBJ_FLAG_HIDDEN)) return;
+    if (!U.viewer || lv_obj_has_flag(U.viewer, LV_OBJ_FLAG_HIDDEN)) {
+        return;
+    }
     lv_obj_clean(U.viewer_body);
     if (!r.error.empty()) {
         lv_obj_t *l = label(U.viewer_body, r.error.c_str(), 20, 170, 400, WARN, 17, true, LV_TEXT_ALIGN_CENTER);
@@ -898,7 +1030,9 @@ void poll(lv_timer_t *)
         std::lock_guard<std::mutex> g(result_lock);
         r = std::move(ready);
     }
-    if (r && r->serial == serial.load()) show_result(*r);
+    if (r && r->serial == serial.load()) {
+        show_result(*r);
+    }
 }
 
 void build(lv_obj_t *s)
@@ -956,12 +1090,16 @@ esp_err_t tcp_probe_rpc(const esp_iris_rpc_request_t *request, uint8_t *out, siz
     char target[64] = {};
     memcpy(target, request->payload, std::min<size_t>(request->payload_size, sizeof(target) - 1));
     char *colon = strchr(target, ':');
-    if (!colon) return ESP_ERR_INVALID_ARG;
+    if (!colon) {
+        return ESP_ERR_INVALID_ARG;
+    }
     *colon = 0;
     sockaddr_in addr = {};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(uint16_t(atoi(colon + 1)));
-    if (inet_pton(AF_INET, target, &addr.sin_addr) != 1) return ESP_ERR_INVALID_ARG;
+    if (inet_pton(AF_INET, target, &addr.sin_addr) != 1) {
+        return ESP_ERR_INVALID_ARG;
+    }
     const int fd = socket(AF_INET, SOCK_STREAM, 0);
     timeval tv = {4, 0};
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
@@ -980,12 +1118,16 @@ esp_err_t tcp_probe_rpc(const esp_iris_rpc_request_t *request, uint8_t *out, siz
 // Runs on the RPC task, so it is quick: the 5 s SMB timeout bounds it.
 esp_err_t smb_list_rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capacity, size_t *size, void *)
 {
-    if (request->payload_size < 1) return ESP_ERR_INVALID_ARG;
+    if (request->payload_size < 1) {
+        return ESP_ERR_INVALID_ARG;
+    }
     // On the Files worker (an SMB call can take long): the result is logged.
     Source src{Kind::Smb, "probe", "", "", int(request->payload[0]), false};
     const std::string path(reinterpret_cast<const char *>(request->payload + 1), request->payload_size - 1);
     auto *job = new Job{Job::LIST, src, path, ++serial};
-    if (xQueueSend(jobs, &job, 0) != pdTRUE) delete job;
+    if (xQueueSend(jobs, &job, 0) != pdTRUE) {
+        delete job;
+    }
     const char *reply = "queued; see the log";
     *size = std::min(capacity, strlen(reply));
     memcpy(out, reply, *size);
@@ -996,7 +1138,9 @@ extern "C" void files_app_init(const files_hooks_t *hooks)
 {
     esp_iris_rpc_register(0x4744, 50, tcp_probe_rpc, nullptr);
     esp_iris_rpc_register(0x4744, 51, smb_list_rpc, nullptr);
-    if (hooks) U.hooks = *hooks;
+    if (hooks) {
+        U.hooks = *hooks;
+    }
     load_shares();
     if (!jobs) {
         jobs = xQueueCreate(4, sizeof(Job *));
@@ -1009,7 +1153,9 @@ extern "C" void files_app_init(const files_hooks_t *hooks)
 
 extern "C" void files_app_open(lv_obj_t *screen)
 {
-    if (!U.built) build(screen);
+    if (!U.built) {
+        build(screen);
+    }
     U.active = true;
     if (U.source < 0) {
         build_sources();
@@ -1017,22 +1163,37 @@ extern "C" void files_app_open(lv_obj_t *screen)
     }
 }
 
-extern "C" void files_app_set_active(bool active) { U.active = active && U.built; }
+extern "C" void files_app_set_active(bool active)
+{
+    U.active = active && U.built;
+}
 
 extern "C" const char *files_app_config_apply(const char *json, size_t length)
 {
     JsonDocument doc;
-    if (deserializeJson(doc, json, length) || !doc.is<JsonObject>()) return "expected an object";
+    if (deserializeJson(doc, json, length) || !doc.is<JsonObject>()) {
+        return "expected an object";
+    }
     for (JsonPair kv : doc.as<JsonObject>())
-        if (strcmp(kv.key().c_str(), "shares") && strcmp(kv.key().c_str(), "photos")) return "unknown key (use shares, photos)";
-    if (!doc["shares"].is<JsonArray>()) return "shares must be a list";
+        if (strcmp(kv.key().c_str(), "shares") && strcmp(kv.key().c_str(), "photos")) {
+            return "unknown key (use shares, photos)";
+        }
+    if (!doc["shares"].is<JsonArray>()) {
+        return "shares must be a list";
+    }
     JsonDocument clean;
     JsonArray out = clean["shares"].to<JsonArray>();
     if (!doc["photos"].isNull()) {
-        if (!doc["photos"].is<JsonObject>()) return "photos must be an object with share and path";
+        if (!doc["photos"].is<JsonObject>()) {
+            return "photos must be an object with share and path";
+        }
         for (JsonPair kv : doc["photos"].as<JsonObject>()) {
-            if (strcmp(kv.key().c_str(), "share") && strcmp(kv.key().c_str(), "path")) return "unknown photos key (use share, path)";
-            if (!kv.value().is<const char *>()) return "photos values must be strings";
+            if (strcmp(kv.key().c_str(), "share") && strcmp(kv.key().c_str(), "path")) {
+                return "unknown photos key (use share, path)";
+            }
+            if (!kv.value().is<const char *>()) {
+                return "photos values must be strings";
+            }
         }
         clean["photos"]["share"] = doc["photos"]["share"] | "";
         clean["photos"]["path"] = doc["photos"]["path"] | "";
@@ -1041,24 +1202,42 @@ extern "C" const char *files_app_config_apply(const char *json, size_t length)
     for (JsonObjectConst s : doc["shares"].as<JsonArrayConst>()) {
         for (JsonPairConst kv : s) {
             bool known = false;
-            for (const char *k : KEYS) known |= !strcmp(k, kv.key().c_str());
-            if (!known) return "unknown share key (use name, host, share, user, password, path)";
-            if (!kv.value().is<const char *>()) return "share values must be strings";
+            for (const char *k : KEYS) {
+                known |= !strcmp(k, kv.key().c_str());
+            }
+            if (!known) {
+                return "unknown share key (use name, host, share, user, password, path)";
+            }
+            if (!kv.value().is<const char *>()) {
+                return "share values must be strings";
+            }
         }
-        if (!(s["host"] | "")[0] || !(s["share"] | "")[0]) return "each share needs host and share";
+        if (!(s["host"] | "")[0] || !(s["share"] | "")[0]) {
+            return "each share needs host and share";
+        }
         JsonObject o = out.add<JsonObject>();
-        for (const char *k : KEYS) o[k] = s[k] | "";
+        for (const char *k : KEYS) {
+            o[k] = s[k] | "";
+        }
     }
     std::string text;
     serializeJson(clean, text);
     nvs_handle_t h;
-    if (nvs_open(NS, NVS_READWRITE, &h) != ESP_OK) return "storage unavailable";
+    if (nvs_open(NS, NVS_READWRITE, &h) != ESP_OK) {
+        return "storage unavailable";
+    }
     esp_err_t err = out.size() ? nvs_set_str(h, "shares", text.c_str()) : nvs_erase_key(h, "shares");
-    if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
-    if (err == ESP_OK) err = nvs_commit(h);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK;
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
     nvs_close(h);
     std::fill(text.begin(), text.end(), '\0');
-    if (err != ESP_OK) return "storage write failed";
+    if (err != ESP_OK) {
+        return "storage write failed";
+    }
     load_shares();
     {
         std::lock_guard<std::recursive_mutex> g(smb_lock);
@@ -1109,12 +1288,18 @@ bool resolve(const char *full, Source *src, std::string *path, std::string *erro
 {
     std::string p = full ? full : "";
     for (char &c : p)
-        if (c == '\\') c = '/';
-    while (!p.empty() && p.front() == '/') p.erase(p.begin());
+        if (c == '\\') {
+            c = '/';
+        }
+    while (!p.empty() && p.front() == '/') {
+        p.erase(p.begin());
+    }
     const size_t slash = p.find('/');
     const std::string head = p.substr(0, slash), rest = slash == std::string::npos ? "" : p.substr(slash + 1);
     for (const Source &s : make_sources()) {
-        if (strcasecmp(s.name.c_str(), head.c_str())) continue;
+        if (strcasecmp(s.name.c_str(), head.c_str())) {
+            continue;
+        }
         if (rest.find("..") != std::string::npos) {
             *error = "Paths may not go up a folder.";
             return false;
@@ -1124,7 +1309,9 @@ bool resolve(const char *full, Source *src, std::string *path, std::string *erro
         return true;
     }
     *error = "No place called \"" + head + "\". Places: ";
-    for (const Source &s : make_sources()) *error += s.name + "; ";
+    for (const Source &s : make_sources()) {
+        *error += s.name + "; ";
+    }
     return false;
 }
 }  // namespace
@@ -1135,7 +1322,9 @@ extern "C" void files_app_tool_list(const char *path, char *out, size_t capacity
     if (!path || !*path || !strcmp(path, "/")) {
         const std::vector<Source> all = make_sources();
         text = all.empty() ? "No places: no shares set up." : "Places (use as the first part of a path):\n";
-        for (const Source &s : all) text += "- " + s.name + ": " + s.detail + "\n";
+        for (const Source &s : all) {
+            text += "- " + s.name + ": " + s.detail + "\n";
+        }
         strlcpy(out, text.c_str(), capacity);
         return;
     }
@@ -1146,15 +1335,18 @@ extern "C" void files_app_tool_list(const char *path, char *out, size_t capacity
         strlcpy(out, error.c_str(), capacity);
         return;
     }
-    std::sort(entries.begin(), entries.end(), [](const Entry &a, const Entry &b) {
+    std::sort(entries.begin(), entries.end(), [](const Entry & a, const Entry & b) {
         return a.dir != b.dir ? a.dir : strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
     });
     char line[160];
     snprintf(line, sizeof(line), "%s: %u item(s)\n", path, unsigned(entries.size()));
     text = line;
     for (const Entry &e : entries) {
-        if (e.dir) snprintf(line, sizeof(line), "- %s/\n", e.name.c_str());
-        else snprintf(line, sizeof(line), "- %s (%llu KB)\n", e.name.c_str(), (unsigned long long)((e.size + 1023) / 1024));
+        if (e.dir) {
+            snprintf(line, sizeof(line), "- %s/\n", e.name.c_str());
+        } else {
+            snprintf(line, sizeof(line), "- %s (%llu KB)\n", e.name.c_str(), (unsigned long long)((e.size + 1023) / 1024));
+        }
         if (text.size() + strlen(line) + 32 > capacity) {
             text += "- \xE2\x80\xA6 more\n";
             break;
@@ -1171,7 +1363,7 @@ extern "C" void files_app_tool_read(const char *path, char *out, size_t capacity
     std::vector<uint8_t> data;
     bool truncated = false;
     if (!resolve(path, &src, &inner, &error) || inner.empty() ||
-        !read_file(src, inner, capacity > 200 ? capacity - 200 : capacity / 2, data, &truncated, &error)) {
+            !read_file(src, inner, capacity > 200 ? capacity - 200 : capacity / 2, data, &truncated, &error)) {
         strlcpy(out, error.empty() ? "Name a file inside a place." : error.c_str(), capacity);
         return;
     }
@@ -1185,6 +1377,8 @@ extern "C" void files_app_tool_read(const char *path, char *out, size_t capacity
             return;
         }
     std::string text(data.begin(), data.end());
-    if (truncated) text += "\n[\xE2\x80\xA6 the rest of the file is cut]";
+    if (truncated) {
+        text += "\n[\xE2\x80\xA6 the rest of the file is cut]";
+    }
     strlcpy(out, text.c_str(), capacity);
 }

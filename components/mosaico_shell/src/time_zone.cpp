@@ -33,9 +33,11 @@ int zone_for(const char *name)
 {
     static const char *const eet[] = {"Europe/Sofia", "Europe/Bucharest", "Europe/Athens", "Europe/Helsinki", "Europe/Kiev",
                                       "Europe/Kyiv", "Europe/Riga", "Europe/Tallinn", "Europe/Vilnius", "Asia/Nicosia",
-                                      "Europe/Mariehamn", "Asia/Famagusta"};
+                                      "Europe/Mariehamn", "Asia/Famagusta"
+                                     };
     static const char *const gmt[] = {"Europe/London", "Europe/Dublin", "Europe/Lisbon", "Atlantic/Canary", "Atlantic/Madeira",
-                                      "Atlantic/Faroe", "Europe/Guernsey", "Europe/Jersey", "Europe/Isle_of_Man"};
+                                      "Atlantic/Faroe", "Europe/Guernsey", "Europe/Jersey", "Europe/Isle_of_Man"
+                                     };
     static const char *const cet[] = {"Europe/Berlin", "Europe/Paris", "Europe/Madrid", "Europe/Rome", "Europe/Amsterdam",
                                       "Europe/Brussels", "Europe/Vienna", "Europe/Zurich", "Europe/Prague", "Europe/Warsaw",
                                       "Europe/Budapest", "Europe/Stockholm", "Europe/Oslo", "Europe/Copenhagen",
@@ -43,23 +45,41 @@ int zone_for(const char *name)
                                       "Europe/Luxembourg", "Europe/Monaco", "Europe/Malta", "Europe/Andorra",
                                       "Europe/San_Marino", "Europe/Vatican", "Europe/Sarajevo", "Europe/Skopje",
                                       "Europe/Podgorica", "Europe/Tirane", "Europe/Vaduz", "Europe/Gibraltar",
-                                      "Europe/Busingen", "Africa/Ceuta", "Arctic/Longyearbyen"};
+                                      "Europe/Busingen", "Africa/Ceuta", "Arctic/Longyearbyen"
+                                     };
     static const char *const est[] = {"America/New_York", "America/Toronto", "America/Detroit", "America/Montreal",
                                       "America/Nassau", "America/Iqaluit", "America/Nipigon", "America/Thunder_Bay",
-                                      "America/Indiana/Indianapolis", "America/Kentucky/Louisville"};
+                                      "America/Indiana/Indianapolis", "America/Kentucky/Louisville"
+                                     };
     static const char *const pst[] = {"America/Los_Angeles", "America/Vancouver", "America/Tijuana"};
-    auto in = [&](const char *const *list, size_t n) {
+    auto in = [&](const char *const * list, size_t n) {
         for (size_t i = 0; i < n; ++i)
-            if (!strcmp(name, list[i])) return true;
+            if (!strcmp(name, list[i])) {
+                return true;
+            }
         return false;
     };
-    if (!strcmp(name, "UTC") || !strcmp(name, "Etc/UTC") || !strcmp(name, "Etc/GMT") || !strcmp(name, "GMT")) return 0;
-    if (in(eet, sizeof(eet) / sizeof(*eet))) return 1;
-    if (in(gmt, sizeof(gmt) / sizeof(*gmt))) return 2;
-    if (in(cet, sizeof(cet) / sizeof(*cet))) return 3;
-    if (in(est, sizeof(est) / sizeof(*est))) return 4;
-    if (in(pst, sizeof(pst) / sizeof(*pst))) return 5;
-    if (!strcmp(name, "Asia/Tokyo")) return 6;
+    if (!strcmp(name, "UTC") || !strcmp(name, "Etc/UTC") || !strcmp(name, "Etc/GMT") || !strcmp(name, "GMT")) {
+        return 0;
+    }
+    if (in(eet, sizeof(eet) / sizeof(*eet))) {
+        return 1;
+    }
+    if (in(gmt, sizeof(gmt) / sizeof(*gmt))) {
+        return 2;
+    }
+    if (in(cet, sizeof(cet) / sizeof(*cet))) {
+        return 3;
+    }
+    if (in(est, sizeof(est) / sizeof(*est))) {
+        return 4;
+    }
+    if (in(pst, sizeof(pst) / sizeof(*pst))) {
+        return 5;
+    }
+    if (!strcmp(name, "Asia/Tokyo")) {
+        return 6;
+    }
     return -1;
 }
 
@@ -82,7 +102,9 @@ bool look_up(char *out, size_t capacity)
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
     cfg.user_agent = "mosaico-clock";
     esp_http_client_handle_t c = esp_http_client_init(&cfg);
-    if (!c) return false;
+    if (!c) {
+        return false;
+    }
     bool ok = false;
     if (esp_http_client_open(c, 0) == ESP_OK) {
         esp_http_client_fetch_headers(c);
@@ -90,7 +112,9 @@ bool look_up(char *out, size_t capacity)
         int n = esp_http_client_read(c, out, int(capacity) - 1);
         if (status == 200 && n > 0) {
             out[n] = 0;
-            while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r' || out[n - 1] == ' ')) out[--n] = 0;
+            while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r' || out[n - 1] == ' ')) {
+                out[--n] = 0;
+            }
             ok = n > 2 && strchr(out, '/') && !strchr(out, '<');
         } else {
             ESP_LOGW(TAG, "lookup: HTTP %d", status);
@@ -106,10 +130,14 @@ void worker(void *)
     for (;;) {
         // Woken by a connection or the switch to automatic; else twice a day.
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(state == 1 ? 60000 : 10000));
-        if (!automatic || WiFi.status() != WL_CONNECTED) continue;
+        if (!automatic || WiFi.status() != WL_CONNECTED) {
+            continue;
+        }
         // Not before the next try is due, whatever the last one gave (a failed
         // lookup used to retry every 10 s, an HTTPS request each time).
-        if (state != 0 && int32_t(xTaskGetTickCount() - next) < 0) continue;
+        if (state != 0 && int32_t(xTaskGetTickCount() - next) < 0) {
+            continue;
+        }
         char name[48];
         if (!look_up(name, sizeof(name))) {
             state = -1;
@@ -152,7 +180,9 @@ void time_zone_start()
 
 void time_zone_connected()
 {
-    if (task) xTaskNotifyGive(task);
+    if (task) {
+        xTaskNotifyGive(task);
+    }
 }
 
 void time_zone_step(int step)
@@ -180,11 +210,19 @@ void time_zone_step(int step)
 void time_zone_set(int choice)
 {
     const int current = automatic ? 0 : zone + 1, want = choice < 0 ? 0 : choice % DISPLAY_CLOCK_ZONE_COUNT + 1;
-    if (want != current) time_zone_step(want - current);
+    if (want != current) {
+        time_zone_step(want - current);
+    }
 }
 
-const char *time_zone_name(int z) { return displayClockZoneName(uint8_t(z)); }
-int time_zone_count() { return DISPLAY_CLOCK_ZONE_COUNT; }
+const char *time_zone_name(int z)
+{
+    return displayClockZoneName(uint8_t(z));
+}
+int time_zone_count()
+{
+    return DISPLAY_CLOCK_ZONE_COUNT;
+}
 
 void time_zone_text(char *out, size_t capacity)
 {

@@ -75,7 +75,7 @@ void WiFiClass::handle_event(int32_t id, void *data, bool ip_event)
         sta_ip = 0;
         sta_status = event->reason == WIFI_REASON_NO_AP_FOUND ? WL_NO_SSID_AVAIL
                      : sta_status == WL_CONNECTED                ? WL_CONNECTION_LOST
-                                                                 : WL_DISCONNECTED;
+                     : WL_DISCONNECTED;
         ESP_LOGW(TAG, "station disconnected, reason %u", unsigned(event->reason));
         dispatch(ARDUINO_EVENT_WIFI_STA_DISCONNECTED, info);
         if (sta_wanted && auto_reconnect_) {
@@ -95,13 +95,15 @@ bool WiFiClass::init()
             return;
         }
         esp_err_t err = esp_event_loop_create_default();
-        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
+        {
             ESP_LOGE(TAG, "event loop: %s", esp_err_to_name(err));
             return;
         }
         sta_netif = esp_netif_create_default_wifi_sta();
         wifi_init_config_t config = WIFI_INIT_CONFIG_DEFAULT();
-        if (!sta_netif || esp_wifi_init(&config) != ESP_OK) {
+        if (!sta_netif || esp_wifi_init(&config) != ESP_OK)
+        {
             ESP_LOGE(TAG, "driver initialization failed");
             return;
         }
@@ -126,9 +128,9 @@ wl_status_t WiFiClass::begin(const char *ssid, const char *password)
     wifi_config_t config{};
     // Same network as the one already joined: keep the association.
     if (esp_wifi_get_config(WIFI_IF_STA, &config) == ESP_OK && sta_wanted &&
-        !strncmp(reinterpret_cast<const char *>(config.sta.ssid), ssid, sizeof(config.sta.ssid)) &&
-        !strncmp(reinterpret_cast<const char *>(config.sta.password), password ? password : "",
-                 sizeof(config.sta.password))) {
+            !strncmp(reinterpret_cast<const char *>(config.sta.ssid), ssid, sizeof(config.sta.ssid)) &&
+            !strncmp(reinterpret_cast<const char *>(config.sta.password), password ? password : "",
+                     sizeof(config.sta.password))) {
         return status();
     }
     config = {};

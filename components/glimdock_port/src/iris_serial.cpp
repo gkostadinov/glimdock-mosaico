@@ -19,17 +19,24 @@ size_t out_size = 0;
 
 void wipe(volatile uint8_t *p, size_t n)
 {
-    while (n--) *p++ = 0;
+    while (n--) {
+        *p++ = 0;
+    }
 }
 
 esp_err_t write_input(const esp_iris_rpc_request_t *request, uint8_t *response, size_t capacity, size_t *size, void *)
 {
     std::lock_guard<std::mutex> guard(lock);
-    if (!in) in = static_cast<uint8_t *>(heap_caps_calloc(1, IN_CAPACITY, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (!in) return ESP_ERR_NO_MEM;
+    if (!in) {
+        in = static_cast<uint8_t *>(heap_caps_calloc(1, IN_CAPACITY, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    }
+    if (!in) {
+        return ESP_ERR_NO_MEM;
+    }
     size_t accepted = 0;
-    for (; accepted < request->payload_size && in_size < IN_CAPACITY; ++accepted, ++in_size)
+    for (; accepted < request->payload_size && in_size < IN_CAPACITY; ++accepted, ++in_size) {
         in[(in_head + in_size) % IN_CAPACITY] = request->payload[accepted];
+    }
     *size = 0;
     if (capacity >= 4) {
         const uint32_t n = uint32_t(accepted);
@@ -61,7 +68,9 @@ int IrisSerial::available()
 int IrisSerial::read()
 {
     std::lock_guard<std::mutex> guard(lock);
-    if (!in_size) return -1;
+    if (!in_size) {
+        return -1;
+    }
     const uint8_t value = in[in_head];
     in[in_head] = 0;
     in_head = (in_head + 1) % IN_CAPACITY;
@@ -78,7 +87,9 @@ int IrisSerial::peek()
 size_t IrisSerial::write(uint8_t value)
 {
     std::lock_guard<std::mutex> guard(lock);
-    if (out_size >= OUT_CAPACITY) return 0;
+    if (out_size >= OUT_CAPACITY) {
+        return 0;
+    }
     out[out_size++] = value;
     return 1;
 }
@@ -92,6 +103,7 @@ IrisSerial &glim_iris_serial()
 void glim_iris_serial_register()
 {
     if (esp_iris_rpc_register(SERVICE, 1, write_input, nullptr) != ESP_OK ||
-        esp_iris_rpc_register(SERVICE, 2, read_output, nullptr) != ESP_OK)
+            esp_iris_rpc_register(SERVICE, 2, read_output, nullptr) != ESP_OK) {
         ESP_LOGW("glim_serial", "private reader provisioning over ESP-Iris unavailable");
+    }
 }

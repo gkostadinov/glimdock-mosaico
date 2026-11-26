@@ -10,6 +10,7 @@ ESP-Iris (service 0x4744: method 20 lists, method 21 reads) into a folder:
 Files are named by the time they were taken (mosaico-YYYYMMDD-HHMMSS.jpg) and
 existing files are left alone, so running it again only fetches new photos.
 """
+
 import argparse
 import base64
 import contextlib
@@ -28,6 +29,7 @@ CHUNK = 3800
 def cli():
     sys.path.insert(0, str(WORKSPACE / "submodule/esp-mosaico-utils/mosaico-tools/tools"))
     from mosaico_cli.cli import main  # noqa: E402
+
     return main
 
 

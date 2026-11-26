@@ -85,7 +85,9 @@ void torch_cb(lv_event_t *)
         return;
     }
     T.torch_on = want;
-    if (T.hooks.haptic) T.hooks.haptic();
+    if (T.hooks.haptic) {
+        T.hooks.haptic();
+    }
     lv_label_set_text(T.torch_note, "The camera module's flash");
     torch_look();
 }
@@ -93,8 +95,12 @@ void torch_cb(lv_event_t *)
 void light_off_cb(lv_event_t *)
 {
     T.screen_light = false;
-    if (T.light) lv_obj_add_flag(T.light, LV_OBJ_FLAG_HIDDEN);
-    if (T.hooks.brightness) T.hooks.brightness(-1);
+    if (T.light) {
+        lv_obj_add_flag(T.light, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (T.hooks.brightness) {
+        T.hooks.brightness(-1);
+    }
 }
 
 void light_cb(lv_event_t *)
@@ -102,7 +108,9 @@ void light_cb(lv_event_t *)
     T.screen_light = true;
     lv_obj_remove_flag(T.light, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(T.light);
-    if (T.hooks.brightness) T.hooks.brightness(100);
+    if (T.hooks.brightness) {
+        T.hooks.brightness(100);
+    }
 }
 
 void build_torch(lv_obj_t *p)
@@ -176,7 +184,9 @@ void update_level()
         const float reach = DIAL / 2 - BUBBLE / 2 - 6;
         float bx = -ax / 20.0f * reach, by = -ay / 20.0f * reach;
         const float d = sqrtf(bx * bx + by * by);
-        if (d > reach) bx *= reach / d, by *= reach / d;
+        if (d > reach) {
+            bx *= reach / d, by *= reach / d;
+        }
         lv_obj_set_pos(T.bubble, int(DIAL / 2 - BUBBLE / 2 + bx), int(DIAL / 2 - BUBBLE / 2 + by));
         const float tilt = sqrtf(ax * ax + ay * ay);
         level = tilt < 1.0f;
@@ -201,7 +211,9 @@ void update_level()
     lv_obj_set_style_text_color(T.level_big, lv_color_hex(c), 0);
     lv_obj_set_style_bg_color(T.bubble, lv_color_hex(level ? OK : ACC.glow), 0);
     lv_obj_set_style_line_color(T.horizon, lv_color_hex(level ? OK : ACC.glow), 0);
-    if (level && !T.was_level && T.hooks.haptic) T.hooks.haptic();
+    if (level && !T.was_level && T.hooks.haptic) {
+        T.hooks.haptic();
+    }
     T.was_level = level;
 }
 
@@ -212,7 +224,9 @@ const char *const POINTS[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
 void load_cal()
 {
     nvs_handle_t h;
-    if (nvs_open("tools", NVS_READONLY, &h) != ESP_OK) return;
+    if (nvs_open("tools", NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
     size_t n = sizeof(T.mmin);
     nvs_get_blob(h, "magmin", T.mmin, &n);
     n = sizeof(T.mmax);
@@ -223,7 +237,9 @@ void load_cal()
 void save_cal()
 {
     nvs_handle_t h;
-    if (nvs_open("tools", NVS_READWRITE, &h) != ESP_OK) return;
+    if (nvs_open("tools", NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
     nvs_set_blob(h, "magmin", T.mmin, sizeof(T.mmin));
     nvs_set_blob(h, "magmax", T.mmax, sizeof(T.mmax));
     nvs_commit(h);
@@ -279,27 +295,39 @@ void update_compass()
     float v[3] = {float(m.x), float(m.y), float(m.z)};
     bool grew = false;
     for (int i = 0; i < 3; ++i) {
-        if (v[i] < T.mmin[i]) T.mmin[i] = v[i], grew = true;
-        if (v[i] > T.mmax[i]) T.mmax[i] = v[i], grew = true;
+        if (v[i] < T.mmin[i]) {
+            T.mmin[i] = v[i], grew = true;
+        }
+        if (v[i] > T.mmax[i]) {
+            T.mmax[i] = v[i], grew = true;
+        }
     }
     static int since_save = 0;
-    if (grew && ++since_save > 40) since_save = 0, save_cal();
+    if (grew && ++since_save > 40) {
+        since_save = 0, save_cal();
+    }
     const float span = std::min(T.mmax[0] - T.mmin[0], T.mmax[1] - T.mmin[1]);
     float x = v[0] - (T.mmin[0] + T.mmax[0]) / 2, y = v[1] - (T.mmin[1] + T.mmax[1]) / 2, z = v[2] - (T.mmin[2] + T.mmax[2]) / 2;
-    if (T.hooks.to_ui) T.hooks.to_ui(&x, &y, &z);
+    if (T.hooks.to_ui) {
+        T.hooks.to_ui(&x, &y, &z);
+    }
     // Flat: the field's horizontal part points north; the heading is the
     // angle from north to the top of the screen, clockwise.
     float h = -atan2f(x, -y) * 180 / float(M_PI);
     h = fmodf(h + 360.0f, 360.0f);
     float d = h - T.head;
-    if (d > 180) d -= 360;
-    if (d < -180) d += 360;
+    if (d > 180) {
+        d -= 360;
+    }
+    if (d < -180) {
+        d += 360;
+    }
     T.head = fmodf(T.head + 0.3f * d + 360.0f, 360.0f);
     char text[16];
     snprintf(text, sizeof(text), "%d\xC2\xB0 %s", int(lroundf(T.head)) % 360, POINTS[int(lroundf(T.head / 45)) % 8]);
     lv_label_set_text(T.heading, text);
     lv_label_set_text(T.compass_note, span < 60 ? "Turn the board around slowly, flat, to calibrate."
-                                                : "Hold it flat. Keep it away from magnets and metal.");
+                      : "Hold it flat. Keep it away from magnets and metal.");
     place_letters(T.head);
 }
 
@@ -316,7 +344,9 @@ void update_webcam()
 
 void webcam_cb(lv_event_t *)
 {
-    if (!T.hooks.webcam || !T.hooks.webcam_status) return;
+    if (!T.hooks.webcam || !T.hooks.webcam_status) {
+        return;
+    }
     char text[96];
     T.hooks.webcam(!T.hooks.webcam_status(text, sizeof(text)));
     update_webcam();
@@ -334,28 +364,38 @@ void build_webcam(lv_obj_t *p)
     T.cam_label = label(p, "Off", 0, 168, 480, TEXT, 26, true, LV_TEXT_ALIGN_CENTER);
     T.cam_note = label(p, "", 30, 206, 420, TEXT2, 15, true, LV_TEXT_ALIGN_CENTER);
     lv_obj_t *n = label(p, "A USB camera for the computer, 1280 \xC3\x97 720 or 640 \xC3\x97 480, upright whichever way "
-                           "the board is held; the small button lights the flash. While it is on, the USB port is only a "
-                           "camera: no installs, logs or Wi-Fi tools.",
+                        "the board is held; the small button lights the flash. While it is on, the USB port is only a "
+                        "camera: no installs, logs or Wi-Fi tools.",
                         50, 240, 380, TEXT3, 14, false, LV_TEXT_ALIGN_CENTER);
     wrap_label(n);
     update_webcam();
 }
 
 // ---- calculator ---------------------------------------------------------------------------
-double entry_value() { return strtod(T.entry.c_str(), nullptr); }
+double entry_value()
+{
+    return strtod(T.entry.c_str(), nullptr);
+}
 
 std::string show(double v)
 {
-    if (!isfinite(v)) return "Error";
+    if (!isfinite(v)) {
+        return "Error";
+    }
     char text[32];
-    if (fabs(v) >= 1e12 || (fabs(v) < 1e-6 && v != 0)) snprintf(text, sizeof(text), "%.6g", v);
-    else {
+    if (fabs(v) >= 1e12 || (fabs(v) < 1e-6 && v != 0)) {
+        snprintf(text, sizeof(text), "%.6g", v);
+    } else {
         snprintf(text, sizeof(text), "%.10f", v);
         char *dot = strchr(text, '.');
         if (dot) {
             char *end = text + strlen(text) - 1;
-            while (end > dot && *end == '0') *end-- = 0;
-            if (end == dot) *end = 0;
+            while (end > dot && *end == '0') {
+                *end-- = 0;
+            }
+            if (end == dot) {
+                *end = 0;
+            }
         }
     }
     return strcmp(text, "-0") ? text : "0";
@@ -367,7 +407,9 @@ void calc_show()
     const int px = T.entry.size() > 12 ? 30 : T.entry.size() > 9 ? 38 : 48;
     lv_obj_set_style_text_font(T.display, font(px, true), 0);
     char e[48] = "";
-    if (T.op) snprintf(e, sizeof(e), "%s %c", show(T.acc).c_str(), T.op);
+    if (T.op) {
+        snprintf(e, sizeof(e), "%s %c", show(T.acc).c_str(), T.op);
+    }
     lv_label_set_text(T.expr, e);
 }
 
@@ -386,10 +428,18 @@ void key(const char *k)
 {
     const char c = k[0];
     if (isdigit(uint8_t(c)) || c == '.') {
-        if (T.fresh) T.entry = c == '.' ? "0" : "", T.fresh = false;
-        if (c == '.' && T.entry.find('.') != std::string::npos) return;
-        if (T.entry == "0" && c != '.') T.entry.clear();
-        if (T.entry.size() < 15) T.entry += c;
+        if (T.fresh) {
+            T.entry = c == '.' ? "0" : "", T.fresh = false;
+        }
+        if (c == '.' && T.entry.find('.') != std::string::npos) {
+            return;
+        }
+        if (T.entry == "0" && c != '.') {
+            T.entry.clear();
+        }
+        if (T.entry.size() < 15) {
+            T.entry += c;
+        }
     } else if (!strcmp(k, "C")) {
         T.entry = "0", T.acc = 0, T.op = 0, T.fresh = true;
     } else if (!strcmp(k, "\xC2\xB1")) {
@@ -397,15 +447,23 @@ void key(const char *k)
     } else if (!strcmp(k, "%")) {
         T.entry = show(entry_value() / 100), T.fresh = true;
     } else if (!strcmp(k, LV_SYMBOL_BACKSPACE)) {  // backspace
-        if (!T.fresh && T.entry.size() > 1) T.entry.pop_back();
-        else T.entry = "0", T.fresh = true;
+        if (!T.fresh && T.entry.size() > 1) {
+            T.entry.pop_back();
+        } else {
+            T.entry = "0", T.fresh = true;
+        }
     } else if (!strcmp(k, "=")) {
-        if (T.op) T.entry = show(apply(T.acc, T.op, entry_value()));
+        if (T.op) {
+            T.entry = show(apply(T.acc, T.op, entry_value()));
+        }
         T.op = 0, T.fresh = true;
     } else {  // an operator
         const char op = !strcmp(k, "\xC3\x97") ? '*' : !strcmp(k, "\xC3\xB7") ? '/' : !strcmp(k, "\xE2\x88\x92") ? '-' : '+';
-        if (T.op && !T.fresh) T.acc = apply(T.acc, T.op, entry_value());
-        else if (!T.op) T.acc = entry_value();
+        if (T.op && !T.fresh) {
+            T.acc = apply(T.acc, T.op, entry_value());
+        } else if (!T.op) {
+            T.acc = entry_value();
+        }
         T.op = op, T.fresh = true;
         T.entry = show(T.acc);
     }
@@ -414,7 +472,9 @@ void key(const char *k)
 
 void key_cb(lv_event_t *e)
 {
-    if (T.hooks.haptic) T.hooks.haptic();
+    if (T.hooks.haptic) {
+        T.hooks.haptic();
+    }
     key(static_cast<const char *>(lv_event_get_user_data(e)));
 }
 
@@ -423,10 +483,11 @@ void build_calc(lv_obj_t *p)
     T.expr = label(p, "", 50, 0, 380, TEXT3, 17, true, LV_TEXT_ALIGN_RIGHT);
     T.display = label(p, "0", 50, 20, 380, TEXT, 48, true, LV_TEXT_ALIGN_RIGHT);
     static const char *const KEYS[5][4] = {{"C", "\xC2\xB1", "%", "\xC3\xB7"},
-                                           {"7", "8", "9", "\xC3\x97"},
-                                           {"4", "5", "6", "\xE2\x88\x92"},
-                                           {"1", "2", "3", "+"},
-                                           {"0", ".", LV_SYMBOL_BACKSPACE, "="}};
+        {"7", "8", "9", "\xC3\x97"},
+        {"4", "5", "6", "\xE2\x88\x92"},
+        {"1", "2", "3", "+"},
+        {"0", ".", LV_SYMBOL_BACKSPACE, "="}
+    };
     constexpr int KW = 88, KH = 48, GX = 8, GY = 7, X0 = 240 - (4 * KW + 3 * GX) / 2, Y0 = 82;
     for (int r = 0; r < 5; ++r)
         for (int c = 0; c < 4; ++c) {
@@ -448,10 +509,15 @@ void show_tool(int t)
 {
     T.tool = std::clamp(t, 0, TOOLS - 1);
     for (int i = 0; i < TOOLS; ++i) {
-        if (i == T.tool) lv_obj_remove_flag(T.pane[i], LV_OBJ_FLAG_HIDDEN);
-        else lv_obj_add_flag(T.pane[i], LV_OBJ_FLAG_HIDDEN);
+        if (i == T.tool) {
+            lv_obj_remove_flag(T.pane[i], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(T.pane[i], LV_OBJ_FLAG_HIDDEN);
+        }
     }
-    if (T.tabs && capsule_selected(T.tabs) != T.tool) capsule_select(T.tabs, T.tool, true);
+    if (T.tabs && capsule_selected(T.tabs) != T.tool) {
+        capsule_select(T.tabs, T.tool, true);
+    }
     interact::set_visible(T.active && T.tool == BOARD);
     nvs_handle_t h;
     if (nvs_open("tools", NVS_READWRITE, &h) == ESP_OK) {
@@ -461,15 +527,25 @@ void show_tool(int t)
     }
 }
 
-void tab_cb(lv_event_t *e) { show_tool(capsule_selected(lv_event_get_current_target_obj(e))); }
+void tab_cb(lv_event_t *e)
+{
+    show_tool(capsule_selected(lv_event_get_current_target_obj(e)));
+}
 
 void tick(lv_timer_t *)
 {
-    if (!T.active) return;
-    if (T.tool == LEVEL) update_level();
-    else if (T.tool == COMPASS) update_compass();
-    else if (T.tool == BOARD) interact::update();
-    else if (T.tool == WEBCAM && ++T.cam_tick % 8 == 0) update_webcam();
+    if (!T.active) {
+        return;
+    }
+    if (T.tool == LEVEL) {
+        update_level();
+    } else if (T.tool == COMPASS) {
+        update_compass();
+    } else if (T.tool == BOARD) {
+        interact::update();
+    } else if (T.tool == WEBCAM && ++T.cam_tick % 8 == 0) {
+        update_webcam();
+    }
 }
 
 void build(lv_obj_t *s)
@@ -481,11 +557,17 @@ void build(lv_obj_t *s)
     icon(back, "back", 10, 10, 24, TEXT, 2.0f);
     lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);
     press_fx(back);
-    lv_obj_add_event_cb(back, [](lv_event_t *) { if (T.hooks.exit) T.hooks.exit(); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(back, [](lv_event_t *) {
+        if (T.hooks.exit) {
+            T.hooks.exit();
+        }
+    }, LV_EVENT_CLICKED, nullptr);
     label(s, "Tools", 112, 20, 200, TEXT, 26, true);
     T.tabs = capsule(s, 30, 66, 420, 44, NAMES, TOOLS, T.tool, ACC, 14);
     lv_obj_add_event_cb(T.tabs, tab_cb, LV_EVENT_VALUE_CHANGED, nullptr);
-    for (int i = 0; i < TOOLS; ++i) T.pane[i] = box(s, 0, 124, PANEL, 356);
+    for (int i = 0; i < TOOLS; ++i) {
+        T.pane[i] = box(s, 0, 124, PANEL, 356);
+    }
     build_torch(T.pane[TORCH]);
     build_level(T.pane[LEVEL]);
     build_compass(T.pane[COMPASS]);
@@ -500,11 +582,15 @@ void build(lv_obj_t *s)
 
 extern "C" void tools_app_init(const tools_hooks_t *hooks)
 {
-    if (hooks) T.hooks = *hooks;
+    if (hooks) {
+        T.hooks = *hooks;
+    }
     nvs_handle_t h;
     if (nvs_open("tools", NVS_READONLY, &h) == ESP_OK) {
         uint8_t v;
-        if (nvs_get_u8(h, "tool", &v) == ESP_OK && v < TOOLS) T.tool = v;
+        if (nvs_get_u8(h, "tool", &v) == ESP_OK && v < TOOLS) {
+            T.tool = v;
+        }
         nvs_close(h);
     }
     interact::start();  // a saved light mode runs without the app open
@@ -512,7 +598,9 @@ extern "C" void tools_app_init(const tools_hooks_t *hooks)
 
 extern "C" void tools_app_open(lv_obj_t *screen)
 {
-    if (!T.built) build(screen);
+    if (!T.built) {
+        build(screen);
+    }
     tools_app_set_active(true);
 }
 
@@ -521,13 +609,20 @@ extern "C" void tools_app_set_active(bool active)
     T.active = active && T.built;
     interact::set_visible(T.active && T.tool == BOARD);
     if (!T.active && T.built) {
-        if (T.screen_light) light_off_cb(nullptr);
-        if (T.torch_on && T.hooks.torch) T.hooks.torch(false), T.torch_on = false, torch_look();
+        if (T.screen_light) {
+            light_off_cb(nullptr);
+        }
+        if (T.torch_on && T.hooks.torch) {
+            T.hooks.torch(false), T.torch_on = false, torch_look();
+        }
     }
 }
 
 extern "C" void tools_app_select(int tool)
 {
-    if (T.built) show_tool(tool);
-    else T.tool = std::clamp(tool, 0, TOOLS - 1);
+    if (T.built) {
+        show_tool(tool);
+    } else {
+        T.tool = std::clamp(tool, 0, TOOLS - 1);
+    }
 }

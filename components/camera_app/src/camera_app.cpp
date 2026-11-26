@@ -76,7 +76,9 @@ Lut luts[FILTERS];
 
 uint16_t pack(float r, float g, float b)
 {
-    auto c = [](float v, int max) { return uint16_t(lroundf(fminf(fmaxf(v, 0.0f), 1.0f) * max)); };
+    auto c = [](float v, int max) {
+        return uint16_t(lroundf(fminf(fmaxf(v, 0.0f), 1.0f) * max));
+    };
     return uint16_t(c(r, 31) << 11 | c(g, 63) << 5 | c(b, 31));
 }
 
@@ -98,10 +100,14 @@ void build_luts()
             l.r[i] = uint8_t(lroundf(fminf(fmaxf(curve(i / 31.0f, Filter(f), 0), 0.0f), 1.0f) * 31));
             l.b[i] = uint8_t(lroundf(fminf(fmaxf(curve(i / 31.0f, Filter(f), 2), 0.0f), 1.0f) * 31));
         }
-        for (int i = 0; i < 64; ++i) l.g[i] = uint8_t(lroundf(fminf(fmaxf(curve(i / 63.0f, Filter(f), 1), 0.0f), 1.0f) * 63));
+        for (int i = 0; i < 64; ++i) {
+            l.g[i] = uint8_t(lroundf(fminf(fmaxf(curve(i / 63.0f, Filter(f), 1), 0.0f), 1.0f) * 63));
+        }
         for (int i = 0; i < 256; ++i) {
             float y = i / 255.0f;
-            if (f == NOIR) y = fminf(fmaxf(0.5f + (y - 0.5f) * 1.7f, 0.0f), 1.0f);
+            if (f == NOIR) {
+                y = fminf(fmaxf(0.5f + (y - 0.5f) * 1.7f, 0.0f), 1.0f);
+            }
             l.y[i] = f == SEPIA ? pack(y * 1.07f + 0.04f, y * 0.92f + 0.02f, y * 0.70f) : pack(y, y, y);
         }
     }
@@ -109,7 +115,9 @@ void build_luts()
 
 void apply_filter(uint16_t *px, Filter f)
 {
-    if (f == NORMAL) return;
+    if (f == NORMAL) {
+        return;
+    }
     const Lut &l = luts[f];
     uint16_t *const end = px + W * H;
     if (l.luma) {
@@ -131,9 +139,15 @@ void apply_filter(uint16_t *px, Filter f)
 // (x, y) -> (a x + b y, c x + d y).
 struct Mat {
     int a, b, c, d;
-    bool operator==(const Mat &o) const { return a == o.a && b == o.b && c == o.c && d == o.d; }
+    bool operator==(const Mat &o) const
+    {
+        return a == o.a && b == o.b && c == o.c && d == o.d;
+    }
 };
-Mat mul(const Mat &p, const Mat &q) { return {p.a * q.a + p.b * q.c, p.a * q.b + p.b * q.d, p.c * q.a + p.d * q.c, p.c * q.b + p.d * q.d}; }
+Mat mul(const Mat &p, const Mat &q)
+{
+    return {p.a * q.a + p.b * q.c, p.a * q.b + p.b * q.d, p.c * q.a + p.d * q.c, p.c * q.b + p.d * q.d};
+}
 constexpr Mat IDENTITY{1, 0, 0, 1}, MIRROR_X{-1, 0, 0, 1}, MIRROR_Y{1, 0, 0, -1}, TURN_180{-1, 0, 0, -1};
 // How the UI's coordinates land on the glass for each BSP rotation (the
 // BSP's compose_orientation): 90 sends the UI's x axis up and y right.
@@ -215,9 +229,9 @@ struct {
     bool stored = false;      // photos go to the NAND
     int gallery = -1;  // photo index shown, -1 viewfinder
     lv_obj_t *screen = nullptr, *viewfinder = nullptr, *status_dot = nullptr, *status_label = nullptr,
-             *thumb = nullptr, *thumb_image = nullptr, *flash_btn = nullptr, *mirror_btn = nullptr,
-             *filter_btn = nullptr, *facing_btn = nullptr, *strip = nullptr, *flash_overlay = nullptr, *message = nullptr,
-             *gallery_layer = nullptr, *gallery_title = nullptr, *filter_toast = nullptr, *photo_image = nullptr;
+              *thumb = nullptr, *thumb_image = nullptr, *flash_btn = nullptr, *mirror_btn = nullptr,
+               *filter_btn = nullptr, *facing_btn = nullptr, *strip = nullptr, *flash_overlay = nullptr, *message = nullptr,
+                *gallery_layer = nullptr, *gallery_title = nullptr, *filter_toast = nullptr, *photo_image = nullptr;
     lv_obj_t *chips[FILTERS] = {};
     volatile bool ui_dirty = false;
     volatile int last_luma = -1;
@@ -275,8 +289,11 @@ bool probe_ppa()
         int rx = -1, ry = -1, gx = -1, gy = -1;
         for (int p = 0; ok && p < N * N; ++p) {
             const int r = out[p] >> 11, g = (out[p] >> 5) & 63;
-            if (r > 20 && g < 24) rx = p % N, ry = p / N;
-            else if (g > 40 && r < 10) gx = p % N, gy = p / N;
+            if (r > 20 && g < 24) {
+                rx = p % N, ry = p / N;
+            } else if (g > 40 && r < 10) {
+                gx = p % N, gy = p / N;
+            }
         }
         ok = ok && rx >= 0 && gx >= 0;
         if (ok) ppa_mats[i] = {unit(rx), unit(gx), unit(ry), unit(gy)};
@@ -293,7 +310,10 @@ bool probe_ppa()
     return ok;
 }
 
-Mat transpose(const Mat &m) { return {m.a, m.c, m.b, m.d}; }  // a rotation's inverse
+Mat transpose(const Mat &m)
+{
+    return {m.a, m.c, m.b, m.d};    // a rotation's inverse
+}
 
 // Sensor to UI coordinates for a UI rotation, from the owner's video (the
 // phone, the speaker's logo and the cables behind it as references):
@@ -311,14 +331,19 @@ Mat transpose(const Mat &m) { return {m.a, m.c, m.b, m.d}; }  // a rotation's in
 Mat want_mat(int rotation, bool back, bool flip)
 {
     Mat glass = mul(MIRROR_Y, G.upright);
-    if (back ? flip : !flip) glass = mul(MIRROR_X, glass);
+    if (back ? flip : !flip) {
+        glass = mul(MIRROR_X, glass);
+    }
     const Mat ui = ui_mat(rotation);
     return mul(flip ? transpose(ui) : ui, glass);
 }
 
 // The flip button: a horizontal flip of whatever the camera shows, remembered
 // for each facing (want_mat's mirror is exactly that in the UI's coordinates).
-bool mirrored() { return G.back ? G.mirror_back : G.mirror; }
+bool mirrored()
+{
+    return G.back ? G.mirror_back : G.mirror;
+}
 
 // The PPA setting that shows the sensor upright in the UI's current rotation.
 uint8_t ppa_setting()
@@ -328,15 +353,21 @@ uint8_t ppa_setting()
     static uint8_t last = 0;
     const int rotation = int(bsp_display_get_rotation());
     const bool mirror = mirrored(), back = G.back;
-    if (rotation == last_rotation && mirror == last_mirror && back == last_back) return last;
+    if (rotation == last_rotation && mirror == last_mirror && back == last_back) {
+        return last;
+    }
     last_rotation = rotation;
     last_mirror = mirror;
     last_back = back;
     last = uint8_t(G.fallback ^ (mirror ? PPA_MX : 0));
-    if (!ppa_probed) return last;
+    if (!ppa_probed) {
+        return last;
+    }
     const Mat want = want_mat(rotation, back, mirror);
     for (uint8_t i = 0; i < 16; ++i)
-        if (ppa_mats[i] == want) return last = i;
+        if (ppa_mats[i] == want) {
+            return last = i;
+        }
     ESP_LOGW(TAG, "no PPA setting for rotation %d", rotation);
     return last;
 }
@@ -418,7 +449,9 @@ void judge_turn()
     for (int i = 0; i < F.count; ++i) {
         const Thumb &before = F.ring[(F.head + RING - 1 - i) % RING];
         const int64_t age = F.turned_at - before.at;
-        if (age < BEFORE_TO_US || age > BEFORE_FROM_US) continue;
+        if (age < BEFORE_TO_US || age > BEFORE_FROM_US) {
+            continue;
+        }
         same = fmaxf(same, match(before, after, t));
         other = fmaxf(other, match(before, after, transpose(t)));
         still = fmaxf(still, match(before, after, IDENTITY));
@@ -447,19 +480,25 @@ void track_facing(const mosaico_camera_frame_t &frame)
 {
     const int rotation = int(bsp_display_get_rotation());
     const int64_t now = esp_timer_get_time();
-    if (F.seen_rotation < 0) F.seen_rotation = rotation;
+    if (F.seen_rotation < 0) {
+        F.seen_rotation = rotation;
+    }
     if (rotation != F.seen_rotation) {
         F.from = F.seen_rotation, F.to = rotation, F.turned_at = now;
         F.seen_rotation = rotation;
     }
-    if (++F.every % 3 && !(F.turned_at && now - F.turned_at >= AFTER_US)) return;
+    if (++F.every % 3 && !(F.turned_at && now - F.turned_at >= AFTER_US)) {
+        return;
+    }
     take_thumb(frame, F.ring[F.head]);
     F.ring[F.head].at = now;
     F.ring[F.head].angle = board_angle;
     F.head = (F.head + 1) % RING;
     F.count = std::min(F.count + 1, RING);
     if (F.turned_at && now - F.turned_at >= AFTER_US) {
-        if (ppa_probed && G.auto_facing && ((F.to - F.from + 360) % 180)) judge_turn();  // quarter turns only
+        if (ppa_probed && G.auto_facing && ((F.to - F.from + 360) % 180)) {
+            judge_turn();    // quarter turns only
+        }
         F.turned_at = 0;
     }
 }
@@ -536,20 +575,28 @@ bool shift_of(const int16_t *a, const int16_t *b, float *shift)
         gb[i] = b[i + 1] - b[i - 1];
         texture += abs(ga[i]);
     }
-    if (texture < PB * 6) return false;  // a blank wall or the dark
+    if (texture < PB * 6) {
+        return false;    // a blank wall or the dark
+    }
     float cost[2 * PMAX + 1];
     int best = 0;
     float sum = 0;
     for (int s = -PMAX; s <= PMAX; ++s) {
         int64_t sad = 0;
         int n = 0;
-        for (int i = 1 + PMAX; i < PB - 1 - PMAX; ++i, ++n) sad += abs(gb[i] - ga[i - s]);
+        for (int i = 1 + PMAX; i < PB - 1 - PMAX; ++i, ++n) {
+            sad += abs(gb[i] - ga[i - s]);
+        }
         cost[s + PMAX] = float(sad) / float(n);
         sum += cost[s + PMAX];
-        if (cost[s + PMAX] < cost[best + PMAX]) best = s;
+        if (cost[s + PMAX] < cost[best + PMAX]) {
+            best = s;
+        }
     }
     const float mean = sum / float(2 * PMAX + 1), low = cost[best + PMAX];
-    if (abs(best) >= PMAX || low > 0.6f * mean) return false;
+    if (abs(best) >= PMAX || low > 0.6f * mean) {
+        return false;
+    }
     const float l = cost[best + PMAX - 1], r = cost[best + PMAX + 1], den = l - 2 * low + r;
     *shift = float(best) + (den > 0.001f ? 0.5f * (l - r) / den : 0.0f);
     return true;
@@ -557,11 +604,17 @@ bool shift_of(const int16_t *a, const int16_t *b, float *shift)
 
 void watch_motion(const mosaico_camera_frame_t &frame)
 {
-    if (!ppa_probed || ++M.frame % 2) return;  // every other frame: bigger shifts, half the work
+    if (!ppa_probed || ++M.frame % 2) {
+        return;    // every other frame: bigger shifts, half the work
+    }
     float gx = 0, gy = 0, gz = 0;
-    if (bsp_imu_get_gyro(&gx, &gy, &gz) != ESP_OK) return;
+    if (bsp_imu_get_gyro(&gx, &gy, &gz) != ESP_OK) {
+        return;
+    }
     const int64_t at = esp_timer_get_time();
-    if (M.gyro_at && at - M.gyro_at < 500000) board_angle += sqrtf(gx * gx + gy * gy + gz * gz) * float(at - M.gyro_at) * 1e-6f;
+    if (M.gyro_at && at - M.gyro_at < 500000) {
+        board_angle += sqrtf(gx * gx + gy * gy + gz * gz) * float(at - M.gyro_at) * 1e-6f;
+    }
     M.gyro_at = at;
     const int next = M.cur ^ 1;
     projections(frame, M.cols[next], M.rows[next]);
@@ -571,13 +624,19 @@ void watch_motion(const mosaico_camera_frame_t &frame)
     M.have = 1;
     const int prev = M.cur;
     M.cur = next;
-    if (!had || fabsf(rate) < 6.0f || fabsf(rate) > 160.0f) return;  // still, or a swing too fast to match
+    if (!had || fabsf(rate) < 6.0f || fabsf(rate) > 160.0f) {
+        return;    // still, or a swing too fast to match
+    }
     float sx, sy;
-    if (!shift_of(M.cols[prev], M.cols[next], &sx) || !shift_of(M.rows[prev], M.rows[next], &sy)) return;
+    if (!shift_of(M.cols[prev], M.cols[next], &sx) || !shift_of(M.rows[prev], M.rows[next], &sy)) {
+        return;
+    }
     // The shift as the front camera would show it, upright at rotation 0.
     const Mat &u = G.upright;
     const float fx = u.a * sx + u.b * sy, fy = u.c * sx + u.d * sy;
-    if (fabsf(fx) < 0.4f) return;
+    if (fabsf(fx) < 0.4f) {
+        return;
+    }
     const float weight = std::min(fabsf(rate) / 25.0f, 1.0f) * std::min(fabsf(fx) / 1.5f, 1.0f);
     const float vote = (fx > 0) == (rate > 0) ? weight : -weight;  // + the person, - away (as assumed)
     M.raw = M.raw * 0.94f + vote;
@@ -608,8 +667,12 @@ const Thumb *thumb_aged(int64_t now, int64_t lo, int64_t hi)
     for (int i = 0; i < F.count; ++i) {
         const Thumb &t = F.ring[(F.head + RING - 1 - i) % RING];
         const int64_t age = now - t.at;
-        if (age > hi) break;
-        if (age >= lo) return &t;
+        if (age > hi) {
+            break;
+        }
+        if (age >= lo) {
+            return &t;
+        }
     }
     return nullptr;
 }
@@ -617,7 +680,9 @@ const Thumb *thumb_aged(int64_t now, int64_t lo, int64_t hi)
 float spread(const Thumb &t)  // standard deviation of the luma: low for a covered lens or the dark
 {
     double s = 0, ss = 0;
-    for (int i = 0; i < TN * TN; ++i) s += t.px[i], ss += double(t.px[i]) * t.px[i];
+    for (int i = 0; i < TN * TN; ++i) {
+        s += t.px[i], ss += double(t.px[i]) * t.px[i];
+    }
     const double mean = s / (TN * TN);
     return float(sqrt(std::max(0.0, ss / (TN * TN) - mean * mean)));
 }
@@ -626,16 +691,24 @@ void watch_swivel()
 {
     static int seen = -1;
     static int64_t logged = 0;
-    if (F.count < 12 || seen == F.head) return;  // once per new thumbnail
+    if (F.count < 12 || seen == F.head) {
+        return;    // once per new thumbnail
+    }
     seen = F.head;
     const Thumb &now_t = F.ring[(F.head + RING - 1) % RING];
     const int64_t now = now_t.at;
-    if (now < swivel_quiet_until || F.turned_at) return;
+    if (now < swivel_quiet_until || F.turned_at) {
+        return;
+    }
     const Thumb *after = thumb_aged(now, 200000, 450000), *before = thumb_aged(now, 900000, 1300000),
-                *earlier = thumb_aged(now, 1500000, 2000000);
-    if (!after || !before || !earlier) return;
+                 *earlier = thumb_aged(now, 1500000, 2000000);
+    if (!after || !before || !earlier) {
+        return;
+    }
     const float across = match(*before, now_t, IDENTITY);
-    if (across > 0.3f) return;  // the same scene: nothing to look at
+    if (across > 0.3f) {
+        return;    // the same scene: nothing to look at
+    }
     const float turned = now_t.angle - earlier->angle;
     const float steady_after = match(*after, now_t, IDENTITY), steady_before = match(*earlier, *before, IDENTITY);
     const float tex_now = spread(now_t), tex_before = spread(*before);
@@ -643,7 +716,7 @@ void watch_swivel()
                        : steady_after < 0.45f || steady_before < 0.45f ? "not steady"
                        : across > 0.2f                             ? "too similar"
                        : tex_now < 10.0f || tex_before < 10.0f     ? "too dark or covered"
-                                                                   : nullptr;
+                       : nullptr;
     if (miss) {
         if (now - logged > 1000000) {
             logged = now;
@@ -667,7 +740,9 @@ void watch_swivel()
 
 esp_err_t convert(const mosaico_camera_frame_t &frame, uint16_t *out)
 {
-    if (frame.pixel_format != V4L2_PIX_FMT_UYVY || frame.width < CROP || frame.height < CROP) return ESP_ERR_NOT_SUPPORTED;
+    if (frame.pixel_format != V4L2_PIX_FMT_UYVY || frame.width < CROP || frame.height < CROP) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     const uint32_t bpl = frame.bytes_per_line ? frame.bytes_per_line : frame.width * 2;
     esp_cache_msync(const_cast<void *>(frame.data), frame.size, ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
     esp_cache_msync(out, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
@@ -696,7 +771,9 @@ esp_err_t convert(const mosaico_camera_frame_t &frame, uint16_t *out)
     op.mode = PPA_TRANS_MODE_BLOCKING;
     esp_err_t err = ppa_do_scale_rotate_mirror(G.ppa, &op);
     esp_cache_msync(out, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
-    if (err == ESP_OK) apply_filter(out, Filter(G.filter));
+    if (err == ESP_OK) {
+        apply_filter(out, Filter(G.filter));
+    }
     return err;
 }
 
@@ -708,7 +785,9 @@ void reset_sensor()
     gpio_config_t io = {};
     io.pin_bit_mask = BIT64(GPIO_NUM_53) | BIT64(GPIO_NUM_48);
     io.mode = GPIO_MODE_OUTPUT;
-    if (gpio_config(&io) != ESP_OK) return;
+    if (gpio_config(&io) != ESP_OK) {
+        return;
+    }
     gpio_set_level(GPIO_NUM_48, 0);  // power-down released
     gpio_set_level(GPIO_NUM_53, 0);  // reset asserted
     vTaskDelay(pdMS_TO_TICKS(20));
@@ -718,9 +797,13 @@ void reset_sensor()
 
 void close_camera()
 {
-    if (!G.camera) return;
+    if (!G.camera) {
+        return;
+    }
     G.torch_lit = false;
-    if (G.streaming) mosaico_camera_stop_stream(G.camera);
+    if (G.streaming) {
+        mosaico_camera_stop_stream(G.camera);
+    }
     G.streaming = false;
     mosaico_camera_close(G.camera);
     mosaico_camera_del(G.camera);
@@ -732,9 +815,13 @@ bool open_camera()
     reset_sensor();
     mosaico_camera_config_t config = MOSAICO_CAMERA_DEFAULT_CONFIG();
     esp_err_t err = mosaico_camera_new(&config, &G.camera);
-    if (err == ESP_OK) err = mosaico_camera_open(G.camera);
+    if (err == ESP_OK) {
+        err = mosaico_camera_open(G.camera);
+    }
     if (err != ESP_OK) {
-        if (G.camera) mosaico_camera_del(G.camera);
+        if (G.camera) {
+            mosaico_camera_del(G.camera);
+        }
         G.camera = nullptr;
         G.present = false;
         G.probed = true;
@@ -754,7 +841,9 @@ bool open_camera()
         // degrees, vertical mirror); the SC101IOT (1280x720) a quarter turn on.
         if (!(info.width == 1280 && info.height == 720)) {
             G.fallback = 3 | PPA_MY;
-            if (ppa_probed) G.upright = ppa_mats[3 | PPA_MY];
+            if (ppa_probed) {
+                G.upright = ppa_mats[3 | PPA_MY];
+            }
         }
     }
     return true;
@@ -766,14 +855,21 @@ void flush_pending();
 // the camera streams and comes back (with the photos taken meanwhile) after.
 void stream(bool on)
 {
-    if (!G.camera || G.streaming == on) return;
-    if (on) mosaico_storage_pause(true);
-    if (on ? mosaico_camera_start_stream(G.camera) == ESP_OK : mosaico_camera_stop_stream(G.camera) == ESP_OK)
+    if (!G.camera || G.streaming == on) {
+        return;
+    }
+    if (on) {
+        mosaico_storage_pause(true);
+    }
+    if (on ? mosaico_camera_start_stream(G.camera) == ESP_OK : mosaico_camera_stop_stream(G.camera) == ESP_OK) {
         G.streaming = on;
+    }
     set_status(G.streaming ? "" : "Paused");
     if (!G.streaming && G.stored) {
         mosaico_storage_pause(false);
-        if (mosaico_storage_mount()) flush_pending();
+        if (mosaico_storage_mount()) {
+            flush_pending();
+        }
     }
 }
 
@@ -783,7 +879,9 @@ void show_frame(int index)
         G.shown = index;
         return;
     }
-    if (!bsp_display_lock(200)) return;
+    if (!bsp_display_lock(200)) {
+        return;
+    }
     G.shown = index;
     if (G.viewfinder && G.gallery < 0) {
         lv_image_set_src(G.viewfinder, &G.dsc[index]);
@@ -796,7 +894,9 @@ void show_frame(int index)
 void make_thumb(const uint16_t *rgb)
 {
     for (int y = 0; y < THUMB; ++y)
-        for (int x = 0; x < THUMB; ++x) G.thumb_px[y * THUMB + x] = rgb[(y * H / THUMB) * W + x * W / THUMB];
+        for (int x = 0; x < THUMB; ++x) {
+            G.thumb_px[y * THUMB + x] = rgb[(y * H / THUMB) * W + x * W / THUMB];
+        }
 }
 
 void store_photo(const uint16_t *rgb, bool keep)
@@ -809,7 +909,9 @@ void store_photo(const uint16_t *rgb, bool keep)
     cfg.quality = QUALITY;
     jpeg_enc_handle_t enc = nullptr;
     int size = 0;
-    if (jpeg_enc_open(&cfg, &enc) != JPEG_ERR_OK) return;
+    if (jpeg_enc_open(&cfg, &enc) != JPEG_ERR_OK) {
+        return;
+    }
     const jpeg_error_t r = jpeg_enc_process(enc, (uint8_t *)rgb, int(FRAME_BYTES), G.jpeg, int(MAX_JPEG), &size);
     jpeg_enc_close(enc);
     if (r != JPEG_ERR_OK || size <= 0) {
@@ -828,7 +930,9 @@ void store_photo(const uint16_t *rgb, bool keep)
         snprintf(path, sizeof(path), "%s/IMG_%05u.jpg", PHOTO_DIR, G.next_number);
         FILE *f = fopen(path, "wb");
         const bool ok = f && fwrite(G.jpeg, 1, size_t(size), f) == size_t(size);
-        if (f) fclose(f);
+        if (f) {
+            fclose(f);
+        }
         if (ok) {
             std::lock_guard<std::mutex> guard(G.lock);
             ++G.next_number;
@@ -840,7 +944,9 @@ void store_photo(const uint16_t *rgb, bool keep)
         ESP_LOGW(TAG, "could not save %s; keeping the photo in memory", path);
     }
     auto *copy = static_cast<uint8_t *>(heap_caps_malloc(size_t(size), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (!copy) return;
+    if (!copy) {
+        return;
+    }
     memcpy(copy, G.jpeg, size_t(size));
     std::lock_guard<std::mutex> guard(G.lock);
     // Over the memory budget: drop the oldest temporary photos first, and
@@ -849,7 +955,9 @@ void store_photo(const uint16_t *rgb, bool keep)
         for (size_t i = 0; i < G.photos.size() && (G.photos.size() >= MAX_PHOTOS || G.photo_bytes + size_t(size) > MAX_PHOTO_BYTES);) {
             Photo &old = G.photos[i];
             if (old.jpeg && old.path.empty() && old.nas.empty() && (pass || !old.keep)) {
-                if (old.keep) ESP_LOGW(TAG, "memory full: dropping a photo the NAS never got");
+                if (old.keep) {
+                    ESP_LOGW(TAG, "memory full: dropping a photo the NAS never got");
+                }
                 G.photo_bytes -= old.size;
                 heap_caps_free(old.jpeg);
                 G.photos.erase(G.photos.begin() + long(i));
@@ -862,7 +970,9 @@ void store_photo(const uint16_t *rgb, bool keep)
     G.stored_count = G.stored_count + 1;
     ++photos_revision;
     ESP_LOGI(TAG, "photo %u: %d bytes", unsigned(G.photos.size()), size);
-    if (uploader) xTaskNotifyGive(uploader);
+    if (uploader) {
+        xTaskNotifyGive(uploader);
+    }
 }
 
 // A photo's JPEG, from memory, its file or the NAS (takes G.lock itself, and
@@ -872,7 +982,9 @@ bool photo_bytes(int index, std::vector<uint8_t> &out)
     std::string nas;
     {
         std::lock_guard<std::mutex> guard(G.lock);
-        if (index < 0 || index >= int(G.photos.size())) return false;
+        if (index < 0 || index >= int(G.photos.size())) {
+            return false;
+        }
         const Photo &p = G.photos[size_t(index)];
         if (p.jpeg) {
             out.assign(p.jpeg, p.jpeg + p.size);
@@ -880,7 +992,9 @@ bool photo_bytes(int index, std::vector<uint8_t> &out)
         }
         if (!p.path.empty()) {
             FILE *f = fopen(p.path.c_str(), "rb");
-            if (!f) return false;
+            if (!f) {
+                return false;
+            }
             out.resize(p.size);
             const bool ok = fread(out.data(), 1, p.size, f) == p.size;
             fclose(f);
@@ -890,7 +1004,9 @@ bool photo_bytes(int index, std::vector<uint8_t> &out)
     }
     uint8_t *data = nullptr;
     size_t size = 0;
-    if (nas.empty() || !files_nas_get(nas.c_str(), &data, &size)) return false;
+    if (nas.empty() || !files_nas_get(nas.c_str(), &data, &size)) {
+        return false;
+    }
     out.assign(data, data + size);
     heap_caps_free(data);
     return true;
@@ -900,11 +1016,15 @@ bool photo_bytes(int index, std::vector<uint8_t> &out)
 void nas_thumb(int index)
 {
     std::vector<uint8_t> jpeg;
-    if (!photo_bytes(index, jpeg)) return;
+    if (!photo_bytes(index, jpeg)) {
+        return;
+    }
     jpeg_dec_config_t cfg = DEFAULT_JPEG_DEC_CONFIG();
     cfg.output_type = JPEG_PIXEL_FORMAT_RGB565_LE;
     jpeg_dec_handle_t dec = nullptr;
-    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) return;
+    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) {
+        return;
+    }
     jpeg_dec_io_t io = {};
     io.inbuf = jpeg.data();
     io.inbuf_len = int(jpeg.size());
@@ -912,14 +1032,16 @@ void nas_thumb(int index)
     int outlen = 0;
     auto *px = static_cast<uint16_t *>(jpeg_calloc_align(FRAME_BYTES, 16));
     if (px && jpeg_dec_parse_header(dec, &io, &header) == JPEG_ERR_OK && header.width == W && header.height == H &&
-        jpeg_dec_get_outbuf_len(dec, &outlen) == JPEG_ERR_OK && size_t(outlen) <= FRAME_BYTES) {
+            jpeg_dec_get_outbuf_len(dec, &outlen) == JPEG_ERR_OK && size_t(outlen) <= FRAME_BYTES) {
         io.outbuf = reinterpret_cast<uint8_t *>(px);
         if (jpeg_dec_process(dec, &io) == JPEG_ERR_OK) {
             make_thumb(px);
             G.ui_dirty = true;
         }
     }
-    if (px) jpeg_free_align(px);
+    if (px) {
+        jpeg_free_align(px);
+    }
     jpeg_dec_close(dec);
 }
 
@@ -944,11 +1066,15 @@ void upload_task(void *)
                 ++photos_revision;
                 continue;
             }
-            std::sort(found, found + n, [](const files_photo_t &a, const files_photo_t &b) { return strcmp(a.name, b.name) < 0; });
+            std::sort(found, found + n, [](const files_photo_t &a, const files_photo_t &b) {
+                return strcmp(a.name, b.name) < 0;
+            });
             unsigned top = 0;
             for (int i = 0; i < n; ++i) {
                 unsigned num = 0;
-                if (sscanf(found[i].name, "IMG_%u.jpg", &num) == 1) top = std::max(top, num);
+                if (sscanf(found[i].name, "IMG_%u.jpg", &num) == 1) {
+                    top = std::max(top, num);
+                }
             }
             int added = 0;
             bool only_nas;
@@ -959,7 +1085,9 @@ void upload_task(void *)
                 for (int i = 0; i < n; ++i) {
                     bool known = false;
                     for (const Photo &p : G.photos)
-                        if (p.nas == found[i].name) known = true;
+                        if (p.nas == found[i].name) {
+                            known = true;
+                        }
                     if (!known)
                         unseen.push_back({nullptr, found[i].size, found[i].mtime > 1700000000 ? found[i].mtime : 0,
                                           std::string(), found[i].name, true});
@@ -969,18 +1097,26 @@ void upload_task(void *)
                 // Oldest first by time where every photo has one (the Gallery shows newest first).
                 bool timed = true;
                 for (const Photo &p : G.photos)
-                    if (!p.at) timed = false;
+                    if (!p.at) {
+                        timed = false;
+                    }
                 if (timed && added)
-                    std::stable_sort(G.photos.begin(), G.photos.end(), [](const Photo &a, const Photo &b) { return a.at < b.at; });
+                    std::stable_sort(G.photos.begin(), G.photos.end(), [](const Photo & a, const Photo & b) {
+                    return a.at < b.at;
+                });
                 G.next_number = std::max(G.next_number, top + 1);
                 only_nas = true;
                 for (const Photo &p : G.photos)
-                    if (p.jpeg || !p.path.empty()) only_nas = false;
+                    if (p.jpeg || !p.path.empty()) {
+                        only_nas = false;
+                    }
                 nas_list_state = 1;
                 ++photos_revision;
             }
             ESP_LOGI(TAG, "%d photos on the NAS (%d new to the list)", n, added);
-            if (n && added && only_nas) nas_thumb(int(G.photos.size()) - 1);
+            if (n && added && only_nas) {
+                nas_thumb(int(G.photos.size()) - 1);
+            }
         }
         // Upload what is new, oldest first.
         for (;;) {
@@ -999,7 +1135,9 @@ void upload_task(void *)
                         break;
                     }
             }
-            if (index < 0) break;
+            if (index < 0) {
+                break;
+            }
             if (!files_nas_put(name, jpeg.data(), jpeg.size())) {
                 std::lock_guard<std::mutex> guard(G.lock);
                 --G.next_number;
@@ -1016,7 +1154,9 @@ void upload_task(void *)
             int kept = 0;
             for (size_t i = G.photos.size(); i-- > 0;) {
                 Photo &p = G.photos[i];
-                if (!p.jpeg || p.nas.empty()) continue;
+                if (!p.jpeg || p.nas.empty()) {
+                    continue;
+                }
                 if (++kept > KEEP_IN_RAM) {
                     G.photo_bytes -= p.size;
                     heap_caps_free(p.jpeg);
@@ -1036,20 +1176,28 @@ void load_photos()
     }
     mkdir(PHOTO_DIR, 0775);
     DIR *d = opendir(PHOTO_DIR);
-    if (!d) return;
+    if (!d) {
+        return;
+    }
     std::vector<Photo> found;
     unsigned top = 0;
     while (dirent *e = readdir(d)) {
         unsigned n = 0;
-        if (sscanf(e->d_name, "IMG_%u.jpg", &n) != 1) continue;
+        if (sscanf(e->d_name, "IMG_%u.jpg", &n) != 1) {
+            continue;
+        }
         const std::string path = std::string(PHOTO_DIR) + "/" + e->d_name;
         struct stat st;
-        if (stat(path.c_str(), &st) || st.st_size <= 0) continue;
+        if (stat(path.c_str(), &st) || st.st_size <= 0) {
+            continue;
+        }
         found.push_back({nullptr, size_t(st.st_size), uint32_t(st.st_mtime > 1700000000 ? st.st_mtime : 0), path, std::string(), true});
         top = std::max(top, n);
     }
     closedir(d);
-    std::sort(found.begin(), found.end(), [](const Photo &a, const Photo &b) { return a.path < b.path; });
+    std::sort(found.begin(), found.end(), [](const Photo & a, const Photo & b) {
+        return a.path < b.path;
+    });
     {
         std::lock_guard<std::mutex> guard(G.lock);
         G.photos.insert(G.photos.begin(), found.begin(), found.end());
@@ -1057,32 +1205,43 @@ void load_photos()
         G.stored = true;
     }
     ESP_LOGI(TAG, "%u photos on the NAND (%s)", unsigned(found.size()), mosaico_storage_status());
-    if (found.empty()) return;
+    if (found.empty()) {
+        return;
+    }
     // The newest one's thumbnail.
     std::vector<uint8_t> jpeg;
     {
         std::lock_guard<std::mutex> guard(G.lock);
-        if (!G.photos.empty() && G.photos.back().jpeg) jpeg.assign(G.photos.back().jpeg, G.photos.back().jpeg + G.photos.back().size);
-        else if (!G.photos.empty() && !G.photos.back().path.empty()) {
+        if (!G.photos.empty() && G.photos.back().jpeg) {
+            jpeg.assign(G.photos.back().jpeg, G.photos.back().jpeg + G.photos.back().size);
+        } else if (!G.photos.empty() && !G.photos.back().path.empty()) {
             FILE *f = fopen(G.photos.back().path.c_str(), "rb");
-            if (!f) return;
+            if (!f) {
+                return;
+            }
             jpeg.resize(G.photos.back().size);
             const bool ok = fread(jpeg.data(), 1, jpeg.size(), f) == jpeg.size();
             fclose(f);
-            if (!ok) return;
-        } else return;
+            if (!ok) {
+                return;
+            }
+        } else {
+            return;
+        }
     }
     jpeg_dec_config_t cfg = DEFAULT_JPEG_DEC_CONFIG();
     cfg.output_type = JPEG_PIXEL_FORMAT_RGB565_LE;
     jpeg_dec_handle_t dec = nullptr;
-    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) return;
+    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) {
+        return;
+    }
     jpeg_dec_io_t io = {};
     io.inbuf = jpeg.data();
     io.inbuf_len = int(jpeg.size());
     jpeg_dec_header_info_t header = {};
     int outlen = 0;
     if (jpeg_dec_parse_header(dec, &io, &header) == JPEG_ERR_OK && header.width == W && header.height == H &&
-        jpeg_dec_get_outbuf_len(dec, &outlen) == JPEG_ERR_OK && size_t(outlen) <= FRAME_BYTES) {
+            jpeg_dec_get_outbuf_len(dec, &outlen) == JPEG_ERR_OK && size_t(outlen) <= FRAME_BYTES) {
         io.outbuf = reinterpret_cast<uint8_t *>(G.view);
         if (jpeg_dec_process(dec, &io) == JPEG_ERR_OK) {
             make_thumb(G.view);
@@ -1102,10 +1261,14 @@ void screen_flash(bool on)
     if (bsp_display_lock(500)) {
         lv_anim_delete(G.flash_overlay, nullptr);
         lv_obj_set_style_bg_opa(G.flash_overlay, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-        if (on) lv_obj_move_foreground(G.flash_overlay);
+        if (on) {
+            lv_obj_move_foreground(G.flash_overlay);
+        }
         bsp_display_unlock();
     }
-    if (brightness_hook) brightness_hook(on ? 100 : -1);
+    if (brightness_hook) {
+        brightness_hook(on ? 100 : -1);
+    }
 }
 
 void capture_now()
@@ -1122,7 +1285,9 @@ void capture_now()
         const TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(FLASH_LEAD_MS);
         while (xTaskGetTickCount() < until) {
             mosaico_camera_frame_t lead = {};
-            if (mosaico_camera_get_frame(G.camera, &lead) != ESP_OK) break;
+            if (mosaico_camera_get_frame(G.camera, &lead) != ESP_OK) {
+                break;
+            }
             mosaico_camera_return_frame(G.camera, &lead);
         }
     }
@@ -1136,13 +1301,19 @@ void capture_now()
         int used = 0;
         for (uint32_t n = 0; lit && (n < FLASH_LEAD_FRAMES || xTaskGetTickCount() < until); ++n) {
             mosaico_camera_frame_t lead = {};
-            if (mosaico_camera_get_frame(G.camera, &lead) != ESP_OK) break;
+            if (mosaico_camera_get_frame(G.camera, &lead) != ESP_OK) {
+                break;
+            }
             esp_cache_msync(const_cast<void *>(lead.data), lead.size, ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
             const uint8_t *px = static_cast<const uint8_t *>(lead.data);
             uint32_t sum = 0, count = 0;
-            for (size_t i = 1; i < lead.size; i += 2 * 97, ++count) sum += px[i];
+            for (size_t i = 1; i < lead.size; i += 2 * 97, ++count) {
+                sum += px[i];
+            }
             mosaico_camera_return_frame(G.camera, &lead);
-            if (used < int(sizeof(trace)) - 8) used += snprintf(trace + used, sizeof(trace) - used, " %u", unsigned(count ? sum / count : 0));
+            if (used < int(sizeof(trace)) - 8) {
+                used += snprintf(trace + used, sizeof(trace) - used, " %u", unsigned(count ? sum / count : 0));
+            }
         }
         ESP_LOGI(TAG, "flash lead luma:%s", trace);
     }
@@ -1151,9 +1322,13 @@ void capture_now()
         uint16_t *out = G.frames[G.shown ^ 1];
         const esp_err_t err = convert(frame, out);
         mosaico_camera_return_frame(G.camera, &frame);
-        if (lit) mosaico_camera_flash_stop(G.camera);
+        if (lit) {
+            mosaico_camera_flash_stop(G.camera);
+        }
         lit = false;
-        if (screen) screen_flash(false);
+        if (screen) {
+            screen_flash(false);
+        }
         if (err == ESP_OK) {
             uint64_t sum = 0;  // mean luma, for the test RPC
             for (size_t i = 0; i < size_t(W) * H; i += 7) {
@@ -1169,17 +1344,28 @@ void capture_now()
             G.ui_dirty = true;
         }
     }
-    if (lit) mosaico_camera_flash_stop(G.camera);
-    if (screen) screen_flash(false);  // (again, if the frame failed)
-    if (pulse) mosaico_camera_restore_flash_capture(G.camera, &flash);
+    if (lit) {
+        mosaico_camera_flash_stop(G.camera);
+    }
+    if (screen) {
+        screen_flash(false);    // (again, if the frame failed)
+    }
+    if (pulse) {
+        mosaico_camera_restore_flash_capture(G.camera, &flash);
+    }
 }
 
 void set_torch(bool on)
 {
-    if (!G.camera || G.torch_lit == on) return;
+    if (!G.camera || G.torch_lit == on) {
+        return;
+    }
     const esp_err_t err = on ? mosaico_camera_flash_trigger(G.camera) : mosaico_camera_flash_stop(G.camera);
-    if (err == ESP_OK) G.torch_lit = on;
-    else ESP_LOGW(TAG, "torch %s failed: %s", on ? "on" : "off", esp_err_to_name(err));
+    if (err == ESP_OK) {
+        G.torch_lit = on;
+    } else {
+        ESP_LOGW(TAG, "torch %s failed: %s", on ? "on" : "off", esp_err_to_name(err));
+    }
 }
 
 // Photos taken while the NAND was paused: write them out now.
@@ -1187,13 +1373,19 @@ void flush_pending()
 {
     std::lock_guard<std::mutex> guard(G.lock);
     for (Photo &p : G.photos) {
-        if (!p.jpeg || !p.path.empty()) continue;
-        if (mosaico_storage_free_bytes() < KEEP_FREE + p.size) break;
+        if (!p.jpeg || !p.path.empty()) {
+            continue;
+        }
+        if (mosaico_storage_free_bytes() < KEEP_FREE + p.size) {
+            break;
+        }
         char path[64];
         snprintf(path, sizeof(path), "%s/IMG_%05u.jpg", PHOTO_DIR, G.next_number);
         FILE *f = fopen(path, "wb");
         const bool ok = f && fwrite(p.jpeg, 1, p.size, f) == p.size;
-        if (f) fclose(f);
+        if (f) {
+            fclose(f);
+        }
         if (!ok) {
             unlink(path);
             ESP_LOGW(TAG, "could not save %s", path);
@@ -1225,7 +1417,10 @@ struct WebcamPlan {
 };
 
 // The PPA's own rounding of a block side b at scale k / 16 (ppa_srm.c).
-uint32_t ppa_scaled(uint32_t b, int k) { return uint32_t(k / 16) * b + uint32_t(k % 16) * b / 16; }
+uint32_t ppa_scaled(uint32_t b, int k)
+{
+    return uint32_t(k / 16) * b + uint32_t(k % 16) * b / 16;
+}
 
 // A block side that the PPA scales to exactly out at k / 16, at most max (even
 // if asked: UYVY's x); 0 if there is none.
@@ -1233,7 +1428,9 @@ uint32_t block_side(int out, int k, uint32_t max, bool even)
 {
     const int c = (out * 16 + k - 1) / k;
     for (int b = c - 1; b <= c + 1; ++b)
-        if (b > 0 && uint32_t(b) <= max && !(even && (b & 1)) && ppa_scaled(b, k) == uint32_t(out)) return b;
+        if (b > 0 && uint32_t(b) <= max && !(even && (b & 1)) && ppa_scaled(b, k) == uint32_t(out)) {
+            return b;
+        }
     return 0;
 }
 
@@ -1246,13 +1443,19 @@ bool plan_webcam(WebcamPlan &p)
     const Mat want = want_mat(p.rotation, p.back, p.flip);
     int setting = -1;
     for (int i = 0; i < 16 && setting < 0; ++i)
-        if (ppa_mats[i] == want) setting = i;
-    if (setting < 0) return false;
+        if (ppa_mats[i] == want) {
+            setting = i;
+        }
+    if (setting < 0) {
+        return false;
+    }
     const bool quarter = setting & 1;  // 90 or 270: the frame's width runs along the sensor's y
     for (int k = 1; k < 16 * 16; ++k) {
         const uint32_t bx = block_side(quarter ? p.h : p.w, k, p.fw, true);
         const uint32_t by = block_side(quarter ? p.w : p.h, k, p.fh, false);
-        if (!bx || !by) continue;
+        if (!bx || !by) {
+            continue;
+        }
         p.setting = uint8_t(setting);
         p.bw = bx, p.bh = by, p.k = k;
         p.ox = ((p.fw - bx) / 2) & ~1u;
@@ -1293,11 +1496,15 @@ void webcam_encode(const WebcamSlot &s)
     uint32_t size = 0;
     if (jpeg_encoder_process(G.wc_encoder, &enc, static_cast<const uint8_t *>(s.buf),
                              uint32_t(s.yuv ? s.w * s.h * 3 / 2 : s.w * s.h * 2), G.wc_jpeg, G.wc_jpeg_size,
-                             &size) != ESP_OK || !size) return;
+                             &size) != ESP_OK || !size) {
+        return;
+    }
     const int64_t t2 = esp_timer_get_time();
     // The encoder wrote it by DMA; the sink reads it with the CPU.
     esp_cache_msync(G.wc_jpeg, G.wc_jpeg_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
-    if (void (*sink)(const unsigned char *, size_t) = G.webcam_sink) sink(G.wc_jpeg, size);
+    if (void (*sink)(const unsigned char *, size_t) = G.webcam_sink) {
+        sink(G.wc_jpeg, size);
+    }
     const int64_t t3 = esp_timer_get_time();
     WS.ppa += s.ppa_us, WS.jpeg += t2 - t1, WS.total += s.ppa_us + (t3 - t1);
     WS.worst = std::max(WS.worst, s.ppa_us + (t3 - t1));
@@ -1325,17 +1532,25 @@ void webcam_frame(const mosaico_camera_frame_t &frame)
 {
     void (*sink)(const unsigned char *, size_t) = G.webcam_sink;
     const camera_webcam_view_t view = G.webcam_view;
-    if (!sink || !view || !ppa_probed || frame.pixel_format != V4L2_PIX_FMT_UYVY) return;
+    if (!sink || !view || !ppa_probed || frame.pixel_format != V4L2_PIX_FMT_UYVY) {
+        return;
+    }
     int w = 0, h = 0, rotation = 0;
     view(&w, &h, &rotation);
-    if (w <= 0 || h <= 0 || w > WC_MAX_W || h > WC_MAX_H) return;  // nobody watching
+    if (w <= 0 || h <= 0 || w > WC_MAX_W || h > WC_MAX_H) {
+        return;    // nobody watching
+    }
     static bool ready = false, failed = false;
     if (!ready && !failed) {
         ready = webcam_setup();
         failed = !ready;
-        if (failed) ESP_LOGW(TAG, "webcam: no memory for frames");
+        if (failed) {
+            ESP_LOGW(TAG, "webcam: no memory for frames");
+        }
     }
-    if (!ready) return;
+    if (!ready) {
+        return;
+    }
     const uint32_t bpl = frame.bytes_per_line ? frame.bytes_per_line : frame.width * 2;
     // The true view (others see you as the front camera does; the rear is a
     // window), unless the flip button mirrored it: want_mat's flip is the
@@ -1343,7 +1558,7 @@ void webcam_frame(const mosaico_camera_frame_t &frame)
     const bool flip = G.back ? G.mirror_back : !G.mirror;
     static WebcamPlan plan;
     if (plan.w != w || plan.h != h || plan.rotation != rotation || plan.back != G.back || plan.flip != flip ||
-        plan.fw != bpl / 2 || plan.fh != frame.height) {
+            plan.fw != bpl / 2 || plan.fh != frame.height) {
         plan = {};
         plan.w = w, plan.h = h, plan.rotation = rotation, plan.back = G.back, plan.flip = flip;
         plan.fw = bpl / 2, plan.fh = frame.height;
@@ -1356,7 +1571,9 @@ void webcam_frame(const mosaico_camera_frame_t &frame)
                      (unsigned long)plan.bh, (unsigned long)plan.ox, (unsigned long)plan.oy, plan.k, plan.setting);
         }
     }
-    if (!plan.bw) return;
+    if (!plan.bw) {
+        return;
+    }
     WebcamSlot &slot = wc_slot;
     const bool yuv = G.wc_yuv;
     ppa_srm_oper_config_t op = {};
@@ -1384,7 +1601,9 @@ void webcam_frame(const mosaico_camera_frame_t &frame)
     op.mirror_y = plan.setting & PPA_MY;
     op.mode = PPA_TRANS_MODE_BLOCKING;
     const int64_t t0 = esp_timer_get_time();
-    if (ppa_do_scale_rotate_mirror(G.ppa, &op) != ESP_OK) return;
+    if (ppa_do_scale_rotate_mirror(G.ppa, &op) != ESP_OK) {
+        return;
+    }
     slot.w = w, slot.h = h, slot.yuv = yuv;
     slot.ppa_us = esp_timer_get_time() - t0;
     webcam_encode(slot);
@@ -1405,7 +1624,9 @@ void capture_task(void *)
             // keeps; without it the speech socket's TLS could not start.
             static TickType_t idle_since = 0;
             if (G.camera && !G.torch_only && G.gallery < 0 && !G.active && !G.headless && !webcam) {
-                if (!idle_since) idle_since = xTaskGetTickCount();
+                if (!idle_since) {
+                    idle_since = xTaskGetTickCount();
+                }
                 if (xTaskGetTickCount() - idle_since >= pdMS_TO_TICKS(100)) {  // right away: Swifty may listen next
                     close_camera();
                     idle_since = 0;
@@ -1463,7 +1684,9 @@ void capture_task(void *)
         failures = 0;
         // A photo open in the gallery needs no viewfinder; a restart wants the
         // stream stopped now (the loop's top does it), not one more frame drawn.
-        if (webcam && !G.shutdown) webcam_frame(frame);
+        if (webcam && !G.shutdown) {
+            webcam_frame(frame);
+        }
         if ((G.gallery >= 0 && !G.headless) || G.shutdown || (webcam && !G.active && !G.headless)) {
             mosaico_camera_return_frame(G.camera, &frame);  // the webcam alone needs no viewfinder
             continue;
@@ -1473,10 +1696,14 @@ void capture_task(void *)
         if (err == ESP_OK) {  // after convert: the frame is fresh in the cache
             track_facing(frame);
             watch_motion(frame);
-            if (ppa_probed && G.auto_facing) watch_swivel();
+            if (ppa_probed && G.auto_facing) {
+                watch_swivel();
+            }
         }
         mosaico_camera_return_frame(G.camera, &frame);
-        if (err == ESP_OK) show_frame(next);
+        if (err == ESP_OK) {
+            show_frame(next);
+        }
     }
 }
 
@@ -1499,18 +1726,24 @@ esp_err_t rpc_list(const esp_iris_rpc_request_t *, uint8_t *out, size_t capacity
 
 esp_err_t rpc_read(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capacity, size_t *size, void *)
 {
-    if (request->payload_size < 6) return ESP_ERR_INVALID_ARG;
+    if (request->payload_size < 6) {
+        return ESP_ERR_INVALID_ARG;
+    }
     uint16_t index;
     uint32_t offset;
     memcpy(&index, request->payload, 2);
     memcpy(&offset, request->payload + 2, 4);
     {
         std::unique_lock<std::mutex> guard(G.lock);
-        if (index >= G.photos.size() || offset > G.photos[index].size) return ESP_ERR_INVALID_ARG;
+        if (index >= G.photos.size() || offset > G.photos[index].size) {
+            return ESP_ERR_INVALID_ARG;
+        }
         if (!G.photos[index].jpeg && G.photos[index].path.empty()) {  // on the NAS
             guard.unlock();
             std::vector<uint8_t> bytes;
-            if (!photo_bytes(index, bytes) || offset > bytes.size()) return ESP_FAIL;
+            if (!photo_bytes(index, bytes) || offset > bytes.size()) {
+                return ESP_FAIL;
+            }
             const size_t n = std::min<size_t>(capacity, bytes.size() - offset);
             memcpy(out, bytes.data() + offset, n);
             *size = n;
@@ -1518,17 +1751,23 @@ esp_err_t rpc_read(const esp_iris_rpc_request_t *request, uint8_t *out, size_t c
         }
     }
     std::lock_guard<std::mutex> guard(G.lock);
-    if (index >= G.photos.size() || offset > G.photos[index].size) return ESP_ERR_INVALID_ARG;
+    if (index >= G.photos.size() || offset > G.photos[index].size) {
+        return ESP_ERR_INVALID_ARG;
+    }
     const Photo &p = G.photos[index];
     const size_t n = std::min<size_t>(capacity, p.size - offset);
     if (p.jpeg) {
         memcpy(out, p.jpeg + offset, n);
     } else {
         FILE *f = fopen(p.path.c_str(), "rb");
-        if (!f) return ESP_FAIL;
+        if (!f) {
+            return ESP_FAIL;
+        }
         const bool ok = fseek(f, long(offset), SEEK_SET) == 0 && fread(out, 1, n, f) == n;
         fclose(f);
-        if (!ok) return ESP_FAIL;
+        if (!ok) {
+            return ESP_FAIL;
+        }
     }
     *size = n;
     return ESP_OK;
@@ -1540,11 +1779,15 @@ esp_err_t rpc_flash(const esp_iris_rpc_request_t *request, uint8_t *out, size_t 
 {
     esp_err_t err = ESP_OK;
     if (request->payload_size >= 1) {
-        if (!G.camera) return ESP_ERR_INVALID_STATE;
+        if (!G.camera) {
+            return ESP_ERR_INVALID_STATE;
+        }
         err = request->payload[0] ? mosaico_camera_flash_trigger(G.camera) : mosaico_camera_flash_stop(G.camera);
     }
     FILE *f = fmemopen(out, capacity, "w");
-    if (!f) return ESP_ERR_NO_MEM;
+    if (!f) {
+        return ESP_ERR_NO_MEM;
+    }
     gpio_input_enable(GPIO_NUM_34);  // read back what the pad actually does
     fprintf(f, "set: %s, pad level %d\n", esp_err_to_name(err), gpio_get_level(GPIO_NUM_34));
     gpio_dump_io_configuration(f, BIT64(GPIO_NUM_34));
@@ -1558,12 +1801,18 @@ esp_err_t rpc_flash(const esp_iris_rpc_request_t *request, uint8_t *out, size_t 
 // with its mean luma (0-255), so flash and no flash can be compared.
 esp_err_t rpc_shoot(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capacity, size_t *size, void *)
 {
-    if (!G.streaming || G.capture) return ESP_ERR_INVALID_STATE;
+    if (!G.streaming || G.capture) {
+        return ESP_ERR_INVALID_STATE;
+    }
     const uint8_t saved = G.flash_mode;
-    if (request->payload_size >= 1) G.flash_mode = request->payload[0] ? 1 : 0;
+    if (request->payload_size >= 1) {
+        G.flash_mode = request->payload[0] ? 1 : 0;
+    }
     G.last_luma = -1;
     G.capture = true;
-    for (int i = 0; i < 60 && G.last_luma < 0; ++i) vTaskDelay(pdMS_TO_TICKS(50));
+    for (int i = 0; i < 60 && G.last_luma < 0; ++i) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
     G.flash_mode = saved;
     G.ui_dirty = true;
     *size = size_t(snprintf(reinterpret_cast<char *>(out), capacity, "luma %d", G.last_luma));
@@ -1583,7 +1832,6 @@ esp_err_t rpc_state(const esp_iris_rpc_request_t *, uint8_t *out, size_t capacit
     return ESP_OK;
 }
 
-
 // ---- UI ---------------------------------------------------------------------------------------
 lv_obj_t *circle_button(lv_obj_t *parent, int x, int y, int size, uint32_t bg, lv_opa_t opa = LV_OPA_COVER)
 {
@@ -1602,7 +1850,10 @@ void toggle_look(lv_obj_t *b, bool on)
     lv_obj_set_style_line_color(lv_obj_get_child(b, 0), lv_color_hex(on ? ACC.ink : TEXT), 0);
 }
 
-void pop(void *o, int32_t v) { lv_obj_set_style_transform_scale(static_cast<lv_obj_t *>(o), v, 0); }
+void pop(void *o, int32_t v)
+{
+    lv_obj_set_style_transform_scale(static_cast<lv_obj_t *>(o), v, 0);
+}
 
 void update_ui()
 {
@@ -1611,19 +1862,28 @@ void update_ui()
     lv_obj_set_style_bg_color(G.status_dot, lv_color_hex(live ? RED : G.present ? WARN : TEXT3), 0);
     // Live needs no word: the chip shows only a state to notice, or the filter.
     char status[64];
-    if (live) strlcpy(status, G.filter != NORMAL ? FILTER_NAMES[G.filter] : "", sizeof(status));
-    else strlcpy(status, G.status, sizeof(status));
+    if (live) {
+        strlcpy(status, G.filter != NORMAL ? FILTER_NAMES[G.filter] : "", sizeof(status));
+    } else {
+        strlcpy(status, G.status, sizeof(status));
+    }
     lv_label_set_text(G.status_label, status);
     lv_obj_t *chip = lv_obj_get_parent(G.status_label);
-    if (status[0]) lv_obj_remove_flag(chip, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(chip, LV_OBJ_FLAG_HIDDEN);
+    if (status[0]) {
+        lv_obj_remove_flag(chip, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(chip, LV_OBJ_FLAG_HIDDEN);
+    }
     size_t n;
     {
         std::lock_guard<std::mutex> guard(G.lock);
         n = G.photos.size();
     }
-    if (n) lv_obj_remove_flag(G.thumb_image, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(G.thumb_image, LV_OBJ_FLAG_HIDDEN);
+    if (n) {
+        lv_obj_remove_flag(G.thumb_image, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(G.thumb_image, LV_OBJ_FLAG_HIDDEN);
+    }
     if (G.captured && G.pick) {  // taken for Swifty: hand it over
         G.captured = false;
         auto done = G.pick;
@@ -1662,18 +1922,28 @@ void update_ui()
         lv_obj_set_style_bg_opa(G.chips[i], on ? LV_OPA_COVER : 150, 0);
         lv_obj_set_style_text_color(lv_obj_get_child(G.chips[i], 0), lv_color_hex(on ? ACC.ink : TEXT), 0);
     }
-    if (!G.present && G.probed && G.started && !live) lv_obj_remove_flag(G.message, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(G.message, LV_OBJ_FLAG_HIDDEN);
+    if (!G.present && G.probed && G.started && !live) {
+        lv_obj_remove_flag(G.message, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(G.message, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
-void flash_fade(void *o, int32_t v) { lv_obj_set_style_bg_opa(static_cast<lv_obj_t *>(o), lv_opa_t(v), 0); }
+void flash_fade(void *o, int32_t v)
+{
+    lv_obj_set_style_bg_opa(static_cast<lv_obj_t *>(o), lv_opa_t(v), 0);
+}
 
 void shutter_cb(lv_event_t *)
 {
-    if (!G.streaming || G.capture) return;
+    if (!G.streaming || G.capture) {
+        return;
+    }
     G.capture_keep = !G.pick;  // a photo picked for Swifty stays temporary
     G.capture = true;
-    if (G.flash_mode == 1 && !G.back) return;  // the screen flash is the capture task's
+    if (G.flash_mode == 1 && !G.back) {
+        return;    // the screen flash is the capture task's
+    }
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, G.flash_overlay);
@@ -1734,7 +2004,10 @@ void facing_cb(lv_event_t *)
     update_ui();
 }
 
-void toast_fade(void *o, int32_t v) { lv_obj_set_style_opa(static_cast<lv_obj_t *>(o), lv_opa_t(v), 0); }
+void toast_fade(void *o, int32_t v)
+{
+    lv_obj_set_style_opa(static_cast<lv_obj_t *>(o), lv_opa_t(v), 0);
+}
 
 void show_toast(const char *text)
 {
@@ -1759,11 +2032,17 @@ void set_filter(int f)
     lv_obj_scroll_to_view(G.chips[G.filter], LV_ANIM_ON);
 }
 
-void chip_cb(lv_event_t *e) { set_filter(int(intptr_t(lv_event_get_user_data(e)))); }
+void chip_cb(lv_event_t *e)
+{
+    set_filter(int(intptr_t(lv_event_get_user_data(e))));
+}
 void filter_btn_cb(lv_event_t *)
 {
-    if (lv_obj_has_flag(G.strip, LV_OBJ_FLAG_HIDDEN)) lv_obj_remove_flag(G.strip, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(G.strip, LV_OBJ_FLAG_HIDDEN);
+    if (lv_obj_has_flag(G.strip, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_remove_flag(G.strip, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(G.strip, LV_OBJ_FLAG_HIDDEN);
+    }
     update_ui();
 }
 
@@ -1773,12 +2052,18 @@ void show_photo(int index)
     size_t total;
     std::vector<uint8_t> copy;
     uint32_t at = 0;
-    if (G.gallery < 0) G.gallery = index;  // stops the stream: the NAND comes back
-    for (int i = 0; i < 40 && G.stored && !mosaico_storage_ready(); ++i) vTaskDelay(pdMS_TO_TICKS(50));
+    if (G.gallery < 0) {
+        G.gallery = index;    // stops the stream: the NAND comes back
+    }
+    for (int i = 0; i < 40 && G.stored && !mosaico_storage_ready(); ++i) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
     {
         std::lock_guard<std::mutex> guard(G.lock);
         total = G.photos.size();
-        if (!total) return;
+        if (!total) {
+            return;
+        }
         index = (index % int(total) + int(total)) % int(total);
         at = G.photos[index].at;
     }
@@ -1799,7 +2084,7 @@ void show_photo(int index)
         jpeg_dec_header_info_t header = {};
         int outlen = 0;
         if (jpeg_dec_parse_header(dec, &io, &header) == JPEG_ERR_OK && jpeg_dec_get_outbuf_len(dec, &outlen) == JPEG_ERR_OK &&
-            size_t(outlen) <= FRAME_BYTES) {
+                size_t(outlen) <= FRAME_BYTES) {
             io.outbuf = reinterpret_cast<uint8_t *>(G.view);
             jpeg_dec_process(dec, &io);
         }
@@ -1838,42 +2123,63 @@ void open_gallery_cb(lv_event_t *)
         std::lock_guard<std::mutex> guard(G.lock);
         n = G.photos.size();
     }
-    if (n) show_photo(int(n) - 1);
+    if (n) {
+        show_photo(int(n) - 1);
+    }
 }
-void step_cb(lv_event_t *e) { show_photo(G.gallery + int(intptr_t(lv_event_get_user_data(e)))); }
+void step_cb(lv_event_t *e)
+{
+    show_photo(G.gallery + int(intptr_t(lv_event_get_user_data(e))));
+}
 // Swipe: between photos in the gallery, between filters in the viewfinder.
 void swipe_cb(lv_event_t *)
 {
     const lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
-    if (dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT) return;
+    if (dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT) {
+        return;
+    }
     const int step = dir == LV_DIR_LEFT ? 1 : -1;
-    if (G.gallery >= 0) show_photo(G.gallery + step);
-    else if (G.streaming) set_filter(G.filter + step);
+    if (G.gallery >= 0) {
+        show_photo(G.gallery + step);
+    } else if (G.streaming) {
+        set_filter(G.filter + step);
+    }
 }
 void delete_cb(lv_event_t *)
 {
     size_t n;
     {
         std::lock_guard<std::mutex> guard(G.lock);
-        if (G.gallery < 0 || G.gallery >= int(G.photos.size())) return;
+        if (G.gallery < 0 || G.gallery >= int(G.photos.size())) {
+            return;
+        }
         Photo &p = G.photos[G.gallery];
         if (p.jpeg) {
             G.photo_bytes -= p.size;
             heap_caps_free(p.jpeg);
         }
-        if (!p.path.empty()) unlink(p.path.c_str());
-        if (!p.nas.empty()) files_nas_delete(p.nas.c_str());
+        if (!p.path.empty()) {
+            unlink(p.path.c_str());
+        }
+        if (!p.nas.empty()) {
+            files_nas_delete(p.nas.c_str());
+        }
         G.photos.erase(G.photos.begin() + G.gallery);
         n = G.photos.size();
     }
     update_ui();
-    if (n) show_photo(std::min(G.gallery, int(n) - 1));
-    else close_gallery_cb(nullptr);
+    if (n) {
+        show_photo(std::min(G.gallery, int(n) - 1));
+    } else {
+        close_gallery_cb(nullptr);
+    }
 }
 
 void ui_timer(lv_timer_t *)
 {
-    if (G.ui_dirty) update_ui();
+    if (G.ui_dirty) {
+        update_ui();
+    }
 }
 
 void build_ui(lv_obj_t *s)
@@ -2015,7 +2321,9 @@ extern "C" void camera_app_start(lv_obj_t *screen)
     if (!G.started) {
         G.screen = screen;
         const uint32_t caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_8BIT;
-        for (auto &f : G.frames) f = static_cast<uint16_t *>(heap_caps_aligned_calloc(ALIGN, 1, FRAME_BYTES, caps));
+        for (auto &f : G.frames) {
+            f = static_cast<uint16_t *>(heap_caps_aligned_calloc(ALIGN, 1, FRAME_BYTES, caps));
+        }
         G.view = static_cast<uint16_t *>(heap_caps_aligned_calloc(ALIGN, 1, FRAME_BYTES, caps));
         G.thumb_px = static_cast<uint16_t *>(heap_caps_calloc(1, THUMB * THUMB * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
         G.jpeg = static_cast<uint8_t *>(heap_caps_malloc(MAX_JPEG, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -2028,17 +2336,33 @@ extern "C" void camera_app_start(lv_obj_t *screen)
         }
         build_luts();
         ppa_probed = probe_ppa();
-        if (ppa_probed) G.upright = ppa_mats[1 | PPA_MY];
+        if (ppa_probed) {
+            G.upright = ppa_mats[1 | PPA_MY];
+        }
         nvs_handle_t h;
         if (nvs_open("camera", NVS_READONLY, &h) == ESP_OK) {
             uint8_t v = 0;
-            if (nvs_get_u8(h, "mirror", &v) == ESP_OK) G.mirror = v;
-            if (nvs_get_u8(h, "mirrorb", &v) == ESP_OK) G.mirror_back = v;
-            if (nvs_get_u8(h, "autoface", &v) == ESP_OK) G.auto_facing = v;
-            if (nvs_get_u8(h, "msign", &v) == ESP_OK) M.sign = v ? -1.0f : 1.0f;
-            if (nvs_get_u8(h, "flash", &v) == ESP_OK) G.flash_mode = v ? 1 : 0;
-            if (nvs_get_u8(h, "filter", &v) == ESP_OK && v < FILTERS) G.filter = v;
-            if (nvs_get_u8(h, "back", &v) == ESP_OK) G.back = v;
+            if (nvs_get_u8(h, "mirror", &v) == ESP_OK) {
+                G.mirror = v;
+            }
+            if (nvs_get_u8(h, "mirrorb", &v) == ESP_OK) {
+                G.mirror_back = v;
+            }
+            if (nvs_get_u8(h, "autoface", &v) == ESP_OK) {
+                G.auto_facing = v;
+            }
+            if (nvs_get_u8(h, "msign", &v) == ESP_OK) {
+                M.sign = v ? -1.0f : 1.0f;
+            }
+            if (nvs_get_u8(h, "flash", &v) == ESP_OK) {
+                G.flash_mode = v ? 1 : 0;
+            }
+            if (nvs_get_u8(h, "filter", &v) == ESP_OK && v < FILTERS) {
+                G.filter = v;
+            }
+            if (nvs_get_u8(h, "back", &v) == ESP_OK) {
+                G.back = v;
+            }
             nvs_close(h);
         }
         build_ui(screen);
@@ -2059,18 +2383,26 @@ extern "C" void camera_app_start(lv_obj_t *screen)
 
 extern "C" int camera_app_take_photo(uint32_t timeout_ms)
 {
-    if (!G.started || G.shutdown) return -1;
+    if (!G.started || G.shutdown) {
+        return -1;
+    }
     const TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
     G.headless = true;
-    while (!G.streaming && xTaskGetTickCount() < until) vTaskDelay(pdMS_TO_TICKS(50));
+    while (!G.streaming && xTaskGetTickCount() < until) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
     int index = -1;
     if (G.streaming) {
-        while (G.capture && xTaskGetTickCount() < until) vTaskDelay(pdMS_TO_TICKS(20));
+        while (G.capture && xTaskGetTickCount() < until) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
         G.last_luma = -1;
         const uint32_t before = G.stored_count;
         G.capture = true;
         // Wait for the photo itself (JPEG encoded and stored), not just the frame.
-        while (G.stored_count == before && xTaskGetTickCount() < until) vTaskDelay(pdMS_TO_TICKS(30));
+        while (G.stored_count == before && xTaskGetTickCount() < until) {
+            vTaskDelay(pdMS_TO_TICKS(30));
+        }
         if (G.stored_count != before) {
             std::lock_guard<std::mutex> guard(G.lock);
             index = int(G.photos.size()) - 1;
@@ -2083,24 +2415,44 @@ extern "C" int camera_app_take_photo(uint32_t timeout_ms)
 
 extern "C" bool camera_app_torch(bool on)
 {
-    if (!G.started || G.shutdown) return false;
+    if (!G.started || G.shutdown) {
+        return false;
+    }
     G.torch_only = on;
-    if (!on) return true;
-    for (int i = 0; i < 100 && G.torch_only && !G.torch_lit; ++i) vTaskDelay(pdMS_TO_TICKS(50));
+    if (!on) {
+        return true;
+    }
+    for (int i = 0; i < 100 && G.torch_only && !G.torch_lit; ++i) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
     return G.torch_lit;
 }
 
-extern "C" void camera_app_set_brightness_hook(void (*set)(int percent)) { brightness_hook = set; }
-extern "C" void camera_app_set_gallery_hook(void (*open)(void)) { gallery_hook = open; }
+extern "C" void camera_app_set_brightness_hook(void (*set)(int percent))
+{
+    brightness_hook = set;
+}
+extern "C" void camera_app_set_gallery_hook(void (*open)(void))
+{
+    gallery_hook = open;
+}
 
 extern "C" bool camera_app_photo_info(int index, uint32_t *at, bool *on_nas, uint32_t *size)
 {
     std::lock_guard<std::mutex> guard(G.lock);
-    if (index < 0 || index >= int(G.photos.size())) return false;
+    if (index < 0 || index >= int(G.photos.size())) {
+        return false;
+    }
     const Photo &p = G.photos[size_t(index)];
-    if (at) *at = p.at;
-    if (on_nas) *on_nas = !p.nas.empty();
-    if (size) *size = uint32_t(p.size);
+    if (at) {
+        *at = p.at;
+    }
+    if (on_nas) {
+        *on_nas = !p.nas.empty();
+    }
+    if (size) {
+        *size = uint32_t(p.size);
+    }
     return true;
 }
 
@@ -2109,36 +2461,52 @@ extern "C" bool camera_app_delete_photo(int index)
     std::string nas;
     {
         std::lock_guard<std::mutex> guard(G.lock);
-        if (index < 0 || index >= int(G.photos.size())) return false;
+        if (index < 0 || index >= int(G.photos.size())) {
+            return false;
+        }
         Photo &p = G.photos[size_t(index)];
         if (p.jpeg) {
             G.photo_bytes -= p.size;
             heap_caps_free(p.jpeg);
         }
-        if (!p.path.empty()) unlink(p.path.c_str());
+        if (!p.path.empty()) {
+            unlink(p.path.c_str());
+        }
         nas = p.nas;
         G.photos.erase(G.photos.begin() + index);
         ++photos_revision;
     }
-    if (!nas.empty()) files_nas_delete(nas.c_str());
+    if (!nas.empty()) {
+        files_nas_delete(nas.c_str());
+    }
     G.ui_dirty = true;
     return true;
 }
 
-extern "C" uint32_t camera_app_photos_revision(void) { return photos_revision; }
+extern "C" uint32_t camera_app_photos_revision(void)
+{
+    return photos_revision;
+}
 
 extern "C" void camera_app_refresh_photos(void)
 {
     relist_wanted = true;
-    if (uploader) xTaskNotifyGive(uploader);
+    if (uploader) {
+        xTaskNotifyGive(uploader);
+    }
 }
 
-extern "C" int camera_app_photos_state(void) { return nas_list_state; }
+extern "C" int camera_app_photos_state(void)
+{
+    return nas_list_state;
+}
 
 extern "C" void camera_app_pick(void (*done)(int index))
 {
     G.pick = done;
-    if (done) set_status("Photo for Swifty");
+    if (done) {
+        set_status("Photo for Swifty");
+    }
 }
 
 extern "C" int camera_app_photo_count(void)
@@ -2152,13 +2520,21 @@ extern "C" bool camera_app_photo_jpeg(int index, uint8_t **jpeg, size_t *size)
     {
         std::lock_guard<std::mutex> guard(G.lock);
         const int n = int(G.photos.size());
-        if (index < 0) index += n;
-        if (index < 0 || index >= n) return false;
+        if (index < 0) {
+            index += n;
+        }
+        if (index < 0 || index >= n) {
+            return false;
+        }
     }
     std::vector<uint8_t> bytes;
-    if (!photo_bytes(index, bytes)) return false;
+    if (!photo_bytes(index, bytes)) {
+        return false;
+    }
     auto *copy = static_cast<uint8_t *>(heap_caps_malloc(bytes.size(), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (!copy) return false;
+    if (!copy) {
+        return false;
+    }
     memcpy(copy, bytes.data(), bytes.size());
     *jpeg = copy;
     *size = bytes.size();
@@ -2167,9 +2543,13 @@ extern "C" bool camera_app_photo_jpeg(int index, uint8_t **jpeg, size_t *size)
 
 extern "C" void camera_app_set_active(bool active)
 {
-    if (!active && G.pick) G.pick = nullptr;  // left without taking one
+    if (!active && G.pick) {
+        G.pick = nullptr;    // left without taking one
+    }
     G.active = active && G.started;
-    if (!G.active && G.gallery >= 0) close_gallery_cb(nullptr);
+    if (!G.active && G.gallery >= 0) {
+        close_gallery_cb(nullptr);
+    }
 }
 
 // A restart's shutdown handler. The restart resets the CPUs, not every DMA
@@ -2182,12 +2562,17 @@ extern "C" void camera_app_set_active(bool active)
 extern "C" void camera_app_set_frame_sink(void (*sink)(const unsigned char *jpeg, size_t length),
                                           camera_webcam_view_t view)
 {
-    if (sink) G.webcam_view = view;  // before the sink: the capture task reads both
+    if (sink) {
+        G.webcam_view = view;    // before the sink: the capture task reads both
+    }
     G.webcam_sink = sink;
     ESP_LOGI(TAG, "webcam frames %s", sink ? "on" : "off");
 }
 
-extern "C" void camera_app_webcam_yuv(bool on) { G.wc_yuv = on; }
+extern "C" void camera_app_webcam_yuv(bool on)
+{
+    G.wc_yuv = on;
+}
 
 extern "C" void camera_app_webcam_stats(char *out, size_t cap, bool reset)
 {
@@ -2200,22 +2585,33 @@ extern "C" void camera_app_webcam_stats(char *out, size_t cap, bool reset)
 
 extern "C" void camera_app_set_auto_facing(bool on)
 {
-    if (G.auto_facing == on) return;
+    if (G.auto_facing == on) {
+        return;
+    }
     G.auto_facing = on;
-    if (on) swivel_quiet_until = esp_timer_get_time() + 1000000;  // not on the picture from before
+    if (on) {
+        swivel_quiet_until = esp_timer_get_time() + 1000000;    // not on the picture from before
+    }
     save_prefs();
     ESP_LOGI(TAG, "front/rear detection %s", on ? "automatic" : "manual");
 }
 
-extern "C" bool camera_app_auto_facing(void) { return G.auto_facing; }
+extern "C" bool camera_app_auto_facing(void)
+{
+    return G.auto_facing;
+}
 
 extern "C" void camera_app_shutdown(void)
 {
     G.shutdown = true;
     G.active = false;
-    if (xTaskGetSchedulerState() != taskSCHEDULER_RUNNING) return;
+    if (xTaskGetSchedulerState() != taskSCHEDULER_RUNNING) {
+        return;
+    }
     // 1.5 s at most, in whole ticks (100 Hz: 5 ms was 0 ticks, no wait at all).
-    for (int i = 0; i < 150 && G.streaming; ++i) vTaskDelay(pdMS_TO_TICKS(10));
+    for (int i = 0; i < 150 && G.streaming; ++i) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
 }
 
 extern "C" void camera_app_summary(camera_summary_t *out)

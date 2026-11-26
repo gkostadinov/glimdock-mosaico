@@ -6,11 +6,16 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:
+      # Vendored sources (libsmb2), licence texts and fonts stay byte for byte
+      # as their upstream ships them.
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
+        exclude: &verbatim '(^|/)(third_party|managed_components|components/libsmb2|LICENSES)/|\.(ttf|otf)$|(^|/)COPYING$|LICEN[CS]E[^/]*$|OFL[^/]*\.txt$'
       - id: end-of-file-fixer
+        exclude: *verbatim
       - id: mixed-line-ending
         args: [--fix=lf]
+        exclude: *verbatim
       - id: check-yaml
       - id: check-json
       - id: check-toml
@@ -29,7 +34,7 @@ repos:
     hooks:
       - id: astyle_py
         args: [--astyle-version=3.4.7, --rules=tools/quality/astyle.yml]
-        exclude: &external_sources '(^|/)(build|build[-_][^/]*|cmake-build-[^/]*|managed_components|third_party|third-party|vendor|submodule|submodules|generated|\.venv[^/]*|venv)/|^shared/(common_components|boards)/'
+        exclude: &external_sources '(^|/)(build|build[-_][^/]*|cmake-build-[^/]*|managed_components|third_party|third-party|vendor|submodule|submodules|generated|components/libsmb2|\.venv[^/]*|venv)/|^shared/(common_components|boards)/'
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.7
     hooks:

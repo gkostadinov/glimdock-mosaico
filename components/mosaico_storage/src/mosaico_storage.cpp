@@ -49,7 +49,10 @@ struct Super {
     uint32_t version = 0, block_size = 0, block_count = 0;
 };
 
-uint32_t le32(const uint8_t *p) { return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24; }
+uint32_t le32(const uint8_t *p)
+{
+    return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
+}
 
 // LittleFS keeps its superblock in blocks 0 and 1: the name "littlefs" and,
 // a tag later, version, block size and block count (little endian).
@@ -57,19 +60,31 @@ Super find_super(esp_blockdev_handle_t dev, uint64_t block_size)
 {
     Super s;
     uint8_t *buf = static_cast<uint8_t *>(heap_caps_malloc(PROBE, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
-    if (!buf) return s;
-    for (uint64_t at : {uint64_t(0), block_size}) {
-        if (at + PROBE > dev->geometry.disk_size) break;
-        if (dev->ops->read(dev, buf, PROBE, at, PROBE) != ESP_OK) continue;
+    if (!buf) {
+        return s;
+    }
+    for (uint64_t at : {
+                uint64_t(0), block_size
+            }) {
+        if (at + PROBE > dev->geometry.disk_size) {
+            break;
+        }
+        if (dev->ops->read(dev, buf, PROBE, at, PROBE) != ESP_OK) {
+            continue;
+        }
         for (size_t i = 0; i + 32 <= PROBE; ++i) {
-            if (memcmp(buf + i, "littlefs", 8)) continue;
+            if (memcmp(buf + i, "littlefs", 8)) {
+                continue;
+            }
             s.found = true;
             s.version = le32(buf + i + 12);
             s.block_size = le32(buf + i + 16);
             s.block_count = le32(buf + i + 20);
             break;
         }
-        if (s.found) break;
+        if (s.found) {
+            break;
+        }
     }
     heap_caps_free(buf);
     return s;
@@ -80,21 +95,34 @@ Super find_super(esp_blockdev_handle_t dev, uint64_t block_size)
 uint32_t lfs_block_size(esp_blockdev_handle_t dev)
 {
     const esp_blockdev_flags_t &f = dev->device_flags;
-    if (f.erase_before_write || f.and_type_write) return uint32_t(dev->geometry.erase_size);
+    if (f.erase_before_write || f.and_type_write) {
+        return uint32_t(dev->geometry.erase_size);
+    }
     size_t a = dev->geometry.read_size, b = dev->geometry.write_size;
     size_t x = a, y = b;
-    while (y) { const size_t t = x % y; x = y; y = t; }
+    while (y) {
+        const size_t t = x % y;
+        x = y;
+        y = t;
+    }
     size_t l = x ? a / x * b : 0;
-    if (!l) return 0;
+    if (!l) {
+        return 0;
+    }
     size_t size = l;
-    while (size < 128) size += l;
+    while (size < 128) {
+        size += l;
+    }
     return uint32_t(size);
 }
 
 void close_devices()
 {
-    if (wl) wl->ops->release(wl);  // releases the flash layer under it too
-    else if (flash) flash->ops->release(flash);
+    if (wl) {
+        wl->ops->release(wl);    // releases the flash layer under it too
+    } else if (flash) {
+        flash->ops->release(flash);
+    }
     wl = flash = nullptr;
     if (spi) {
         spi_bus_remove_device(spi);
@@ -111,7 +139,9 @@ bool open_flash(uint8_t gc)
         io.mode = GPIO_MODE_OUTPUT;
         gpio_set_level(BSP_NAND_HOLD, 1);
         gpio_set_level(BSP_NAND_WP, 1);
-        if (gpio_config(&io) != ESP_OK) return false;
+        if (gpio_config(&io) != ESP_OK) {
+            return false;
+        }
         spi_bus_config_t bus = {};
         bus.mosi_io_num = BSP_NAND_D;
         bus.miso_io_num = BSP_NAND_Q;
@@ -120,7 +150,9 @@ bool open_flash(uint8_t gc)
         bus.quadwp_io_num = GPIO_NUM_NC;
         bus.max_transfer_sz = 4096 + 64;
         const esp_err_t b = spi_bus_initialize(BSP_NAND_SPI_HOST, &bus, SPI_DMA_CH_AUTO);
-        if (b != ESP_OK && b != ESP_ERR_INVALID_STATE) return false;
+        if (b != ESP_OK && b != ESP_ERR_INVALID_STATE) {
+            return false;
+        }
         spi_device_interface_config_t dev = {};
         dev.clock_speed_hz = CLOCK_HZ;
         dev.mode = 0;
@@ -143,7 +175,9 @@ bool open_flash(uint8_t gc)
 
 bool open_wl(uint8_t gc)
 {
-    if (!open_flash(gc)) return false;
+    if (!open_flash(gc)) {
+        return false;
+    }
     if (spi_nand_flash_wl_get_blockdev(flash, &wl) != ESP_OK || !wl) {
         wl = nullptr;
         return false;
@@ -164,11 +198,17 @@ int gc_for(uint32_t default_pages, uint32_t want_pages)
             cap = c;
             break;
         }
-    if (!cap || want_pages + DHARA_SAFETY_PAGES >= cap) return -1;
+    if (!cap || want_pages + DHARA_SAFETY_PAGES >= cap) {
+        return -1;
+    }
     const uint32_t reserve = cap - DHARA_SAFETY_PAGES - want_pages;
-    if (!reserve) return -1;
+    if (!reserve) {
+        return -1;
+    }
     for (uint32_t g = 1; g < 256; ++g)
-        if (cap / (g + 1) == reserve) return int(g);
+        if (cap / (g + 1) == reserve) {
+            return int(g);
+        }
     return -1;
 }
 
@@ -181,7 +221,9 @@ bool mount(esp_blockdev_handle_t dev, bool read_only)
     conf.read_only = read_only;
     conf.grow_on_mount = false;
     const esp_err_t err = esp_vfs_littlefs_register(&conf);
-    if (err != ESP_OK) ESP_LOGW(TAG, "LittleFS mount failed: %s", esp_err_to_name(err));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "LittleFS mount failed: %s", esp_err_to_name(err));
+    }
     return err == ESP_OK;
 }
 
@@ -237,8 +279,11 @@ esp_blockdev_handle_t discover()
 bool try_mount()
 {
     esp_blockdev_handle_t dev = nullptr;
-    if (!plan.known) dev = discover();
-    else if (plan.on_wl ? open_wl(plan.gc) : open_flash(0)) dev = plan.on_wl ? wl : flash;
+    if (!plan.known) {
+        dev = discover();
+    } else if (plan.on_wl ? open_wl(plan.gc) : open_flash(0)) {
+        dev = plan.on_wl ? wl : flash;
+    }
     if (!dev) {
         close_devices();
         return false;
@@ -251,7 +296,9 @@ bool try_mount()
     }
     mounted = dev;
     writable = same_version;
-    if (writable) mkdir(MOSAICO_STORAGE_DIR, 0775);
+    if (writable) {
+        mkdir(MOSAICO_STORAGE_DIR, 0775);
+    }
     size_t total = 0, used = 0;
     esp_littlefs_blockdev_info(dev, &total, &used);
     snprintf(status, sizeof(status), "%s: %u of %u MB free", writable ? "NAND" : "NAND (read-only)",
@@ -263,9 +310,13 @@ bool try_mount()
 
 void unmount()
 {
-    if (!mounted) return;
+    if (!mounted) {
+        return;
+    }
     esp_vfs_littlefs_unregister_blockdev(mounted);  // releases the device layers too
-    if (mounted == wl || mounted == flash) wl = flash = nullptr;
+    if (mounted == wl || mounted == flash) {
+        wl = flash = nullptr;
+    }
     mounted = nullptr;
     ready = false;
     close_devices();
@@ -275,29 +326,51 @@ void unmount()
 extern "C" bool mosaico_storage_mount(void)
 {
     std::lock_guard<std::recursive_mutex> g(lock);
-    if (ready || paused || failed) return ready;
+    if (ready || paused || failed) {
+        return ready;
+    }
     ready = try_mount();
-    if (!ready && !plan.known) failed = true;  // not this NAND's layout: stop probing
+    if (!ready && !plan.known) {
+        failed = true;    // not this NAND's layout: stop probing
+    }
     return ready;
 }
 
 extern "C" void mosaico_storage_pause(bool pause)
 {
     std::lock_guard<std::recursive_mutex> g(lock);
-    if (pause == paused) return;
+    if (pause == paused) {
+        return;
+    }
     paused = pause;
-    if (pause) unmount();
+    if (pause) {
+        unmount();
+    }
 }
 
-extern "C" bool mosaico_storage_ready(void) { return ready; }
-extern "C" bool mosaico_storage_paused(void) { return paused; }
-extern "C" bool mosaico_storage_writable(void) { return ready && writable; }
-extern "C" const char *mosaico_storage_status(void) { return paused && plan.known ? "In use by the camera" : status; }
+extern "C" bool mosaico_storage_ready(void)
+{
+    return ready;
+}
+extern "C" bool mosaico_storage_paused(void)
+{
+    return paused;
+}
+extern "C" bool mosaico_storage_writable(void)
+{
+    return ready && writable;
+}
+extern "C" const char *mosaico_storage_status(void)
+{
+    return paused && plan.known ? "In use by the camera" : status;
+}
 
 extern "C" unsigned long long mosaico_storage_free_bytes(void)
 {
     std::lock_guard<std::recursive_mutex> g(lock);
     size_t total = 0, used = 0;
-    if (!ready || !mounted || esp_littlefs_blockdev_info(mounted, &total, &used) != ESP_OK) return 0;
+    if (!ready || !mounted || esp_littlefs_blockdev_info(mounted, &total, &used) != ESP_OK) {
+        return 0;
+    }
     return total > used ? total - used : 0;
 }

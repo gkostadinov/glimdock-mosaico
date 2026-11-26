@@ -11,7 +11,10 @@ uint32_t millis();
 std::string home_fixture_dir;
 
 namespace home {
-uint32_t now_ms() { return millis(); }
+uint32_t now_ms()
+{
+    return millis();
+}
 
 HttpResponse http_perform(const HttpRequest &request)
 {
@@ -40,5 +43,8 @@ void prefs_load(std::string &hub, std::string &token, std::string &name, int &th
     room.clear();
 }
 void prefs_save(const std::string &, const std::string &, const std::string &, int, const std::string &) {}
-int prefs_clock_zone() { return 0; }
+int prefs_clock_zone()
+{
+    return 0;
+}
 }  // namespace home

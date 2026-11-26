@@ -64,7 +64,10 @@ BoardBatteryStatus boardBattery()
 }
 
 // The Mosaico exposes no dedicated power key to applications.
-bool boardPowerButtonDown() { return false; }
+bool boardPowerButtonDown()
+{
+    return false;
+}
 
 bool boardPowerOff()
 {

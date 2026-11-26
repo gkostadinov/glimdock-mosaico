@@ -34,7 +34,7 @@ void render_snapshot(void *)
         shot_data = static_cast<uint8_t *>(heap_caps_aligned_alloc(64, size_t(stride) * h, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     }
     if (shot_data && lv_draw_buf_init(&shot, w, h, LV_COLOR_FORMAT_RGB565, stride, shot_data, stride * h) == LV_RESULT_OK &&
-        lv_snapshot_take_to_draw_buf(screen, LV_COLOR_FORMAT_RGB565, &shot) == LV_RESULT_OK) {
+            lv_snapshot_take_to_draw_buf(screen, LV_COLOR_FORMAT_RGB565, &shot) == LV_RESULT_OK) {
         capture = &shot;
     }
     xSemaphoreGive(rendered);

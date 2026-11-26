@@ -14,9 +14,15 @@ constexpr uint32_t REQUEST_DEADLINE_MS = 3000;
 
 int hex(char c)
 {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
     return -1;
 }
 
@@ -180,7 +186,9 @@ void WebServer::handleClient()
             header_end = request.find("\r\n\r\n");
             if (header_end != std::string::npos) {
                 std::string lower = request.substr(0, header_end);
-                for (auto &c : lower) c = char(tolower((unsigned char)c));
+                for (auto &c : lower) {
+                    c = char(tolower((unsigned char)c));
+                }
                 size_t at = lower.find("\r\ncontent-length:");
                 body_length = at == std::string::npos ? 0 : size_t(strtoul(lower.c_str() + at + 17, nullptr, 10));
                 if (body_length > 8192) {

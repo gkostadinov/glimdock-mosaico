@@ -16,8 +16,14 @@ struct Config {
     std::string asr_url, asr_key, asr_model;  // Qwen/DashScope-style realtime ASR WebSocket
     std::string asr_ca;                        // optional PEM when the ASR host is not publicly signed
     std::string search_key;                    // Tavily web search (api.tavily.com); empty: no web search
-    bool llm_ready() const { return !llm_url.empty(); }
-    bool asr_ready() const { return !asr_url.empty() && !asr_key.empty() && !asr_model.empty(); }
+    bool llm_ready() const
+    {
+        return !llm_url.empty();
+    }
+    bool asr_ready() const
+    {
+        return !asr_url.empty() && !asr_key.empty() && !asr_model.empty();
+    }
 };
 
 // A copy of the current configuration (thread-safe).

@@ -42,21 +42,27 @@ bool decode(const uint8_t *jpeg, size_t size, int w, int h, Picture &out)
     jpeg_dec_handle_t dec = nullptr;
     jpeg_dec_io_t io = {};
     jpeg_dec_header_info_t header = {};
-    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) return false;
+    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) {
+        return false;
+    }
     io.inbuf = const_cast<uint8_t *>(jpeg);
     io.inbuf_len = int(size);
     const bool parsed = jpeg_dec_parse_header(dec, &io, &header) == JPEG_ERR_OK;
     jpeg_dec_close(dec);
-    if (!parsed || !header.width || !header.height) return false;
+    if (!parsed || !header.width || !header.height) {
+        return false;
+    }
     if (header.width != w || header.height != h) cfg.scale = {uint16_t(w), uint16_t(h)};
-    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) return false;
+    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) {
+        return false;
+    }
     io = {};
     io.inbuf = const_cast<uint8_t *>(jpeg);
     io.inbuf_len = int(size);
     int outlen = 0;
     bool ok = false;
     if (jpeg_dec_parse_header(dec, &io, &header) == JPEG_ERR_OK && jpeg_dec_get_outbuf_len(dec, &outlen) == JPEG_ERR_OK &&
-        size_t(outlen) == size_t(w) * h * 2) {
+            size_t(outlen) == size_t(w) * h * 2) {
         auto *px = static_cast<uint16_t *>(jpeg_calloc_align(size_t(outlen), 16));
         if (px) {
             io.outbuf = reinterpret_cast<uint8_t *>(px);
@@ -82,7 +88,9 @@ bool decode(const uint8_t *jpeg, size_t size, int w, int h, Picture &out)
 
 void release(Picture &p)
 {
-    if (p.px) jpeg_free_align(p.px);
+    if (p.px) {
+        jpeg_free_align(p.px);
+    }
     p = Picture{};
 }
 
@@ -105,7 +113,9 @@ void worker(void *)
 {
     for (;;) {
         Job job;
-        if (xQueueReceive(jobs, &job, portMAX_DELAY) != pdTRUE) continue;
+        if (xQueueReceive(jobs, &job, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
         Done d{job.index, job.full, job.generation, {}, false};
         uint8_t *jpeg = nullptr;
         size_t size = 0;
@@ -113,7 +123,9 @@ void worker(void *)
             d.ok = decode(jpeg, size, job.full ? FULL : THUMB, job.full ? FULL : THUMB, d.pic);
             heap_caps_free(jpeg);
         }
-        if (xQueueSend(done, &d, pdMS_TO_TICKS(1000)) != pdTRUE) release(d.pic);
+        if (xQueueSend(done, &d, pdMS_TO_TICKS(1000)) != pdTRUE) {
+            release(d.pic);
+        }
     }
 }
 
@@ -123,7 +135,7 @@ struct {
     bool built = false, active = false;
     lv_obj_t *screen = nullptr, *grid = nullptr, *count = nullptr, *empty = nullptr;
     lv_obj_t *viewer = nullptr, *photo = nullptr, *title = nullptr, *subtitle = nullptr, *status = nullptr,
-             *trash = nullptr, *trash_label = nullptr;
+              *trash = nullptr, *trash_label = nullptr;
     std::vector<lv_obj_t *> cells;
     std::vector<Picture> thumbs;
     std::vector<bool> asked;
@@ -141,7 +153,9 @@ void post(int index, bool full)
 
 void clear_thumbs()
 {
-    for (Picture &p : U.thumbs) release(p);
+    for (Picture &p : U.thumbs) {
+        release(p);
+    }
     U.thumbs.clear();
     U.asked.clear();
 }
@@ -149,7 +163,10 @@ void clear_thumbs()
 void show_photo(int index);
 void close_viewer();
 
-void cell_cb(lv_event_t *e) { show_photo(int(intptr_t(lv_event_get_user_data(e)))); }
+void cell_cb(lv_event_t *e)
+{
+    show_photo(int(intptr_t(lv_event_get_user_data(e))));
+}
 
 // The grid, newest first.
 void build_grid()
@@ -167,11 +184,12 @@ void build_grid()
     if (!n) {
         const int state = camera_app_photos_state();
         lv_label_set_text(U.empty, state == 0    ? "Loading photos from the NAS\xE2\x80\xA6"
-                                   : state == -1 ? "The NAS is unreachable. Photos will show when it answers."
-                                                 : "No photos yet. Take some with the Camera.");
+                          : state == -1 ? "The NAS is unreachable. Photos will show when it answers."
+                          : "No photos yet. Take some with the Camera.");
         lv_obj_remove_flag(U.empty, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(U.empty, LV_OBJ_FLAG_HIDDEN);
     }
-    else lv_obj_add_flag(U.empty, LV_OBJ_FLAG_HIDDEN);
     for (int k = 0; k < n; ++k) {
         const int index = n - 1 - k;
         lv_obj_t *c = box(U.grid, (k % COLS) * (THUMB + GAP), (k / COLS) * (THUMB + GAP), THUMB, THUMB, 14);
@@ -196,9 +214,13 @@ void request_visible()
     for (int row = std::max(0, top - 1); row <= top + 4 && asked < 6; ++row)
         for (int col = 0; col < COLS; ++col) {
             const int k = row * COLS + col;
-            if (k >= n) break;
+            if (k >= n) {
+                break;
+            }
             const int index = n - 1 - k;
-            if (U.asked[size_t(index)]) continue;
+            if (U.asked[size_t(index)]) {
+                continue;
+            }
             U.asked[size_t(index)] = true;
             post(index, false);
             ++asked;
@@ -208,7 +230,9 @@ void request_visible()
 void place_thumb(int index)
 {
     const int n = int(U.thumbs.size()), k = n - 1 - index;
-    if (k < 0 || k >= int(U.cells.size())) return;
+    if (k < 0 || k >= int(U.cells.size())) {
+        return;
+    }
     lv_obj_t *img = lv_image_create(U.cells[size_t(k)]);
     lv_image_set_src(img, &U.thumbs[size_t(index)].dsc);
     lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
@@ -285,9 +309,13 @@ void close_viewer()
 void step(int by)
 {
     const int n = camera_app_photo_count();
-    if (U.shown < 0 || !n) return;
+    if (U.shown < 0 || !n) {
+        return;
+    }
     const int next = U.shown - by;  // left: older (the grid is newest first)
-    if (next < 0 || next >= n) return;
+    if (next < 0 || next >= n) {
+        return;
+    }
     show_photo(next);
 }
 
@@ -295,7 +323,9 @@ void step(int by)
 void viewer_touch_cb(lv_event_t *e)
 {
     lv_indev_t *indev = lv_indev_active();
-    if (!indev) return;
+    if (!indev) {
+        return;
+    }
     lv_point_t p;
     lv_indev_get_point(indev, &p);
     if (lv_event_get_code(e) == LV_EVENT_PRESSED) {
@@ -303,7 +333,9 @@ void viewer_touch_cb(lv_event_t *e)
         return;
     }
     const int dx = p.x - U.press.x, dy = p.y - U.press.y;
-    if (abs(dx) > 50 && abs(dx) > 2 * abs(dy)) step(dx < 0 ? 1 : -1);
+    if (abs(dx) > 50 && abs(dx) > 2 * abs(dy)) {
+        step(dx < 0 ? 1 : -1);
+    }
 }
 
 void trash_cb(lv_event_t *)
@@ -318,11 +350,16 @@ void trash_cb(lv_event_t *)
     }
     const int index = U.shown;
     disarm_delete();
-    if (index < 0 || !camera_app_delete_photo(index)) return;
+    if (index < 0 || !camera_app_delete_photo(index)) {
+        return;
+    }
     build_grid();
     const int n = camera_app_photo_count();
-    if (!n) close_viewer();
-    else show_photo(std::min(index, n - 1));
+    if (!n) {
+        close_viewer();
+    } else {
+        show_photo(std::min(index, n - 1));
+    }
 }
 
 lv_obj_t *back_button(lv_obj_t *parent, lv_event_cb_t cb)
@@ -339,13 +376,19 @@ lv_obj_t *back_button(lv_obj_t *parent, lv_event_cb_t cb)
 
 void tick(lv_timer_t *)
 {
-    if (!U.active) return;
-    if (camera_app_photos_revision() != U.revision && U.shown < 0) build_grid();
+    if (!U.active) {
+        return;
+    }
+    if (camera_app_photos_revision() != U.revision && U.shown < 0) {
+        build_grid();
+    }
     Done d;
     while (done && xQueueReceive(done, &d, 0) == pdTRUE) {
         if (d.generation != U.generation || !d.ok) {
             release(d.pic);
-            if (d.full && d.index == U.shown && d.generation == U.generation) lv_label_set_text(U.status, "This photo could not be opened.");
+            if (d.full && d.index == U.shown && d.generation == U.generation) {
+                lv_label_set_text(U.status, "This photo could not be opened.");
+            }
             continue;
         }
         if (d.full) {
@@ -365,14 +408,18 @@ void tick(lv_timer_t *)
             release(d.pic);
         }
     }
-    if (U.shown < 0) request_visible();
+    if (U.shown < 0) {
+        request_visible();
+    }
 }
 
 void build(lv_obj_t *s)
 {
     U.screen = s;
     back_button(s, [](lv_event_t *) {
-        if (U.exit) U.exit();
+        if (U.exit) {
+            U.exit();
+        }
     });
     label(s, "Gallery", 112, 12, 300, TEXT, 24, true);
     U.count = label(s, "", 112, 44, 300, TEXT3, 13);
@@ -397,13 +444,17 @@ void build(lv_obj_t *s)
     lv_obj_t *band = box(U.viewer, 0, 0, PANEL, 66);
     lv_obj_set_style_bg_color(band, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(band, 150, 0);
-    back_button(U.viewer, [](lv_event_t *) { close_viewer(); });
+    back_button(U.viewer, [](lv_event_t *) {
+        close_viewer();
+    });
     U.title = label(U.viewer, "", 112, 10, 280, TEXT, 20, true);
     U.subtitle = label(U.viewer, "", 112, 38, 300, TEXT2, 13);
     U.status = label(U.viewer, "", 40, 230, 400, WARN, 16, true, LV_TEXT_ALIGN_CENTER);
     lv_obj_t *left = box(U.viewer, 74, 394, 52, 52, 26);
     lv_obj_t *right = box(U.viewer, 354, 394, 52, 52, 26);
-    for (lv_obj_t *b : {left, right}) {
+    for (lv_obj_t *b : {
+                left, right
+            }) {
         lv_obj_set_style_bg_color(b, lv_color_black(), 0);
         lv_obj_set_style_bg_opa(b, 170, 0);
         lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
@@ -411,8 +462,12 @@ void build(lv_obj_t *s)
     }
     icon(left, "back", 14, 14, 24, TEXT, 2.0f);
     icon(right, "chev", 14, 14, 24, TEXT, 2.0f);
-    lv_obj_add_event_cb(left, [](lv_event_t *) { step(-1); }, LV_EVENT_CLICKED, nullptr);
-    lv_obj_add_event_cb(right, [](lv_event_t *) { step(1); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(left, [](lv_event_t *) {
+        step(-1);
+    }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(right, [](lv_event_t *) {
+        step(1);
+    }, LV_EVENT_CLICKED, nullptr);
     U.trash = box(U.viewer, 140, 394, 200, 52, 26);
     lv_obj_set_style_bg_color(U.trash, lv_color_hex(FIELD), 0);
     lv_obj_set_style_bg_opa(U.trash, LV_OPA_COVER, 0);
@@ -427,9 +482,15 @@ void build(lv_obj_t *s)
 }
 }  // namespace
 
-extern "C" void gallery_app_set_exit(void (*exit)(void)) { U.exit = exit; }
+extern "C" void gallery_app_set_exit(void (*exit)(void))
+{
+    U.exit = exit;
+}
 
-extern "C" void gallery_app_show(int index) { U.pending_show = index; }
+extern "C" void gallery_app_show(int index)
+{
+    U.pending_show = index;
+}
 
 extern "C" void gallery_app_open(lv_obj_t *screen)
 {
@@ -439,13 +500,17 @@ extern "C" void gallery_app_open(lv_obj_t *screen)
         // Network (NAS photos) and decoding only: its stack can live in PSRAM.
         xTaskCreatePinnedToCoreWithCaps(worker, "gallery", 10 * 1024, nullptr, 3, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
-    if (!U.built) build(screen);
+    if (!U.built) {
+        build(screen);
+    }
     U.active = true;
     camera_app_refresh_photos();  // photos added to the NAS folder meanwhile
     build_grid();
     if (U.pending_show >= -1) {
         const int n = camera_app_photo_count();
-        if (n) show_photo(U.pending_show < 0 ? n - 1 : U.pending_show);
+        if (n) {
+            show_photo(U.pending_show < 0 ? n - 1 : U.pending_show);
+        }
     } else {
         close_viewer();
     }

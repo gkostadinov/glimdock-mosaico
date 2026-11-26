@@ -44,14 +44,18 @@ std::string *field(Config &c, int i)
 void wipe(std::string &s)
 {
     volatile char *p = s.data();
-    for (size_t i = 0; i < s.size(); ++i) p[i] = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+        p[i] = 0;
+    }
     s.clear();
 }
 
 void load()
 {
     nvs_handle_t h;
-    if (nvs_open(NS, NVS_READONLY, &h) != ESP_OK) return;
+    if (nvs_open(NS, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
     Config c;
     for (int i = 0; i < NKEYS; ++i) {
         size_t n = 0;
@@ -78,23 +82,37 @@ const char *apply_swifty(JsonVariant doc)
     }
     for (int i = 0; i < NKEYS; ++i) {
         JsonVariant v = doc[KEYS[i]];
-        if (v.isNull()) continue;
-        if (!v.is<const char *>()) return "values must be strings";
+        if (v.isNull()) {
+            continue;
+        }
+        if (!v.is<const char *>()) {
+            return "values must be strings";
+        }
         const char *text = v.as<const char *>();
-        if (strlen(text) > (i == CA_KEY ? 8000u : 400u)) return "a value is too long";
+        if (strlen(text) > (i == CA_KEY ? 8000u : 400u)) {
+            return "a value is too long";
+        }
         *field(next, i) = text;
     }
     nvs_handle_t h;
-    if (nvs_open(NS, NVS_READWRITE, &h) != ESP_OK) return "storage unavailable";
+    if (nvs_open(NS, NVS_READWRITE, &h) != ESP_OK) {
+        return "storage unavailable";
+    }
     esp_err_t err = ESP_OK;
     for (int i = 0; i < NKEYS && err == ESP_OK; ++i) {
         const std::string &v = *field(next, i);
         err = v.empty() ? nvs_erase_key(h, KEYS[i]) : nvs_set_str(h, KEYS[i], v.c_str());
-        if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            err = ESP_OK;
+        }
     }
-    if (err == ESP_OK) err = nvs_commit(h);
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
     nvs_close(h);
-    if (err != ESP_OK) return "storage write failed";
+    if (err != ESP_OK) {
+        return "storage write failed";
+    }
     std::lock_guard<std::mutex> g(lock);
     current = next;
     ++revision;
@@ -104,7 +122,9 @@ const char *apply_swifty(JsonVariant doc)
 bool is_swifty_key(const char *k)
 {
     for (const char *key : KEYS)
-        if (!strcmp(key, k)) return true;
+        if (!strcmp(key, k)) {
+            return true;
+        }
     return false;
 }
 
@@ -126,7 +146,9 @@ void commit(std::string &reply)
             continue;
         }
         bool known = !strcmp(k, "swifty");
-        for (const Section &sec : sections) known |= sec.name == k;
+        for (const Section &sec : sections) {
+            known |= sec.name == k;
+        }
         if (!known) {
             reply = std::string("unknown section \"") + k + "\"";
             return;
@@ -147,13 +169,18 @@ void commit(std::string &reply)
     bool restart = false;
     for (const Section &sec : sections) {
         JsonVariant part = doc[sec.name];
-        if (part.isNull()) continue;
+        if (part.isNull()) {
+            continue;
+        }
         std::string json;
         serializeJson(part, json);
         const char *error = sec.apply(json.c_str(), json.size());
-        for (char &c : json) c = 0;
-        if (error && !strcmp(error, "restart")) restart = true;
-        else if (error) {
+        for (char &c : json) {
+            c = 0;
+        }
+        if (error && !strcmp(error, "restart")) {
+            restart = true;
+        } else if (error) {
             reply = sec.name + ": " + error;
             return;
         }
@@ -166,7 +193,9 @@ void commit(std::string &reply)
 // Replies are short words, never configuration values except the URLs.
 esp_err_t rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capacity, size_t *size, void *)
 {
-    if (request->payload_size < 1) return ESP_ERR_INVALID_ARG;
+    if (request->payload_size < 1) {
+        return ESP_ERR_INVALID_ARG;
+    }
     const uint8_t op = request->payload[0];
     const uint8_t *data = request->payload + 1;
     const size_t n = request->payload_size - 1;
@@ -187,7 +216,9 @@ esp_err_t rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capaci
             std::string text(1024, '\0');  // on the heap: the ESP-Iris task has a small stack
             sec.status(text.data(), text.size());
             JsonDocument part;
-            if (deserializeJson(part, text.c_str()) == DeserializationError::Ok) doc[sec.name] = part;
+            if (deserializeJson(part, text.c_str()) == DeserializationError::Ok) {
+                doc[sec.name] = part;
+            }
         }
         reply.clear();
         serializeJson(doc, reply);
@@ -195,14 +226,23 @@ esp_err_t rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capaci
         uint32_t total;
         memcpy(&total, data, 4);
         wipe(frame);
-        if (total == 0 || total > MAX_FRAME) reply = "too large";
-        else expected = total, frame.reserve(total);
+        if (total == 0 || total > MAX_FRAME) {
+            reply = "too large";
+        } else {
+            expected = total, frame.reserve(total);
+        }
     } else if (op == 2) {
-        if (frame.size() + n > expected) reply = "unexpected data";
-        else frame.append(reinterpret_cast<const char *>(data), n);
+        if (frame.size() + n > expected) {
+            reply = "unexpected data";
+        } else {
+            frame.append(reinterpret_cast<const char *>(data), n);
+        }
     } else if (op == 3) {
-        if (frame.size() == expected) commit(reply);
-        else reply = "incomplete";
+        if (frame.size() == expected) {
+            commit(reply);
+        } else {
+            reply = "incomplete";
+        }
         wipe(frame);
         expected = 0;
     } else if (op == 4) {
@@ -238,7 +278,9 @@ void config_section(const char *name, SectionApply apply, SectionStatus status)
 void config_start()
 {
     static bool started = false;
-    if (started) return;
+    if (started) {
+        return;
+    }
     started = true;
     load();
     esp_iris_rpc_register(RPC_SERVICE, RPC_CONFIG, rpc, nullptr);

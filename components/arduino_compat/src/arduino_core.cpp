@@ -72,15 +72,24 @@ int serial_poll()
 }
 }  // namespace
 
-int HardwareSerial::available() { return serial_poll() >= 0 ? 1 : 0; }
-int HardwareSerial::peek() { return serial_poll(); }
+int HardwareSerial::available()
+{
+    return serial_poll() >= 0 ? 1 : 0;
+}
+int HardwareSerial::peek()
+{
+    return serial_poll();
+}
 int HardwareSerial::read()
 {
     int value = serial_poll();
     serial_peeked = -1;
     return value;
 }
-size_t HardwareSerial::write(uint8_t value) { return write(&value, 1); }
+size_t HardwareSerial::write(uint8_t value)
+{
+    return write(&value, 1);
+}
 size_t HardwareSerial::write(const uint8_t *data, size_t size)
 {
     size_t written = fwrite(data, 1, size, stdout);
@@ -109,7 +118,7 @@ bool IPAddress::fromString(const char *text)
     unsigned parts[4];
     int consumed = 0;
     if (sscanf(text, "%3u.%3u.%3u.%3u%n", &parts[0], &parts[1], &parts[2], &parts[3], &consumed) != 4 ||
-        text[consumed] != '\0') {
+            text[consumed] != '\0') {
         return false;
     }
     for (unsigned part : parts) {

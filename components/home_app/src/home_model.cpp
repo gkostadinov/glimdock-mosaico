@@ -13,14 +13,19 @@ namespace home {
 namespace {
 // until 0: the command is still running (held up to HOLD_MS in case its
 // result never comes).
-struct Lean { double value; uint32_t until, since; };
+struct Lean {
+    double value;
+    uint32_t until, since;
+};
 std::map<std::string, Lean> leans;
 constexpr uint32_t SETTLED_MS = 10000, HOLD_MS = 90000;
 
 // The web's tolerances: brightness within 1 (or the 10% floor), hue within 2.
 bool agrees(const char *field, double actual, double want)
 {
-    if (!strcmp(field, "bri")) return fabs(actual - want) <= 1 || (want < 10 && actual == 10);
+    if (!strcmp(field, "bri")) {
+        return fabs(actual - want) <= 1 || (want < 10 && actual == 10);
+    }
     if (!strcmp(field, "hue")) {
         const double d = fmod(fabs(actual - want), 360.0);
         return std::min(d, 360.0 - d) <= 2;
@@ -78,27 +83,37 @@ bool leans_due()
 {
     const uint32_t now = now_ms();
     for (const auto &kv : leans)
-        if (expired(kv.second, now)) return true;
+        if (expired(kv.second, now)) {
+            return true;
+        }
     return false;
 }
 
 std::string to_text(JsonVariantConst v)
 {
-    if (v.is<const char *>()) return v.as<const char *>();
-    if (v.is<long>()) return std::to_string(v.as<long>());
+    if (v.is<const char *>()) {
+        return v.as<const char *>();
+    }
+    if (v.is<long>()) {
+        return std::to_string(v.as<long>());
+    }
     if (v.is<double>()) {
         char text[32];
         snprintf(text, sizeof(text), "%g", v.as<double>());
         return text;
     }
-    if (v.is<bool>()) return v.as<bool>() ? "true" : "false";
+    if (v.is<bool>()) {
+        return v.as<bool>() ? "true" : "false";
+    }
     return std::string();
 }
 
 JsonObjectConst capability(const JsonObjectConst &dev, const char *name)
 {
     for (JsonObjectConst cap : dev["capabilities"].as<JsonArrayConst>()) {
-        if (strcmp(cap["cap"] | "", name) == 0) return cap;
+        if (strcmp(cap["cap"] | "", name) == 0) {
+            return cap;
+        }
     }
     return JsonObjectConst();
 }
@@ -113,7 +128,9 @@ Derived build()
     }
     JsonObjectConst readings = d.state_hold ? (*d.state_hold)["devices"].as<JsonObjectConst>() : JsonObjectConst();
     for (JsonObjectConst dev : (*d.devices_hold)["devices"].as<JsonArrayConst>()) {
-        if (dev["enabled"] == false) continue;
+        if (dev["enabled"] == false) {
+            continue;
+        }
         const char *target = dev["target"] | "";
         JsonObjectConst r = readings[target].as<JsonObjectConst>();
         JsonObjectConst st = r["state"].as<JsonObjectConst>();
@@ -175,7 +192,9 @@ Derived build()
             d.others.push_back(item);
         }
     }
-    std::sort(d.bulbs.begin(), d.bulbs.end(), [](const Item &a, const Item &b) { return a.name < b.name; });
+    std::sort(d.bulbs.begin(), d.bulbs.end(), [](const Item & a, const Item & b) {
+        return a.name < b.name;
+    });
     return d;
 }
 
@@ -184,7 +203,9 @@ LightsSummary lights_summary(const std::vector<Item> &bulbs)
     int known = 0, lit = 0, sum = 0;
     double hx = 0, hy = 0;
     for (const Item &b : bulbs) {
-        if (!b.known) continue;
+        if (!b.known) {
+            continue;
+        }
         known++;
         if (b.on) {
             lit++;
@@ -198,11 +219,17 @@ LightsSummary lights_summary(const std::vector<Item> &bulbs)
     s.total = int(bulbs.size());
     s.avg = lit > 0 ? int(floor(double(sum) / lit + 0.5)) : 0;
     s.hue = lit > 0 ? fmod(atan2(hy, hx) * 180.0 / M_PI + 360.0, 360.0) : 270;
-    if (bulbs.empty()) s.state = "No lights yet";
-    else if (known == 0) s.state = "Not reporting";
-    else if (lit == 0) s.state = "All off";
-    else if (lit == known) s.state = known == 1 ? "On" : "All on";
-    else s.state = std::to_string(lit) + " of " + std::to_string(known) + " on";
+    if (bulbs.empty()) {
+        s.state = "No lights yet";
+    } else if (known == 0) {
+        s.state = "Not reporting";
+    } else if (lit == 0) {
+        s.state = "All off";
+    } else if (lit == known) {
+        s.state = known == 1 ? "On" : "All on";
+    } else {
+        s.state = std::to_string(lit) + " of " + std::to_string(known) + " on";
+    }
     return s;
 }
 
@@ -213,9 +240,12 @@ std::pair<std::string, std::string> status_sentence(const Derived &d, const stru
     }
     static const char *const days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
     static const char *const months[] = {"January", "February", "March", "April", "May", "June",
-                                          "July", "August", "September", "October", "November", "December"};
+                                         "July", "August", "September", "October", "November", "December"
+                                        };
     std::string who = hub.me ? std::string((*hub.me)["session"]["user_name"] | "") : std::string();
-    if (who.empty()) who = hub.cfg.name.empty() ? "Wall display" : hub.cfg.name;
+    if (who.empty()) {
+        who = hub.cfg.name.empty() ? "Wall display" : hub.cfg.name;
+    }
     std::string when = who;
     if (local) {
         when = std::string(days[local->tm_wday % 7]) + " " + std::to_string(local->tm_mday) + " " +
@@ -227,8 +257,14 @@ std::pair<std::string, std::string> status_sentence(const Derived &d, const stru
     if (!noresp.empty()) return {"The " + noresp + " didn't answer.", "Nothing changed. Try again when you like."};
     if (!hub.status.live) return {"Dry-run. No device is contacted.", when};
     std::vector<std::string> quiet;
-    for (const Item &b : d.bulbs) if (!b.known) quiet.push_back(b.name);
-    for (const auto *k : {&d.speaker, &d.tv}) if (*k && !(*k)->known) quiet.push_back((*k)->name);
+    for (const Item &b : d.bulbs) if (!b.known) {
+            quiet.push_back(b.name);
+        }
+    for (const auto *k : {
+                &d.speaker, &d.tv
+            }) if (*k && !(*k)->known) {
+            quiet.push_back((*k)->name);
+        }
     if (quiet.size() == 1) return {quiet[0] + " is not reporting.", when};
     if (quiet.size() > 1) return {std::to_string(quiet.size()) + " devices are not reporting.", when};
     return {"All is well at home.", when};

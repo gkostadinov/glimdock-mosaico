@@ -14,6 +14,7 @@ by you, mode 0600). Its contents never appear on a command line or in a log:
 the frame is passed to the Mosaico CLI in-process and on to ESP-Iris by stdin.
 Only success or failure is printed.
 """
+
 import argparse
 import base64
 import contextlib
@@ -31,7 +32,7 @@ WORKSPACE = Path(__file__).resolve().parents[3]
 # (https://github.com/gkostadinov/glimdock); --homelab-tools overrides it.
 DEFAULT_TOOLS = Path(os.environ.get("GLIMDOCK_DIR", ".")) / "tools"
 SERVICE = 0x4744
-CHUNK = 3000            # below the 4000-byte ESP-Iris RPC body
+CHUNK = 3000  # below the 4000-byte ESP-Iris RPC body
 ACK_TIMEOUT_S = 20.0
 SUCCESS = "Private reader provisioned."
 FAILURE = "Private reader provisioning failed."
@@ -47,6 +48,7 @@ def load_usb_tool(tools: Path):
 def mosaico():
     sys.path.insert(0, str(WORKSPACE / "submodule/esp-mosaico-utils/mosaico-tools/tools"))
     from mosaico_cli.cli import main  # noqa: E402
+
     return main
 
 
@@ -73,7 +75,7 @@ def provision(credentials_file: str, tools: Path) -> None:
     try:
         rpc(main, 2)  # drop any stale reply
         for start in range(0, len(frame), CHUNK):
-            chunk = bytes(frame[start:start + CHUNK])
+            chunk = bytes(frame[start : start + CHUNK])
             accepted = int.from_bytes(rpc(main, 1, chunk)[:4] or b"\0", "little")
             if accepted != len(chunk):
                 raise RuntimeError("frame not accepted")
@@ -100,8 +102,12 @@ def provision(credentials_file: str, tools: Path) -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--credentials-file", required=True, metavar="FILE")
-    parser.add_argument("--homelab-tools", type=Path, default=DEFAULT_TOOLS,
-                        help="Glimdock's tools directory (default: $GLIMDOCK_DIR/tools; for the shared validation and frame format)")
+    parser.add_argument(
+        "--homelab-tools",
+        type=Path,
+        default=DEFAULT_TOOLS,
+        help="Glimdock's tools directory (default: $GLIMDOCK_DIR/tools; for the shared validation and frame format)",
+    )
     args = parser.parse_args(argv)
     try:
         provision(args.credentials_file, args.homelab_tools)

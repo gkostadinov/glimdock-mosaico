@@ -68,34 +68,80 @@ public:
     String(char value) : text_(1, value) {}
     String(const std::string &value) : text_(value) {}
     String(std::string &&value) : text_(std::move(value)) {}
-    String(double value, unsigned char digits = 2) { format_float(value, digits); }
-    String(float value, unsigned char digits = 2) { format_float(value, digits); }
-    template <typename T, typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, char>::value, int>::type = 0>
+    String(double value, unsigned char digits = 2)
+    {
+        format_float(value, digits);
+    }
+    String(float value, unsigned char digits = 2)
+    {
+        format_float(value, digits);
+    }
+    template < typename T, typename std::enable_if < std::is_integral<T>::value && !std::is_same<T, char>::value, int >::type = 0 >
     String(T value) : text_(std::to_string(value)) {}
 
-    const char *c_str() const { return text_.c_str(); }
-    size_t length() const { return text_.size(); }
-    bool isEmpty() const { return text_.empty(); }
-    void reserve(size_t size) { text_.reserve(size); }
-    char operator[](size_t index) const { return index < text_.size() ? text_[index] : '\0'; }
-    char charAt(size_t index) const { return (*this)[index]; }
+    const char *c_str() const
+    {
+        return text_.c_str();
+    }
+    size_t length() const
+    {
+        return text_.size();
+    }
+    bool isEmpty() const
+    {
+        return text_.empty();
+    }
+    void reserve(size_t size)
+    {
+        text_.reserve(size);
+    }
+    char operator[](size_t index) const
+    {
+        return index < text_.size() ? text_[index] : '\0';
+    }
+    char charAt(size_t index) const
+    {
+        return (*this)[index];
+    }
 
-    int indexOf(char value, size_t from = 0) const { return position(text_.find(value, from)); }
-    int indexOf(const char *value, size_t from = 0) const { return position(text_.find(value ? value : "", from)); }
-    int indexOf(const String &value, size_t from = 0) const { return position(text_.find(value.text_, from)); }
-    int lastIndexOf(char value) const { return position(text_.rfind(value)); }
-    bool startsWith(const String &prefix) const { return text_.compare(0, prefix.text_.size(), prefix.text_) == 0; }
+    int indexOf(char value, size_t from = 0) const
+    {
+        return position(text_.find(value, from));
+    }
+    int indexOf(const char *value, size_t from = 0) const
+    {
+        return position(text_.find(value ? value : "", from));
+    }
+    int indexOf(const String &value, size_t from = 0) const
+    {
+        return position(text_.find(value.text_, from));
+    }
+    int lastIndexOf(char value) const
+    {
+        return position(text_.rfind(value));
+    }
+    bool startsWith(const String &prefix) const
+    {
+        return text_.compare(0, prefix.text_.size(), prefix.text_) == 0;
+    }
     bool endsWith(const String &suffix) const
     {
         return suffix.text_.size() <= text_.size() &&
                text_.compare(text_.size() - suffix.text_.size(), suffix.text_.size(), suffix.text_) == 0;
     }
-    bool equals(const String &other) const { return text_ == other.text_; }
+    bool equals(const String &other) const
+    {
+        return text_ == other.text_;
+    }
     bool equalsIgnoreCase(const String &other) const
     {
-        if (text_.size() != other.text_.size()) return false;
+        if (text_.size() != other.text_.size()) {
+            return false;
+        }
         for (size_t i = 0; i < text_.size(); ++i) {
-            if (tolower((unsigned char)text_[i]) != tolower((unsigned char)other.text_[i])) return false;
+            if (tolower((unsigned char)text_[i]) != tolower((unsigned char)other.text_[i])) {
+                return false;
+            }
         }
         return true;
     }
@@ -113,31 +159,84 @@ public:
     }
     void replace(const String &find, const String &replacement)
     {
-        if (find.text_.empty()) return;
+        if (find.text_.empty()) {
+            return;
+        }
         size_t at = 0;
         while ((at = text_.find(find.text_, at)) != std::string::npos) {
             text_.replace(at, find.text_.size(), replacement.text_);
             at += replacement.text_.size();
         }
     }
-    void toLowerCase() { for (auto &c : text_) c = (char)tolower((unsigned char)c); }
-    long toInt() const { return strtol(text_.c_str(), nullptr, 10); }
+    void toLowerCase()
+    {
+        for (auto &c : text_) {
+            c = (char)tolower((unsigned char)c);
+        }
+    }
+    long toInt() const
+    {
+        return strtol(text_.c_str(), nullptr, 10);
+    }
 
-    bool concat(const char *other) { text_ += other ? other : ""; return true; }  // ArduinoJson writer
-    String &operator+=(const String &other) { text_ += other.text_; return *this; }
-    String &operator+=(const char *other) { text_ += other ? other : ""; return *this; }
-    String &operator+=(char other) { text_ += other; return *this; }
-    friend String operator+(String left, const String &right) { return left += right; }
-    friend String operator+(String left, const char *right) { return left += right; }
-    friend String operator+(const char *left, const String &right) { return String(left) += right; }
-    friend bool operator==(const String &left, const String &right) { return left.text_ == right.text_; }
-    friend bool operator==(const String &left, const char *right) { return left.text_ == (right ? right : ""); }
-    friend bool operator!=(const String &left, const String &right) { return !(left == right); }
-    friend bool operator!=(const String &left, const char *right) { return !(left == right); }
-    friend bool operator<(const String &left, const String &right) { return left.text_ < right.text_; }
+    bool concat(const char *other)
+    {
+        text_ += other ? other : "";    // ArduinoJson writer
+        return true;
+    }
+    String &operator+=(const String &other)
+    {
+        text_ += other.text_;
+        return *this;
+    }
+    String &operator+=(const char *other)
+    {
+        text_ += other ? other : "";
+        return *this;
+    }
+    String &operator+=(char other)
+    {
+        text_ += other;
+        return *this;
+    }
+    friend String operator+(String left, const String &right)
+    {
+        return left += right;
+    }
+    friend String operator+(String left, const char *right)
+    {
+        return left += right;
+    }
+    friend String operator+(const char *left, const String &right)
+    {
+        return String(left) += right;
+    }
+    friend bool operator==(const String &left, const String &right)
+    {
+        return left.text_ == right.text_;
+    }
+    friend bool operator==(const String &left, const char *right)
+    {
+        return left.text_ == (right ? right : "");
+    }
+    friend bool operator!=(const String &left, const String &right)
+    {
+        return !(left == right);
+    }
+    friend bool operator!=(const String &left, const char *right)
+    {
+        return !(left == right);
+    }
+    friend bool operator<(const String &left, const String &right)
+    {
+        return left.text_ < right.text_;
+    }
 
 private:
-    static int position(size_t at) { return at == std::string::npos ? -1 : int(at); }
+    static int position(size_t at)
+    {
+        return at == std::string::npos ? -1 : int(at);
+    }
     void format_float(double value, unsigned char digits)
     {
         char buffer[48];
@@ -154,14 +253,31 @@ public:
     virtual size_t write(const uint8_t *data, size_t size)
     {
         size_t written = 0;
-        while (written < size && write(data[written])) ++written;
+        while (written < size && write(data[written])) {
+            ++written;
+        }
         return written;
     }
-    size_t write(const char *text) { return text ? write(reinterpret_cast<const uint8_t *>(text), strlen(text)) : 0; }
-    size_t print(const char *text) { return write(text); }
-    size_t print(const String &text) { return write(text.c_str()); }
-    size_t println(const char *text = "") { return write(text) + write("\r\n"); }
-    size_t println(const String &text) { return println(text.c_str()); }
+    size_t write(const char *text)
+    {
+        return text ? write(reinterpret_cast<const uint8_t *>(text), strlen(text)) : 0;
+    }
+    size_t print(const char *text)
+    {
+        return write(text);
+    }
+    size_t print(const String &text)
+    {
+        return write(text.c_str());
+    }
+    size_t println(const char *text = "")
+    {
+        return write(text) + write("\r\n");
+    }
+    size_t println(const String &text)
+    {
+        return println(text.c_str());
+    }
     size_t printf(const char *format, ...) __attribute__((format(printf, 2, 3)));
 };
 
@@ -171,7 +287,10 @@ public:
     virtual int read() = 0;
     virtual int peek() = 0;
     virtual void flush() {}
-    void setTimeout(unsigned long ms) { stream_timeout_ms_ = ms; }
+    void setTimeout(unsigned long ms)
+    {
+        stream_timeout_ms_ = ms;
+    }
 
 protected:
     unsigned long stream_timeout_ms_ = 1000;
@@ -182,7 +301,10 @@ protected:
 class HardwareSerial : public Stream {
 public:
     void begin(uint32_t) {}
-    size_t setRxBufferSize(size_t size) { return size; }
+    size_t setRxBufferSize(size_t size)
+    {
+        return size;
+    }
     int available() override;
     int read() override;
     int peek() override;

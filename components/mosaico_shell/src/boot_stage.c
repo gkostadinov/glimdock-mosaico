@@ -23,7 +23,10 @@ static esp_err_t read_stage(const esp_iris_rpc_request_t *request, uint8_t *resp
     return ESP_OK;
 }
 
-void boot_stage_register(void) { esp_iris_rpc_register(0x4744, 9, read_stage, NULL); }
+void boot_stage_register(void)
+{
+    esp_iris_rpc_register(0x4744, 9, read_stage, NULL);
+}
 
 void boot_stage(const char *stage)
 {

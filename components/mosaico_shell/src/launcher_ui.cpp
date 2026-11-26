@@ -59,21 +59,24 @@ struct {
     bool charging = false, have_data = false;
     // Settings sheet
     lv_obj_t *s_bright = nullptr, *s_bright_bar = nullptr, *s_radius = nullptr, *s_wifi_dot = nullptr,
-             *s_ssid = nullptr, *s_detail = nullptr, *s_wifi_state = nullptr, *s_versions = nullptr, *s_zone = nullptr,
-             *s_cam_auto = nullptr;
+              *s_ssid = nullptr, *s_detail = nullptr, *s_wifi_state = nullptr, *s_versions = nullptr, *s_zone = nullptr,
+               *s_cam_auto = nullptr;
     // Corner calibration
     lv_obj_t *calibration = nullptr, *guide = nullptr, *cal_value = nullptr;
 } ui;
 
 void set_text(lv_obj_t *l, const char *text)
 {
-    if (strcmp(lv_label_get_text(l), text)) lv_label_set_text(l, text);
+    if (strcmp(lv_label_get_text(l), text)) {
+        lv_label_set_text(l, text);
+    }
 }
 
 void set_color(lv_obj_t *o, uint32_t color)
 {
-    if (!lv_color_eq(lv_obj_get_style_text_color(o, LV_PART_MAIN), lv_color_hex(color)))
+    if (!lv_color_eq(lv_obj_get_style_text_color(o, LV_PART_MAIN), lv_color_hex(color))) {
         lv_obj_set_style_text_color(o, lv_color_hex(color), 0);
+    }
 }
 
 void on(lv_obj_t *o, lv_event_cb_t cb, lv_event_code_t code = LV_EVENT_CLICKED, void *data = nullptr)
@@ -95,10 +98,15 @@ void open_app(int app)
         tools_app_select(3);
         app = int(ShellApp::Tools);
     }
-    if (ui.hooks.open) ui.hooks.open(ShellApp(app));
+    if (ui.hooks.open) {
+        ui.hooks.open(ShellApp(app));
+    }
 }
 
-void open_cb(lv_event_t *e) { open_app(int(intptr_t(lv_event_get_user_data(e)))); }
+void open_cb(lv_event_t *e)
+{
+    open_app(int(intptr_t(lv_event_get_user_data(e))));
+}
 
 void draw_g(lv_event_t *e)
 {
@@ -140,8 +148,11 @@ void build_grid()
         lv_obj_t *cell = box(ui.grid, cx - PITCH / 2, y, PITCH, ROW + TOP);
         lv_obj_t *ic = box(cell, (PITCH - ICON) / 2, TOP, ICON, ICON, 20);
         style_fill(ic, *a.accent, false);
-        if (a.glyph) icon(ic, a.glyph, 16, 16, 40, 0xFFFFFF, 2.0f);
-        else lv_obj_add_event_cb(ic, draw_g, LV_EVENT_DRAW_MAIN, nullptr);
+        if (a.glyph) {
+            icon(ic, a.glyph, 16, 16, 40, 0xFFFFFF, 2.0f);
+        } else {
+            lv_obj_add_event_cb(ic, draw_g, LV_EVENT_DRAW_MAIN, nullptr);
+        }
         label(cell, a.name, 0, TOP + ICON + 6, PITCH, TEXT, 13, true, LV_TEXT_ALIGN_CENTER);
         press_fx(ic);
         on(ic, open_cb, LV_EVENT_CLICKED, reinterpret_cast<void *>(intptr_t(a.app)));
@@ -166,7 +177,8 @@ enum WidgetKind { W_GLIMDOCK, W_LIGHTS, W_MUSIC, W_SWIFTY, W_BATTERY, W_CLOCK, W
 const char *const WIDGET_NAMES[W_KINDS] = {"Glimdock", "Lights", "Music", "Swifty", "Battery", "Clock"};
 const char *const WIDGET_ICONS[W_KINDS] = {"tech", "bulb", "speaker", "mic", "power", "clock"};
 const int WIDGET_APP[W_KINDS] = {int(ShellApp::Glimdock), int(ShellApp::Home), int(ShellApp::Home),
-                                 int(ShellApp::Swifty), -3, -3};
+                                 int(ShellApp::Swifty), -3, -3
+                                };
 constexpr int WX = 40, WY = 44, WW = 196, WH = 136, WGAP = 8;
 
 void update_widget(int slot);
@@ -176,25 +188,34 @@ void widget_tap_cb(lv_event_t *e)
 {
     const int slot = int(intptr_t(lv_event_get_user_data(e)));
     const int app = WIDGET_APP[ui.w[slot].kind];
-    if (app >= 0) open_app(app);
+    if (app >= 0) {
+        open_app(app);
+    }
 }
 
-void widget_hold_cb(lv_event_t *e) { open_picker(int(intptr_t(lv_event_get_user_data(e)))); }
+void widget_hold_cb(lv_event_t *e)
+{
+    open_picker(int(intptr_t(lv_event_get_user_data(e))));
+}
 
 void build_widget(int slot)
 {
     auto &w = ui.w[slot];
-    if (w.card) lv_obj_delete(w.card);
+    if (w.card) {
+        lv_obj_delete(w.card);
+    }
     const int kind = w.kind;
     const Accent &acc = kind == W_GLIMDOCK ? CYAN : kind == W_SWIFTY ? SKY : kind == W_BATTERY ? GREEN
-                      : kind == W_CLOCK ? GRAPHITE : VIOLET;
+                        : kind == W_CLOCK ? GRAPHITE : VIOLET;
     w = {kind, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
     w.card = glass(ui.home, WX + slot * (WW + WGAP), WY, WW, WH, 26, acc);
     press_fx(w.card);
     lv_obj_add_flag(w.card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(w.card, widget_tap_cb, LV_EVENT_SHORT_CLICKED, reinterpret_cast<void *>(intptr_t(slot)));
     lv_obj_add_event_cb(w.card, widget_hold_cb, LV_EVENT_LONG_PRESSED, reinterpret_cast<void *>(intptr_t(slot)));
-    if (kind == W_LIGHTS || kind == W_MUSIC || kind == W_BATTERY) card_fill(w.card, 0, 0xFFD9A0, 0xF3B56A);
+    if (kind == W_LIGHTS || kind == W_MUSIC || kind == W_BATTERY) {
+        card_fill(w.card, 0, 0xFFD9A0, 0xF3B56A);
+    }
     if (kind == W_GLIMDOCK) {
         w.dot = dot(w.card, 16, 18, 9, OFF, false);
         w.title = label(w.card, "glimdock", 32, 12, 150, TEXT2, 14, true);
@@ -215,7 +236,9 @@ void build_widget(int slot)
         lv_obj_add_flag(w.line2, LV_OBJ_FLAG_HIDDEN);
         w.spark = spark(w.card, 1, 96, WW - 2, 38, CYAN.glow);
     }
-    if (ui.have_data) update_widget(slot);
+    if (ui.have_data) {
+        update_widget(slot);
+    }
 }
 
 // Ink that stays readable over a card's fill.
@@ -223,11 +246,17 @@ void ink(int slot, bool dark)
 {
     auto &w = ui.w[slot];
     const uint32_t c = 0x2A1A05;
-    if (w.icon) lv_obj_set_style_line_color(w.icon, lv_color_hex(dark ? c : TEXT), 0);
+    if (w.icon) {
+        lv_obj_set_style_line_color(w.icon, lv_color_hex(dark ? c : TEXT), 0);
+    }
     set_color(w.title, dark ? c : TEXT2);
-    if (w.big) set_color(w.big, dark ? c : TEXT);
+    if (w.big) {
+        set_color(w.big, dark ? c : TEXT);
+    }
     set_color(w.line1, dark ? c : TEXT2);
-    if (w.line2) set_color(w.line2, dark ? c : TEXT3);
+    if (w.line2) {
+        set_color(w.line2, dark ? c : TEXT3);
+    }
 }
 
 void update_widget(int slot)
@@ -237,15 +266,23 @@ void update_widget(int slot)
     switch (w.kind) {
     case W_GLIMDOCK: {
         const glimdock_summary_t &g = ui.glim;
-        if (isfinite(g.cpu)) snprintf(v, sizeof(v), "%d%% CPU", int(lroundf(g.cpu)));
-        else strlcpy(v, g.started ? "\xE2\x80\x94" : "Homelab", sizeof(v));
+        if (isfinite(g.cpu)) {
+            snprintf(v, sizeof(v), "%d%% CPU", int(lroundf(g.cpu)));
+        } else {
+            strlcpy(v, g.started ? "\xE2\x80\x94" : "Homelab", sizeof(v));
+        }
         set_text(w.big, v);
-        if (isfinite(g.memory)) snprintf(v, sizeof(v), "Memory %d%%", int(lroundf(g.memory)));
-        else strlcpy(v, g.status, sizeof(v));
+        if (isfinite(g.memory)) {
+            snprintf(v, sizeof(v), "Memory %d%%", int(lroundf(g.memory)));
+        } else {
+            strlcpy(v, g.status, sizeof(v));
+        }
         set_text(w.line1, v);
         lv_obj_set_style_bg_color(w.dot, lv_color_hex(!g.ready ? OFF : g.alerts ? RED : OK), 0);
         float top = 40;
-        for (int i = 0; i < g.history_count; ++i) top = std::max(top, g.history[i] * 1.25f);
+        for (int i = 0; i < g.history_count; ++i) {
+            top = std::max(top, g.history[i] * 1.25f);
+        }
         spark_set(w.spark, g.history, g.history_count, std::min(100.0f, top));
         break;
     }
@@ -256,9 +293,13 @@ void update_widget(int slot)
         card_fill_set(w.card, lp, warm ? 0xFFD9A0 : hsl(float(h.lights_hue), 0.85f, 0.76f),
                       warm ? 0xF3B56A : hsl(float(h.lights_hue), 0.85f, 0.62f));
         ink(slot, lp > 45);
-        if (!h.paired) strlcpy(v, h.started ? "Pair" : "Home", sizeof(v));
-        else if (h.lights && h.lights_on) snprintf(v, sizeof(v), "%d%%", h.lights_pct);
-        else strlcpy(v, h.lights ? "Off" : "\xE2\x80\x94", sizeof(v));
+        if (!h.paired) {
+            strlcpy(v, h.started ? "Pair" : "Home", sizeof(v));
+        } else if (h.lights && h.lights_on) {
+            snprintf(v, sizeof(v), "%d%%", h.lights_pct);
+        } else {
+            strlcpy(v, h.lights ? "Off" : "\xE2\x80\x94", sizeof(v));
+        }
         set_text(w.big, v);
         set_text(w.line1, h.paired ? (h.lights ? h.lights_state : "No lights") : "Open Home to pair");
         set_text(w.line2, h.tv ? h.tv_name : "");
@@ -269,8 +310,11 @@ void update_widget(int slot)
         const int vol = h.music && h.volume > 0 ? h.volume : 0;
         card_fill_set(w.card, vol, VIOLET.glow, VIOLET.glow);
         ink(slot, false);
-        if (h.music && h.volume >= 0) snprintf(v, sizeof(v), "%d", h.volume);
-        else strlcpy(v, "\xE2\x80\x94", sizeof(v));
+        if (h.music && h.volume >= 0) {
+            snprintf(v, sizeof(v), "%d", h.volume);
+        } else {
+            strlcpy(v, "\xE2\x80\x94", sizeof(v));
+        }
         set_text(w.big, v);
         set_text(w.line1, h.music ? h.music_state : h.paired ? "No speaker" : "Open Home to pair");
         set_text(w.line2, h.music ? "Volume" : "");
@@ -279,9 +323,11 @@ void update_widget(int slot)
     case W_SWIFTY: {
         std::string plain;
         for (const char *c = ui.swifty.last; *c; ++c)
-            if (*c != '*' && *c != '`' && *c != '#') plain += *c == '\n' ? ' ' : *c;
+            if (*c != '*' && *c != '`' && *c != '#') {
+                plain += *c == '\n' ? ' ' : *c;
+            }
         set_text(w.line1, plain.empty() ? (ui.swifty.configured ? "Hold the AI key and ask me anything." : "Set me up with mosaico-config.py.")
-                                        : plain.c_str());
+                 : plain.c_str());
         set_text(w.title, ui.swifty.listening ? "Listening\xE2\x80\xA6" : ui.swifty.busy ? "Thinking\xE2\x80\xA6" : "Swifty");
         break;
     }
@@ -289,8 +335,11 @@ void update_widget(int slot)
         const int b = ui.battery;
         card_fill_set(w.card, b > 0 ? b : 0, b >= 0 && b <= 20 ? RED : GREEN.glow, b >= 0 && b <= 20 ? RED : GREEN.glow);
         ink(slot, b > 45);
-        if (b >= 0) snprintf(v, sizeof(v), "%d%%", b);
-        else strlcpy(v, "\xE2\x80\x94", sizeof(v));
+        if (b >= 0) {
+            snprintf(v, sizeof(v), "%d%%", b);
+        } else {
+            strlcpy(v, "\xE2\x80\x94", sizeof(v));
+        }
         set_text(w.big, v);
         set_text(w.line1, b < 0 ? "No reading" : ui.charging ? "Charging" : "On battery");
         set_text(w.line2, "");
@@ -306,7 +355,9 @@ void update_widget(int slot)
 
 void close_picker()
 {
-    if (ui.picker) lv_obj_delete_async(ui.picker);
+    if (ui.picker) {
+        lv_obj_delete_async(ui.picker);
+    }
     ui.picker = nullptr;
 }
 
@@ -317,7 +368,9 @@ void pick_cb(lv_event_t *e)
     close_picker();
     ui.w[slot].kind = kind;
     build_widget(slot);
-    if (ui.hooks.save_widgets) ui.hooks.save_widgets(ui.w[0].kind, ui.w[1].kind);
+    if (ui.hooks.save_widgets) {
+        ui.hooks.save_widgets(ui.w[0].kind, ui.w[1].kind);
+    }
 }
 
 void open_picker(int slot)
@@ -333,12 +386,16 @@ void open_picker(int slot)
         lv_obj_t *r = glass(o, 50 + (k % 2) * 194, 74 + (k / 2) * 92, 186, 84, 22, CYAN);
         icon(r, WIDGET_ICONS[k], 16, 14, 26, k == ui.w[slot].kind ? CYAN.glow : TEXT, 1.7f);
         label(r, WIDGET_NAMES[k], 16, 48, 160, TEXT, 17, true);
-        if (k == ui.w[slot].kind) icon(r, "check", 146, 16, 24, CYAN.glow, 2.0f);
+        if (k == ui.w[slot].kind) {
+            icon(r, "check", 146, 16, 24, CYAN.glow, 2.0f);
+        }
         press_fx(r);
         on(r, pick_cb, LV_EVENT_CLICKED, reinterpret_cast<void *>(intptr_t(slot << 8 | k)));
     }
     lv_obj_t *cancel = field_button(o, 170, 366, 140, 46, "Cancel", 16, TEXT2);
-    on(cancel, [](lv_event_t *) { close_picker(); });
+    on(cancel, [](lv_event_t *) {
+        close_picker();
+    });
     stagger(o, 0, 12);
 }
 
@@ -347,7 +404,9 @@ void open_picker(int slot)
 int corner_inset(int y)
 {
     const int r = ui.radius;
-    if (r <= 0 || y >= r) return 0;
+    if (r <= 0 || y >= r) {
+        return 0;
+    }
     const float d = float(r - y);
     return int(ceilf(float(r) - sqrtf(float(r * r) - d * d)));
 }
@@ -381,11 +440,18 @@ void update_status_bar()
     set_text(ui.date, ui.date_text);
     const int b = ui.battery;
     const bool known = b >= 0;
-    for (lv_obj_t *o : {ui.batt, ui.batt_nub}) {
-        if (known) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
-        else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    for (lv_obj_t *o : {
+                ui.batt, ui.batt_nub
+            }) {
+        if (known) {
+            lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+        }
     }
-    if (!known) return;
+    if (!known) {
+        return;
+    }
     // No number: the colour says it. Green charging or plenty, amber under
     // half, red under a fifth.
     const int pct = std::clamp(b, 0, 100);
@@ -394,8 +460,11 @@ void update_status_bar()
     lv_obj_set_style_bg_color(ui.batt_fill, lv_color_hex(color), 0);
     lv_obj_set_style_border_color(ui.batt, lv_color_hex(ui.charging ? OK : TEXT2), 0);
     lv_obj_set_style_bg_color(ui.batt_nub, lv_color_hex(ui.charging ? OK : TEXT2), 0);
-    if (ui.charging) lv_obj_remove_flag(ui.batt_bolt, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(ui.batt_bolt, LV_OBJ_FLAG_HIDDEN);
+    if (ui.charging) {
+        lv_obj_remove_flag(ui.batt_bolt, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(ui.batt_bolt, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 // ---- Settings page -----------------------------------------------------------------------
@@ -408,17 +477,23 @@ void bright_cb(lv_event_t *e)
     char text[16];
     snprintf(text, sizeof(text), "%d%%", v);
     set_text(ui.s_bright, text);
-    if (ui.hooks.brightness) ui.hooks.brightness(v, release);
+    if (ui.hooks.brightness) {
+        ui.hooks.brightness(v, release);
+    }
 }
 
 void haptics_cb(lv_event_t *e)
 {
-    if (ui.hooks.haptics) ui.hooks.haptics(toggle_on(lv_event_get_current_target_obj(e)));
+    if (ui.hooks.haptics) {
+        ui.hooks.haptics(toggle_on(lv_event_get_current_target_obj(e)));
+    }
 }
 
 void rotate_cb(lv_event_t *e)
 {
-    if (ui.hooks.auto_rotate) ui.hooks.auto_rotate(toggle_on(lv_event_get_current_target_obj(e)));
+    if (ui.hooks.auto_rotate) {
+        ui.hooks.auto_rotate(toggle_on(lv_event_get_current_target_obj(e)));
+    }
 }
 
 void corners_step_cb(lv_event_t *e)
@@ -439,7 +514,9 @@ void build_settings(int brightness, bool haptics, bool auto_rotate)
     lv_obj_set_style_bg_opa(back, LV_OPA_COVER, 0);
     icon(back, "back", 10, 10, 24, TEXT, 2.0f);
     press_fx(back);
-    on(back, [](lv_event_t *) { lv_obj_add_flag(ui.settings, LV_OBJ_FLAG_HIDDEN); });
+    on(back, [](lv_event_t *) {
+        lv_obj_add_flag(ui.settings, LV_OBJ_FLAG_HIDDEN);
+    });
     label(c, "Settings", 112, 18, 0, TEXT, 30, true);
     lv_obj_t *br = glass(c, 10, 96, 460, 86, 26, GREEN);
     label(br, "Brightness", 24, 16, 200, TEXT, 18, true);
@@ -491,10 +568,18 @@ void build_settings(int brightness, bool haptics, bool auto_rotate)
     ui.s_zone = label(tz, "", 24, 72, 250, TEXT2, 16, true);
     lv_obj_t *prev = field_button(tz, 296, 56, 64, 40, "", 16);
     icon(prev, "back", 20, 8, 24, TEXT, 2.0f);
-    on(prev, [](lv_event_t *) { if (ui.hooks.time_zone) ui.hooks.time_zone(-1); }, LV_EVENT_CLICKED, nullptr);
+    on(prev, [](lv_event_t *) {
+        if (ui.hooks.time_zone) {
+            ui.hooks.time_zone(-1);
+        }
+    }, LV_EVENT_CLICKED, nullptr);
     lv_obj_t *next = field_button(tz, 372, 56, 64, 40, "", 16);
     icon(next, "chev", 20, 8, 24, TEXT, 2.0f);
-    on(next, [](lv_event_t *) { if (ui.hooks.time_zone) ui.hooks.time_zone(1); }, LV_EVENT_CLICKED, nullptr);
+    on(next, [](lv_event_t *) {
+        if (ui.hooks.time_zone) {
+            ui.hooks.time_zone(1);
+        }
+    }, LV_EVENT_CLICKED, nullptr);
     // Camera: front/rear found automatically, or only by its button.
     lv_obj_t *cam = glass(c, 10, 564, 460, 96, 28, GREEN);
     label(cam, "Camera", 24, 16, 260, TEXT, 18, true);
@@ -502,7 +587,9 @@ void build_settings(int brightness, bool haptics, bool auto_rotate)
     label(cam, "Off: only the camera's button switches", 24, 64, 300, TEXT3, 14);
     ui.s_cam_auto = toggle(cam, 360, 28, true, GREEN);
     lv_obj_add_event_cb(ui.s_cam_auto, [](lv_event_t *e) {
-        if (ui.hooks.camera_auto) ui.hooks.camera_auto(toggle_on(lv_event_get_current_target_obj(e)));
+        if (ui.hooks.camera_auto) {
+            ui.hooks.camera_auto(toggle_on(lv_event_get_current_target_obj(e)));
+        }
     }, LV_EVENT_VALUE_CHANGED, nullptr);
     box(c, 0, 660, 1, 60);  // room to scroll the last card clear of the rounded bottom
     lv_obj_add_flag(c, LV_OBJ_FLAG_SCROLLABLE);
@@ -518,10 +605,12 @@ void update_settings(const LauncherStatus &s)
     set_text(ui.s_wifi_state, s.wifi_connected ? "Connected" : s.wifi_configured ? "Connecting\xE2\x80\xA6" : "Not set");
     set_color(ui.s_wifi_state, color);
     set_text(ui.s_detail, s.wifi_connected && s.ip ? s.ip : s.wifi_configured ? "Joining the network\xE2\x80\xA6"
-                                                                            : "Set Wi-Fi in Vibe Mode");
+             : "Set Wi-Fi in Vibe Mode");
     set_text(ui.s_versions, s.versions ? s.versions : "");
     set_text(ui.s_zone, s.zone ? s.zone : "UTC");
-    if (ui.s_cam_auto && toggle_on(ui.s_cam_auto) != s.camera_auto) toggle_set(ui.s_cam_auto, s.camera_auto, false);
+    if (ui.s_cam_auto && toggle_on(ui.s_cam_auto) != s.camera_auto) {
+        toggle_set(ui.s_cam_auto, s.camera_auto, false);
+    }
 }
 
 // ---- corner calibration --------------------------------------------------------------------
@@ -541,10 +630,15 @@ void step_cb(lv_event_t *e)
 
 void save_cb(lv_event_t *)
 {
-    if (ui.hooks.save_radius) ui.hooks.save_radius(ui.draft);
+    if (ui.hooks.save_radius) {
+        ui.hooks.save_radius(ui.draft);
+    }
 }
 
-void cancel_cb(lv_event_t *) { launcher_ui_calibration(false, ui.radius); }
+void cancel_cb(lv_event_t *)
+{
+    launcher_ui_calibration(false, ui.radius);
+}
 }  // namespace
 
 lv_obj_t *launcher_ui_build(const LauncherHooks &hooks, int radius, int brightness, bool haptics, bool auto_rotate,
@@ -587,7 +681,9 @@ void launcher_ui_update(const LauncherStatus &status, const glimdock_summary_t &
     ui.have_data = true;
     set_color(ui.wifi, status.wifi_connected ? TEXT : status.wifi_configured ? WARN : RED);
     update_status_bar();
-    for (int i = 0; i < 2; ++i) update_widget(i);
+    for (int i = 0; i < 2; ++i) {
+        update_widget(i);
+    }
     if (glim.ready && glim.alerts > 0) {
         char v[8];
         snprintf(v, sizeof(v), "%d", std::min(glim.alerts, 99));
@@ -596,8 +692,11 @@ void launcher_ui_update(const LauncherStatus &status, const glimdock_summary_t &
     } else {
         lv_obj_add_flag(ui.badge, LV_OBJ_FLAG_HIDDEN);
     }
-    if (swifty.listening || swifty.busy) lv_obj_remove_flag(ui.swifty_dot, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(ui.swifty_dot, LV_OBJ_FLAG_HIDDEN);
+    if (swifty.listening || swifty.busy) {
+        lv_obj_remove_flag(ui.swifty_dot, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(ui.swifty_dot, LV_OBJ_FLAG_HIDDEN);
+    }
     update_settings(status);
 }
 
@@ -613,8 +712,11 @@ void launcher_ui_entered(ShellApp app)
 // 0-5: the home screen; 6: Settings (kept for the preview).
 void launcher_ui_show_page(int index)
 {
-    if (index >= 6) open_app(-1);
-    else lv_obj_add_flag(ui.settings, LV_OBJ_FLAG_HIDDEN);
+    if (index >= 6) {
+        open_app(-1);
+    } else {
+        lv_obj_add_flag(ui.settings, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 void launcher_ui_calibration(bool visible, int radius)
@@ -623,7 +725,9 @@ void launcher_ui_calibration(bool visible, int radius)
         lv_obj_delete(ui.calibration);
         ui.calibration = ui.guide = ui.cal_value = nullptr;
     }
-    if (!visible) return;
+    if (!visible) {
+        return;
+    }
     ui.draft = radius;
     lv_obj_t *c = box(ui.screen, 0, 0, PANEL, PANEL);
     lv_obj_set_style_bg_color(c, lv_color_black(), 0);

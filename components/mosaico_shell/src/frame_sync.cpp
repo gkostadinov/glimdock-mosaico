@@ -61,11 +61,17 @@ void IRAM_ATTR te_isr(void *)
     const bool high = gpio_get_level(BSP_LCD_TE);
     F.edges = F.edges + 1;
     if (high) {
-        if (F.last_fall) F.low_us = now - F.last_fall;
-        if (F.last_rise) F.period_us = now - F.last_rise;
+        if (F.last_fall) {
+            F.low_us = now - F.last_fall;
+        }
+        if (F.last_rise) {
+            F.period_us = now - F.last_rise;
+        }
         F.last_rise = now;
     } else {
-        if (F.last_rise) F.high_us = now - F.last_rise;
+        if (F.last_rise) {
+            F.high_us = now - F.last_rise;
+        }
         F.last_fall = now;
     }
     // blank = high phase when it is the shorter one (the usual polarity)
@@ -74,7 +80,9 @@ void IRAM_ATTR te_isr(void *)
         F.scan_start = now;
         BaseType_t woken = pdFALSE;
         xSemaphoreGiveFromISR(F.scan, &woken);
-        if (woken) portYIELD_FROM_ISR();
+        if (woken) {
+            portYIELD_FROM_ISR();
+        }
     }
 }
 
@@ -100,7 +108,9 @@ void copy_swapped(uint8_t *dst, const uint8_t *src, size_t bytes)
 void follow_scan(int y)
 {
     xSemaphoreTake(F.scan, 0);  // drop a stale edge
-    if (xSemaphoreTake(F.scan, pdMS_TO_TICKS(40)) != pdTRUE) return;  // no TE: send now
+    if (xSemaphoreTake(F.scan, pdMS_TO_TICKS(40)) != pdTRUE) {
+        return;    // no TE: send now
+    }
     const int64_t period = std::clamp<int64_t>(int64_t(F.period_us), 8000, 40000);
     const int64_t target = F.scan_start + int64_t(y) * period / H + 400;
     int64_t left = target - esp_timer_get_time();
@@ -108,7 +118,9 @@ void follow_scan(int y)
         vTaskDelay(pdMS_TO_TICKS(left / 1000 - 1));
         left = target - esp_timer_get_time();
     }
-    if (left > 0) esp_rom_delay_us(uint32_t(left));
+    if (left > 0) {
+        esp_rom_delay_us(uint32_t(left));
+    }
 }
 
 void sender(void *)
@@ -125,10 +137,14 @@ void sender(void *)
                 --inflight;
             }
             copy_swapped(F.dma[b], F.src + size_t(y) * W * 2, size_t(n) * W * 2);
-            if (esp_lcd_panel_draw_bitmap(F.panel, 0, y, W, y + n, F.dma[b]) == ESP_OK) ++inflight;
+            if (esp_lcd_panel_draw_bitmap(F.panel, 0, y, W, y + n, F.dma[b]) == ESP_OK) {
+                ++inflight;
+            }
             b ^= 1;
         }
-        while (inflight--) xSemaphoreTake(F.chunk_done, pdMS_TO_TICKS(200));
+        while (inflight--) {
+            xSemaphoreTake(F.chunk_done, pdMS_TO_TICKS(200));
+        }
         F.busy = false;
         lv_display_flush_ready(F.disp);
         xSemaphoreGive(F.frame_done);
@@ -154,7 +170,9 @@ void flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
 // LVGL waits here (instead of spinning) before reusing a buffer being sent.
 void flush_wait(lv_display_t *)
 {
-    while (F.busy) xSemaphoreTake(F.frame_done, pdMS_TO_TICKS(50));
+    while (F.busy) {
+        xSemaphoreTake(F.frame_done, pdMS_TO_TICKS(50));
+    }
 }
 }  // namespace
 
@@ -165,7 +183,9 @@ bool frame_sync_start(lv_display_t *display)
     esp_lcd_panel_io_handle_t io = bsp_display_get_panel_io();
     uint8_t *fb0 = static_cast<uint8_t *>(heap_caps_aligned_alloc(64, FRAME_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     uint8_t *fb1 = static_cast<uint8_t *>(heap_caps_aligned_alloc(64, FRAME_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    for (auto &d : F.dma) d = static_cast<uint8_t *>(heap_caps_aligned_alloc(64, CHUNK_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    for (auto &d : F.dma) {
+        d = static_cast<uint8_t *>(heap_caps_aligned_alloc(64, CHUNK_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    }
     F.job = xSemaphoreCreateBinary();
     F.frame_done = xSemaphoreCreateBinary();
     F.chunk_done = xSemaphoreCreateCounting(4, 0);
@@ -174,7 +194,9 @@ bool frame_sync_start(lv_display_t *display)
         ESP_LOGW(TAG, "not available; strips instead");
         heap_caps_free(fb0);
         heap_caps_free(fb1);
-        for (auto &d : F.dma) heap_caps_free(d), d = nullptr;
+        for (auto &d : F.dma) {
+            heap_caps_free(d), d = nullptr;
+        }
         return false;
     }
     memset(fb0, 0, FRAME_BYTES);
@@ -189,7 +211,9 @@ bool frame_sync_start(lv_display_t *display)
     te.intr_type = GPIO_INTR_ANYEDGE;
     gpio_config(&te);
     const esp_err_t isr = gpio_install_isr_service(0);
-    if (isr == ESP_OK || isr == ESP_ERR_INVALID_STATE) gpio_isr_handler_add(BSP_LCD_TE, te_isr, nullptr);
+    if (isr == ESP_OK || isr == ESP_ERR_INVALID_STATE) {
+        gpio_isr_handler_add(BSP_LCD_TE, te_isr, nullptr);
+    }
     lv_display_set_buffers(display, fb0, fb1, FRAME_BYTES, LV_DISPLAY_RENDER_MODE_DIRECT);
     lv_display_set_flush_cb(display, flush);
     lv_display_set_flush_wait_cb(display, flush_wait);
@@ -202,8 +226,13 @@ bool frame_sync_start(lv_display_t *display)
 bool frame_sync_wait_idle(int timeout_ms)
 {
     const int64_t until = esp_timer_get_time() + int64_t(timeout_ms) * 1000;
-    while (F.busy && esp_timer_get_time() < until) vTaskDelay(1);
+    while (F.busy && esp_timer_get_time() < until) {
+        vTaskDelay(1);
+    }
     return !F.busy;
 }
 
-int frame_sync_te_period_us() { return F.edges > 2 ? int(F.period_us) : 0; }
+int frame_sync_te_period_us()
+{
+    return F.edges > 2 ? int(F.period_us) : 0;
+}

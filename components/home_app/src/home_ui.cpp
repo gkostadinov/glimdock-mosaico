@@ -19,7 +19,6 @@
 #include "home_prefs.h"
 #include "mui.h"
 
-
 namespace home {
 namespace {
 
@@ -47,7 +46,7 @@ uint32_t hsl(double h, double s, double l)
 
 struct Palette {
     uint32_t bg, text, text2, text3, tint, tint_soft, on_tint, fill_a, fill_b, card, card_edge, line, field, tint_wash,
-        amber, red, ok, knob, toggle_off, dot_off, unlit;
+             amber, red, ok, knob, toggle_off, dot_off, unlit;
     double lit_l;
 };
 constexpr uint32_t LIGHT_BG = 0xF4F1F7, DARK_BG = 0x121019;
@@ -71,9 +70,15 @@ bool light = false;
 constexpr float VIEW = 320, PAD = 10;
 float VIEW_H = VIEW;  // the frame is taller than wide: it fills the panel's height
 float S = 1.35f;
-int P(float v) { return int(lroundf(v * S)); }
+int P(float v)
+{
+    return int(lroundf(v * S));
+}
 
-const lv_font_t *font(float size, bool semi) { return mui::font(P(size), semi); }
+const lv_font_t *font(float size, bool semi)
+{
+    return mui::font(P(size), semi);
+}
 
 // ---- app state ---------------------------------------------------------------
 enum class Page { Pair, Edit, Home, Lights, Music, Pets, Confirm, Settings };
@@ -91,7 +96,11 @@ struct {
     DocPtr prep;
     std::string prep_name, prep_target, noresp, last_scene, pending_pets;
     std::map<std::string, int> drag;
-    struct { std::string text, kind; uint32_t at = 0; bool shown = false; } toast;
+    struct {
+        std::string text, kind;
+        uint32_t at = 0;
+        bool shown = false;
+    } toast;
     lv_obj_t *scroller = nullptr, *backdrop = nullptr;
     int32_t saved_scroll = 0, room_row_x = 0;
     std::string room_row_for;  // the room the row was last scrolled to
@@ -99,18 +108,36 @@ struct {
     uint32_t last_render = 0, last_revision = 0;
     void (*exit_to_launcher)() = nullptr;
     // Pairing: the hub address is typed in (or set over ESP-Iris), no default.
-    struct { std::string hub, code, message; bool ok = false, busy = false; } pair;
+    struct {
+        std::string hub, code, message;
+        bool ok = false, busy = false;
+    } pair;
     std::unique_ptr<EditState> edit;
     Derived d;
 } G;
 
-void dirty() { G.dirty = true; }
-void open(Page page) { G.page = page; G.dirty = true; }
+void dirty()
+{
+    G.dirty = true;
+}
+void open(Page page)
+{
+    G.page = page;
+    G.dirty = true;
+}
 
 // ---- callbacks owned by objects ------------------------------------------------
-struct Action { std::function<void()> fn; };
-void free_action(lv_event_t *e) { delete static_cast<Action *>(lv_event_get_user_data(e)); }
-void run_action(lv_event_t *e) { static_cast<Action *>(lv_event_get_user_data(e))->fn(); }
+struct Action {
+    std::function<void()> fn;
+};
+void free_action(lv_event_t *e)
+{
+    delete static_cast<Action *>(lv_event_get_user_data(e));
+}
+void run_action(lv_event_t *e)
+{
+    static_cast<Action *>(lv_event_get_user_data(e))->fn();
+}
 void click(lv_obj_t *o, std::function<void()> fn)
 {
     auto *a = new Action{std::move(fn)};
@@ -141,7 +168,9 @@ lv_obj_t *box(lv_obj_t *parent, float x, float y, float w, float h, BoxOpts o = 
     lv_obj_remove_flag(b, lv_obj_flag_t(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
     const uint32_t bg = o.bg < 0 ? c.card : uint32_t(o.bg);
     float bw = o.bw;
-    if (bw < 0) bw = (bg != c.bg && o.bg_opa != 0) ? 1 : 0;  // firmware box(): 1 px edge off-page
+    if (bw < 0) {
+        bw = (bg != c.bg && o.bg_opa != 0) ? 1 : 0;    // firmware box(): 1 px edge off-page
+    }
     lv_obj_set_style_bg_color(b, lv_color_hex(bg), 0);
     lv_obj_set_style_bg_opa(b, o.bg_opa, 0);
     lv_obj_set_style_border_width(b, bw <= 1 ? int(bw) : P(bw), 0);
@@ -165,7 +194,9 @@ lv_obj_t *box(lv_obj_t *parent, float x, float y, float w, float h, BoxOpts o = 
         lv_obj_set_style_border_color(b, lv_color_white(), 0);
         lv_obj_set_style_border_opa(b, 22, 0);
     }
-    if (o.hidden) lv_obj_add_flag(b, LV_OBJ_FLAG_HIDDEN);
+    if (o.hidden) {
+        lv_obj_add_flag(b, LV_OBJ_FLAG_HIDDEN);
+    }
     return b;
 }
 
@@ -187,7 +218,13 @@ lv_obj_t *plain(lv_obj_t *parent, float x, float y, float w, float h, int scroll
     return box(parent, x, y, w, h, o);
 }
 
-BoxOpts card_opts(float radius = 15) { BoxOpts o; o.radius = radius; o.glass = true; return o; }
+BoxOpts card_opts(float radius = 15)
+{
+    BoxOpts o;
+    o.radius = radius;
+    o.glass = true;
+    return o;
+}
 lv_obj_t *card(lv_obj_t *parent, float x, float y, float w, float h, float radius = 15)
 {
     return box(parent, x, y, w, h, card_opts(radius));
@@ -214,11 +251,24 @@ lv_obj_t *text(lv_obj_t *parent, const std::string &str, float x, float y, float
         lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
         lv_obj_set_height(l, lv_font_get_line_height(f));
     }
-    if (o.hidden) lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
+    if (o.hidden) {
+        lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
+    }
     return l;
 }
-TextOpts semi(lv_text_align_t align = LV_TEXT_ALIGN_LEFT) { TextOpts o; o.semi = true; o.align = align; return o; }
-TextOpts wrapped() { TextOpts o; o.wrap = true; return o; }
+TextOpts semi(lv_text_align_t align = LV_TEXT_ALIGN_LEFT)
+{
+    TextOpts o;
+    o.semi = true;
+    o.align = align;
+    return o;
+}
+TextOpts wrapped()
+{
+    TextOpts o;
+    o.wrap = true;
+    return o;
+}
 
 float text_w(const std::string &str, float size, bool is_semi = false)
 {
@@ -228,7 +278,9 @@ float text_w(const std::string &str, float size, bool is_semi = false)
 }
 float fit(const std::string &str, float w, float size = 12, bool is_semi = false, float min = 8)
 {
-    while (size > min && text_w(str, size, is_semi) > w) size -= 1;
+    while (size > min && text_w(str, size, is_semi) > w) {
+        size -= 1;
+    }
     return size;
 }
 float text_h(const std::string &str, float w, float size)
@@ -252,7 +304,9 @@ lv_obj_t *icon(lv_obj_t *parent, const char *name, float x, float y, float size,
 {
     lv_obj_t *o = plain(parent, x, y, size, size);
     const home_icons::Icon *found = home_icons::find(name);
-    if (!found) return o;
+    if (!found) {
+        return o;
+    }
     lv_obj_set_style_line_color(o, lv_color_hex(color), 0);
     lv_obj_set_style_line_width(o, std::max(1, int(lroundf(width * S))), 0);
     lv_obj_add_event_cb(o, draw_icon, LV_EVENT_DRAW_MAIN, const_cast<home_icons::Icon *>(found));
@@ -271,9 +325,17 @@ void glow_fill(lv_obj_t *fill, uint32_t color)
 }
 
 // Web .toggle (44x26 units): springs and glows when on (mui::toggle).
-struct Change { std::function<void()> fn; };
-void run_change(lv_event_t *e) { static_cast<Change *>(lv_event_get_user_data(e))->fn(); }
-void free_change(lv_event_t *e) { delete static_cast<Change *>(lv_event_get_user_data(e)); }
+struct Change {
+    std::function<void()> fn;
+};
+void run_change(lv_event_t *e)
+{
+    static_cast<Change *>(lv_event_get_user_data(e))->fn();
+}
+void free_change(lv_event_t *e)
+{
+    delete static_cast<Change *>(lv_event_get_user_data(e));
+}
 void toggle(lv_obj_t *parent, float x, float y, bool on, std::function<void()> fn, bool disabled)
 {
     lv_obj_t *t = mui::toggle(parent, P(x), P(y), on, mui::VIOLET, float(P(26)) / 32.0f);
@@ -292,7 +354,10 @@ void toggle(lv_obj_t *parent, float x, float y, bool on, std::function<void()> f
     lv_obj_add_event_cb(t, free_change, LV_EVENT_DELETE, ch);
 }
 
-struct RoundOpts { bool active = false, disabled = false; int64_t color = -1; };
+struct RoundOpts {
+    bool active = false, disabled = false;
+    int64_t color = -1;
+};
 void round_button(lv_obj_t *parent, float x, float y, float size, const char *name, std::function<void()> fn, RoundOpts r = {})
 {
     BoxOpts o;
@@ -306,10 +371,16 @@ void round_button(lv_obj_t *parent, float x, float y, float size, const char *na
     lv_obj_t *b = box(parent, x, y, size, size, o);
     const float is = size * 0.5f;
     icon(b, name, (size - is) / 2, (size - is) / 2, is, r.active ? c.on_tint : r.color < 0 ? c.text : uint32_t(r.color), 1.3f);
-    if (fn && !r.disabled) click(pressable(b), std::move(fn));
+    if (fn && !r.disabled) {
+        click(pressable(b), std::move(fn));
+    }
 }
 
-struct PillOpts { bool on = false, disabled = false; float size = 12; int64_t color = -1; };
+struct PillOpts {
+    bool on = false, disabled = false;
+    float size = 12;
+    int64_t color = -1;
+};
 void pill(lv_obj_t *parent, float x, float y, float w, float h, const std::string &label, std::function<void()> fn,
           PillOpts p = {})
 {
@@ -325,7 +396,9 @@ void pill(lv_obj_t *parent, float x, float y, float w, float h, const std::strin
     const float size = fit(label, w - 12, p.size, true);
     text(b, label, 4, (h - size * 1.25f) / 2, w - 8, p.on ? c.on_tint : (p.color < 0 ? c.text : uint32_t(p.color)), size,
          semi(LV_TEXT_ALIGN_CENTER));
-    if (fn && !p.disabled) click(pressable(b), std::move(fn));
+    if (fn && !p.disabled) {
+        click(pressable(b), std::move(fn));
+    }
 }
 
 void heading(lv_obj_t *root, const std::string &title, std::function<void()> back)
@@ -343,15 +416,21 @@ lv_obj_t *scroller(lv_obj_t *root, float y)
 }
 
 // An lv_slider used only for its drag gesture: invisible, over a drawn fill.
-struct Drag { std::function<void(int, bool)> fn; };
+struct Drag {
+    std::function<void(int, bool)> fn;
+};
 void drag_event(lv_event_t *e)
 {
     auto *d = static_cast<Drag *>(lv_event_get_user_data(e));
     lv_obj_t *s = lv_event_get_current_target_obj(e);
     const lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_VALUE_CHANGED) d->fn(lv_slider_get_value(s), false);
-    else if (code == LV_EVENT_RELEASED) d->fn(lv_slider_get_value(s), true);
-    else if (code == LV_EVENT_DELETE) delete d;
+    if (code == LV_EVENT_VALUE_CHANGED) {
+        d->fn(lv_slider_get_value(s), false);
+    } else if (code == LV_EVENT_RELEASED) {
+        d->fn(lv_slider_get_value(s), true);
+    } else if (code == LV_EVENT_DELETE) {
+        delete d;
+    }
 }
 void drag_slider(lv_obj_t *parent, float x, float y, float w, float h, int value, std::function<void(int, bool)> fn)
 {
@@ -381,20 +460,31 @@ void toast(const std::string &message, const char *kind = "ok")
 // then until the device agrees; a failure drops it at once (web actions.js).
 RunHandler after_run(const std::string &name, const std::string &target = std::string())
 {
-    return [name, target](const DocPtr &run, const std::string &error) {
+    return [name, target](const DocPtr & run, const std::string & error) {
         if (!run) {
-            if (!target.empty()) lean_settle(target, false);
+            if (!target.empty()) {
+                lean_settle(target, false);
+            }
             toast(error.empty() ? "That did not work." : error, "fail");
             dirty();
             return;
         }
         const std::string phase = (*run)["phase"] | "";
-        if (phase == "commanded") return;  // still running: keep holding
+        if (phase == "commanded") {
+            return;    // still running: keep holding
+        }
         const bool failed = phase == "no_response" || phase == "failed" || phase == "refused";
-        if (!target.empty()) lean_settle(target, !failed);
-        if (failed) { G.noresp = name; toast("The " + name + " didn't answer.", "fail"); }
-        else if (phase == "simulated") toast("Dry-run: nothing was sent.", "ok");
-        else if (phase == "confirmed" || phase == "sent") G.noresp.clear();
+        if (!target.empty()) {
+            lean_settle(target, !failed);
+        }
+        if (failed) {
+            G.noresp = name;
+            toast("The " + name + " didn't answer.", "fail");
+        } else if (phase == "simulated") {
+            toast("Dry-run: nothing was sent.", "ok");
+        } else if (phase == "confirmed" || phase == "sent") {
+            G.noresp.clear();
+        }
         dirty();
     };
 }
@@ -405,10 +495,18 @@ void act(const std::string &action, const std::string &target, JsonDocument para
 {
     const std::string flow = hub.flow(action);
     const std::string who = name.empty() ? label : name;
-    if (!hub.can(action)) { lean_settle(target, false); toast("This display may not do that.", "fail"); return; }
+    if (!hub.can(action)) {
+        lean_settle(target, false);
+        toast("This display may not do that.", "fail");
+        return;
+    }
     if (flow == "prepare_confirm") {
-        hub.prepare(action, target, std::move(params), [who, target](const DocPtr &prep, const std::string &error) {
-            if (!prep) { lean_settle(target, false); toast(error, "fail"); return; }
+        hub.prepare(action, target, std::move(params), [who, target](const DocPtr & prep, const std::string & error) {
+            if (!prep) {
+                lean_settle(target, false);
+                toast(error, "fail");
+                return;
+            }
             G.prep = prep;
             G.prep_name = who;
             G.prep_target = target;
@@ -422,56 +520,98 @@ void act(const std::string &action, const std::string &target, JsonDocument para
     }
 }
 
-JsonDocument param(const char *key, bool value) { JsonDocument d; d[key] = value; return d; }
-JsonDocument param(const char *key, int value) { JsonDocument d; d[key] = value; return d; }
-JsonDocument param(const char *key, const std::string &value) { JsonDocument d; d[key] = value; return d; }
-JsonDocument no_params() { JsonDocument d; d.to<JsonObject>(); return d; }
+JsonDocument param(const char *key, bool value)
+{
+    JsonDocument d;
+    d[key] = value;
+    return d;
+}
+JsonDocument param(const char *key, int value)
+{
+    JsonDocument d;
+    d[key] = value;
+    return d;
+}
+JsonDocument param(const char *key, const std::string &value)
+{
+    JsonDocument d;
+    d[key] = value;
+    return d;
+}
+JsonDocument no_params()
+{
+    JsonDocument d;
+    d.to<JsonObject>();
+    return d;
+}
 
 // ---- rooms ---------------------------------------------------------------------------
-JsonArrayConst rooms() { return hub.rooms ? (*hub.rooms)["rooms"].as<JsonArrayConst>() : JsonArrayConst(); }
+JsonArrayConst rooms()
+{
+    return hub.rooms ? (*hub.rooms)["rooms"].as<JsonArrayConst>() : JsonArrayConst();
+}
 JsonObjectConst room_of(const std::string &target)
 {
     for (JsonObjectConst r : rooms())
         for (JsonObjectConst d : r["devices"].as<JsonArrayConst>())
-            if (target == (d["target"] | "")) return r;
+            if (target == (d["target"] | "")) {
+                return r;
+            }
     return JsonObjectConst();
 }
 JsonObjectConst picked_room()
 {
-    if (hub.prefs.room.empty()) return JsonObjectConst();
-    for (JsonObjectConst r : rooms()) if (hub.prefs.room == (r["id"] | "")) return r;
+    if (hub.prefs.room.empty()) {
+        return JsonObjectConst();
+    }
+    for (JsonObjectConst r : rooms()) if (hub.prefs.room == (r["id"] | "")) {
+            return r;
+        }
     return JsonObjectConst();
 }
 bool in_view(const std::string &target)
 {
     JsonObjectConst here = picked_room();
-    if (here.isNull() || target.empty()) return true;
+    if (here.isNull() || target.empty()) {
+        return true;
+    }
     JsonObjectConst r = room_of(target);
     return r.isNull() || strcmp(r["id"] | "", here["id"] | "") == 0;
 }
 // A room is offered only if one of its devices is visible to this display.
 bool room_has_devices(JsonObjectConst room)
 {
-    if (!hub.devices) return true;
+    if (!hub.devices) {
+        return true;
+    }
     for (JsonObjectConst d : room["devices"].as<JsonArrayConst>()) {
         const char *t = d["target"] | "";
         for (JsonObjectConst dev : (*hub.devices)["devices"].as<JsonArrayConst>())
-            if (!strcmp(dev["target"] | "", t)) return true;
+            if (!strcmp(dev["target"] | "", t)) {
+                return true;
+            }
     }
     return false;
 }
 std::vector<Item> room_bulbs(JsonObjectConst room)
 {
-    if (room.isNull()) return G.d.bulbs;
+    if (room.isNull()) {
+        return G.d.bulbs;
+    }
     std::vector<Item> list;
     for (const Item &b : G.d.bulbs) {
         JsonObjectConst r = room_of(b.target);
-        if (!r.isNull() && strcmp(r["id"] | "", room["id"] | "") == 0) list.push_back(b);
+        if (!r.isNull() && strcmp(r["id"] | "", room["id"] | "") == 0) {
+            list.push_back(b);
+        }
     }
     return list;
 }
 
-int clamp_pct(double v) { return int(std::max(0.0, std::min(100.0, floor(v + 0.5)))); }
+int clamp_pct(double v)
+{
+    return int(std::max(0.0, std::min(100.0, floor(v + 0.5))));
+}
 
 // ---- home page ------------------------------------------------------------------------
 // Lights / Music tile with drag-to-set (an invisible slider over the card).
@@ -487,8 +627,12 @@ void tile(lv_obj_t *root, float x, float y, float w, float h, bool lights)
     if (lights) {
         LightsSummary s = lights_summary(room_bulbs(room));
         p = dragging ? G.drag[key] : (s.n > 0 ? s.avg : 0);
-        if (s.n > 0) fill = hsl(s.hue, 85, c.lit_l);
-        if (dragging) fill = hsl(s.n > 0 ? s.hue : 34, 85, c.lit_l);
+        if (s.n > 0) {
+            fill = hsl(s.hue, 85, c.lit_l);
+        }
+        if (dragging) {
+            fill = hsl(s.n > 0 ? s.hue : 34, 85, c.lit_l);
+        }
         title = room.isNull() ? "Lights" : std::string(room["name"] | "Lights");
         state = s.state;
         big = (dragging || s.n > 0) ? std::to_string(clamp_pct(p)) + "%" : "";
@@ -500,11 +644,19 @@ void tile(lv_obj_t *root, float x, float y, float w, float h, bool lights)
         fill = c.fill_a;
         title = (sp && tv && w >= 150) ? "Music & TV" : (tv && !sp) ? "TV" : "Music";
         std::vector<std::string> words;
-        if (tv) words.push_back(tv->known ? (tv->on ? "TV on" : "TV off") : "TV not reporting");
-        else if (sp && !sp->known) words.push_back("Not reporting");
-        else if (sp) words.push_back("Speaker");
-        if (sp && sp->known && sp->mute) words.push_back(tv ? "muted" : "Muted");
-        for (size_t i = 0; i < words.size(); ++i) state += (i ? " \xC2\xB7 " : "") + words[i];
+        if (tv) {
+            words.push_back(tv->known ? (tv->on ? "TV on" : "TV off") : "TV not reporting");
+        } else if (sp && !sp->known) {
+            words.push_back("Not reporting");
+        } else if (sp) {
+            words.push_back("Speaker");
+        }
+        if (sp && sp->known && sp->mute) {
+            words.push_back(tv ? "muted" : "Muted");
+        }
+        for (size_t i = 0; i < words.size(); ++i) {
+            state += (i ? " \xC2\xB7 " : "") + words[i];
+        }
         big = (sp && sp->known) ? std::to_string(clamp_pct(p)) : "\xE2\x80\x94";
         icon_name = "speaker";
     }
@@ -512,7 +664,9 @@ void tile(lv_obj_t *root, float x, float y, float w, float h, bool lights)
     const float fw = fill >= 0 ? std::max(0.0, w * p / 100) : 0;
     // Two-tone vertical gradient of the fill colour, clipped to the card.
     auto shade = [lights](uint32_t base, bool top) {
-        if (!lights) return top ? c.fill_a : c.fill_b;
+        if (!lights) {
+            return top ? c.fill_a : c.fill_b;
+        }
         return top ? mix(0xFFFFFF, base, 0.34) : base;
     };
     const uint32_t base = fill >= 0 ? uint32_t(fill) : c.fill_a;
@@ -524,25 +678,32 @@ void tile(lv_obj_t *root, float x, float y, float w, float h, bool lights)
     text(cardo, state, 12, h - 24, w * 0.6f, covered_left ? fg : c.text2, 10);
     lv_obj_t *big_label = text(cardo, big, w - 110, h - 50, 98, covered_right ? fg : c.text, 32, TextOpts{true, false, false, LV_TEXT_ALIGN_RIGHT});
     const uint32_t live_fill = fill >= 0 ? uint32_t(fill) : uint32_t(c.fill_a);
-    drag_slider(cardo, 0, 0, w, h, clamp_pct(p), [=](int v, bool released) {
+    drag_slider(cardo, 0, 0, w, h, clamp_pct(p), [ = ](int v, bool released) {
         G.drag[key] = v;
         // Live feedback without rebuilding under the finger.
         const uint32_t live = lights && fill < 0 ? hsl(34, 85, c.lit_l) : live_fill;
         mui::card_fill_set(cardo, v, shade(live, true), shade(live, false));
         lv_label_set_text(big_label, (std::to_string(v) + (lights ? "%" : "")).c_str());
-        if (!released) return;
+        if (!released) {
+            return;
+        }
         G.drag.erase(key);
         dirty();
         if (lights) {
             JsonObjectConst here = picked_room();
             for (const Item &b : room_bulbs(here)) {
                 lean(b.target, "on", v > 0);
-                if (v > 0) lean(b.target, "bri", v);
+                if (v > 0) {
+                    lean(b.target, "bri", v);
+                }
             }
             if (!here.isNull()) {
                 const std::string id = here["id"] | "";
-                if (v == 0) act("room.power", id, param("on", false), "lights");
-                else act("room.brightness", id, param("percent", v), "lights");
+                if (v == 0) {
+                    act("room.power", id, param("on", false), "lights");
+                } else {
+                    act("room.brightness", id, param("percent", v), "lights");
+                }
             } else if (v == 0) {
                 act("lights.power", "all_bulbs", param("on", false), "lights");
             } else {
@@ -564,11 +725,16 @@ void tile(lv_obj_t *root, float x, float y, float w, float h, bool lights)
 float scenes_bar(lv_obj_t *root, float y)
 {
     JsonObjectConst room = picked_room();
-    struct Scene { const char *label, *action, *target; int level; };
+    struct Scene {
+        const char *label, *action, *target;
+        int level;
+    };
     static const Scene all[] = {{"Movie", "scene.movie", "movie", -1}, {"Evening", "scene.apply", "evening", -1},
-                                {"Lights off", "scene.apply", "all_off", -1}};
+        {"Lights off", "scene.apply", "all_off", -1}
+    };
     static const Scene in_room[] = {{"Bright", "room.brightness", "", 100}, {"Relax", "room.brightness", "", 35},
-                                    {"Off", "room.power", "", 0}, {"Movie", "scene.movie", "movie", -1}};
+        {"Off", "room.power", "", 0}, {"Movie", "scene.movie", "movie", -1}
+    };
     const std::string room_id = room.isNull() ? "" : std::string(room["id"] | "");
     const std::string room_name = room.isNull() ? "" : std::string(room["name"] | "");
     const bool tv_here = !room.isNull() && G.d.tv && room_id == (room_of(G.d.tv->target)["id"] | "");
@@ -579,20 +745,23 @@ float scenes_bar(lv_obj_t *root, float y)
     int selected = -1;
     for (int i = 0; i < n; ++i) {
         labels[i] = names[i].label;
-        if (G.last_scene == room_id + "/" + names[i].label) selected = i;
+        if (G.last_scene == room_id + "/" + names[i].label) {
+            selected = i;
+        }
     }
     lv_obj_t *bar = mui::capsule(root, P(PAD), P(y), P(w), P(40), labels, n, selected, mui::VIOLET, P(12));
     auto *ch = new Change{[bar, names, room_id, room_name] {
-        const Scene s = names[mui::capsule_selected(bar)];
-        G.last_scene = room_id + "/" + s.label;
-        if (s.level > 0) {
-            act(s.action, room_id, param("percent", s.level), room_name + " " + s.label, "lights");
-        } else if (s.level == 0) {
-            act(s.action, room_id, param("on", false), room_name + " " + s.label, "lights");
-        } else {
-            act(s.action, s.target, no_params(), s.label, "lights");
-        }
-    }};
+            const Scene s = names[mui::capsule_selected(bar)];
+            G.last_scene = room_id + "/" + s.label;
+            if (s.level > 0) {
+                act(s.action, room_id, param("percent", s.level), room_name + " " + s.label, "lights");
+            } else if (s.level == 0) {
+                act(s.action, room_id, param("on", false), room_name + " " + s.label, "lights");
+            } else
+            {
+                act(s.action, s.target, no_params(), s.label, "lights");
+            }
+        }};
     lv_obj_add_event_cb(bar, run_change, LV_EVENT_VALUE_CHANGED, ch);
     lv_obj_add_event_cb(bar, free_change, LV_EVENT_DELETE, ch);
     return y + 48;
@@ -601,14 +770,18 @@ float scenes_bar(lv_obj_t *root, float y)
 float tv_bar(lv_obj_t *root, float y)
 {
     const auto &tv = G.d.tv;
-    if (!tv || !tv->known || !in_view(tv->target) || !hub.can("tv.key")) return y;
+    if (!tv || !tv->known || !in_view(tv->target) || !hub.can("tv.key")) {
+        return y;
+    }
     const float w = VIEW - 2 * PAD;
     lv_obj_t *bar = card(root, PAD, y, w, 50, 25);
     lv_obj_t *name = plain(bar, 0, 0, 90, 50);
     text(name, tv->name, 16, 9, 70, c.text, 12, semi());
     text(name, tv->on ? (tv->input.empty() ? "On" : tv->input) : "Off", 16, 27, 70, c.text2, 10);
     click(name, [] { open(Page::Music); });
-    struct Key { const char *icon, *key; };
+    struct Key {
+        const char *icon, *key;
+    };
     static const Key keys[] = {{"power", ""}, {"play", "play"}, {"pause", "pause"}, {"voldown", "volume_down"}, {"volup", "volume_up"}};
     const float size = 36, gap = 6;
     float x = w - (5 * size + 4 * gap) - 8;
@@ -652,7 +825,9 @@ float plug_row(lv_obj_t *root, float y, const Item &item, const char *action, co
     const std::string target = item.target, name = item.name, act_name = action;
     const bool on = item.on;
     std::string lower = name;
-    for (auto &ch : lower) ch = char(tolower((unsigned char)ch));
+    for (auto &ch : lower) {
+        ch = char(tolower((unsigned char)ch));
+    }
     toggle(cardo, w - 58, 16, on, [target, name, lower, on, act_name] {
         lean(target, "on", !on);
         act(act_name, target, param("on", !on), name, lower);
@@ -662,7 +837,7 @@ float plug_row(lv_obj_t *root, float y, const Item &item, const char *action, co
 
 void home_page()
 {
-    struct tm local{};
+    struct tm local {};
     const bool timed = displayClockTm(time(nullptr), uint8_t(prefs_clock_zone()), local);
     auto [title, hint] = status_sentence(G.d, timed ? &local : nullptr, G.noresp);
     lv_obj_t *sc = scroller(G.root, 0);
@@ -685,7 +860,7 @@ void home_page()
         lv_obj_t *row = plain(sc, PAD, y, VIEW - 2 * PAD, 38, 2);
         lv_obj_set_scrollbar_mode(row, LV_SCROLLBAR_MODE_OFF);
         float x = 0, picked_x = 0, picked_w = 0;
-        auto pick = [&](const std::string &id, const std::string &label) {
+        auto pick = [&](const std::string & id, const std::string & label) {
             const bool on = id == hub.prefs.room;
             const float wpx = text_w(label, 12, true) + 30;
             PillOpts p;
@@ -698,26 +873,36 @@ void home_page()
                 hub.save();
                 dirty();
             }, p);
-            if (on) picked_x = x, picked_w = wpx;
+            if (on) {
+                picked_x = x, picked_w = wpx;
+            }
             x += wpx + 6;
         };
         pick("", "All");
-        for (const auto &r : shown_rooms) pick(r.first, r.second);
+        for (const auto &r : shown_rooms) {
+            pick(r.first, r.second);
+        }
         lv_obj_update_layout(row);
         int32_t to = G.room_row_x;
         if (G.room_row_for != hub.prefs.room) {  // a new pick: bring it into view
             G.room_row_for = hub.prefs.room;
             const float view = VIEW - 2 * PAD;
-            if (P(picked_x) < to || P(picked_x + picked_w) > to + P(view)) to = int32_t(P(picked_x + picked_w / 2 - view / 2));
+            if (P(picked_x) < to || P(picked_x + picked_w) > to + P(view)) {
+                to = int32_t(P(picked_x + picked_w / 2 - view / 2));
+            }
         }
         lv_obj_scroll_to_x(row, std::max<int32_t>(0, to), LV_ANIM_OFF);
-        lv_obj_add_event_cb(row, [](lv_event_t *e) { G.room_row_x = lv_obj_get_scroll_x(lv_event_get_target_obj(e)); },
-                            LV_EVENT_SCROLL_END, nullptr);
+        lv_obj_add_event_cb(row, [](lv_event_t *e) {
+            G.room_row_x = lv_obj_get_scroll_x(lv_event_get_target_obj(e));
+        },
+        LV_EVENT_SCROLL_END, nullptr);
         G.room_row_x = lv_obj_get_scroll_x(row);
         y += 44;
     }
     const bool room_lights = !room_bulbs(picked_room()).empty();
-    if (room_lights && (hub.can("scene.apply") || hub.can("room.brightness"))) y = scenes_bar(sc, y);
+    if (room_lights && (hub.can("scene.apply") || hub.can("room.brightness"))) {
+        y = scenes_bar(sc, y);
+    }
     const bool show_lights = !room_bulbs(picked_room()).empty();
     const bool show_music = (G.d.speaker && in_view(G.d.speaker->target)) || (G.d.tv && in_view(G.d.tv->target));
     const float full = VIEW - 2 * PAD;
@@ -731,19 +916,33 @@ void home_page()
     }
     y = tv_bar(sc, y);
     for (const Item &p : G.d.plugs)
-        if (in_view(p.target)) y = plug_row(sc, y, p, "plug.power", p.known ? (p.on ? "On" : "Off") : (p.reason.empty() ? "Not reporting" : p.reason));
+        if (in_view(p.target)) {
+            y = plug_row(sc, y, p, "plug.power", p.known ? (p.on ? "On" : "Off") : (p.reason.empty() ? "Not reporting" : p.reason));
+        }
     for (const Item &a : G.d.acs) {
-        if (!in_view(a.target)) continue;
+        if (!in_view(a.target)) {
+            continue;
+        }
         std::string words = a.known ? (a.on ? (a.mode.empty() ? "On" : a.mode) + (a.temp.empty() ? "" : " to " + a.temp + "\xC2\xB0") : "Off") : "Not reporting";
-        if (a.known && !a.indoor.empty()) words += " \xC2\xB7 " + a.indoor + "\xC2\xB0 inside";
+        if (a.known && !a.indoor.empty()) {
+            words += " \xC2\xB7 " + a.indoor + "\xC2\xB0 inside";
+        }
         y = plug_row(sc, y, a, "ac.power", words);
     }
-    struct Small { const char *icon; std::string label, word; std::function<void()> fn; bool alert; };
+    struct Small {
+        const char *icon;
+        std::string label, word;
+        std::function<void()> fn;
+        bool alert;
+    };
     std::vector<Small> smalls;
     if ((G.d.feeder && in_view(G.d.feeder->target)) || (G.d.litter && in_view(G.d.litter->target))) {
         std::string word = "litter box";
-        if (!G.pending_pets.empty()) word = G.pending_pets;
-        else if (G.d.feeder) word = G.d.feeder->known ? (G.d.feeder->last.empty() ? "no feed yet" : "fed " + G.d.feeder->last) : "not reporting";
+        if (!G.pending_pets.empty()) {
+            word = G.pending_pets;
+        } else if (G.d.feeder) {
+            word = G.d.feeder->known ? (G.d.feeder->last.empty() ? "no feed yet" : "fed " + G.d.feeder->last) : "not reporting";
+        }
         smalls.push_back({"paw", "Pets", word, [] { open(Page::Pets); }, false});
     }
     if (G.d.camera && in_view(G.d.camera->target)) {
@@ -759,20 +958,25 @@ void home_page()
     for (const Item &o : G.d.others)
         if (in_view(o.target)) smalls.push_back({"tech", o.name, o.known ? "" : "not reporting", [] {}, false});
     const float half = (full - 8) / 2;
-    for (size_t i = 0; i < smalls.size(); ++i)
+    for (size_t i = 0; i < smalls.size(); ++i) {
         cap_button(sc, PAD + (i % 2) * (half + 8), y + (i / 2) * 52, half, smalls[i].icon, smalls[i].label, smalls[i].word, smalls[i].fn, smalls[i].alert);
+    }
     y += ((smalls.size() + 1) / 2) * 52;
     if (!hub.status.live) {
         y += 4;
         text(sc, "Dry-run. Nothing on this page is sent to any device.", PAD + 2, y, full, c.amber, 10, wrapped());
         y += 20;
     }
-    if (!hub.status.connected && !hub.status.message.empty())
+    if (!hub.status.connected && !hub.status.message.empty()) {
         text(sc, hub.status.message, PAD + 2, y + 4, full, c.amber, 10, wrapped());
+    }
 }
 
 // ---- sub-pages ---------------------------------------------------------------------------
-struct Hue { const char *name; int hue; };
+struct Hue {
+    const char *name;
+    int hue;
+};
 const Hue HUES[] = {{"Warm", 34}, {"Cool", 210}, {"Red", 0}, {"Orange", 28}, {"Yellow", 52}, {"Green", 120}, {"Blue", 225}, {"Purple", 270}, {"Pink", 320}};
 
 void lights_page()
@@ -788,10 +992,12 @@ void lights_page()
         text(cardo, b.name, 14, 10, w - 80, c.text, 12, semi());
         text(cardo, b.known ? (b.on ? std::to_string(b.bri) + "%" : "Off") : "Not reporting", 14, 28, w - 80, c.text2, 10);
         std::string lower = b.name;
-        for (auto &ch : lower) ch = char(tolower((unsigned char)ch));
+        for (auto &ch : lower) {
+            ch = char(tolower((unsigned char)ch));
+        }
         const std::string target = b.target, name = b.name;
         const bool on = b.on;
-        toggle(cardo, w - 58, 12, on, [=] { lean(target, "on", !on); act("light.power", target, param("on", !on), name, lower); },
+        toggle(cardo, w - 58, 12, on, [ = ] { lean(target, "on", !on); act("light.power", target, param("on", !on), name, lower); },
                !b.known || !hub.can("light.power"));
         const float bw = w - 28;
         BoxOpts track_o;
@@ -811,18 +1017,32 @@ void lights_page()
         TextOpts pct_o = semi();
         pct_o.hidden = v < 12;
         lv_obj_t *pct = text(track, std::to_string(v) + "%", 10, 6, 60, 0x15121D, 10, pct_o);
-        drag_slider(track, 0, 0, bw, 26, v, [=](int nv, bool released) {
+        drag_slider(track, 0, 0, bw, 26, v, [ = ](int nv, bool released) {
             G.drag[target] = nv;
             lv_obj_set_width(fill, std::max(1, P(bw * nv / 100)));
-            if (nv >= 1) lv_obj_remove_flag(fill, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(fill, LV_OBJ_FLAG_HIDDEN);
+            if (nv >= 1) {
+                lv_obj_remove_flag(fill, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(fill, LV_OBJ_FLAG_HIDDEN);
+            }
             lv_label_set_text(pct, (std::to_string(nv) + "%").c_str());
-            if (nv >= 12) lv_obj_remove_flag(pct, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(pct, LV_OBJ_FLAG_HIDDEN);
-            if (!released) return;
+            if (nv >= 12) {
+                lv_obj_remove_flag(pct, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(pct, LV_OBJ_FLAG_HIDDEN);
+            }
+            if (!released) {
+                return;
+            }
             G.drag.erase(target);
             dirty();
             lean(target, "on", nv > 0);
-            if (nv > 0) { lean(target, "bri", nv); act("light.brightness", target, param("percent", std::max(10, nv)), name, lower); }
-            else act("light.power", target, param("on", false), name, lower);
+            if (nv > 0) {
+                lean(target, "bri", nv);
+                act("light.brightness", target, param("percent", std::max(10, nv)), name, lower);
+            } else {
+                act("light.power", target, param("on", false), name, lower);
+            }
         });
         if (b.color && hub.can("light.hue")) {
             const float cw = (bw - 8 * 4) / 9;
@@ -840,12 +1060,14 @@ void lights_page()
                     lv_obj_set_style_outline_color(chip, lv_color_hex(c.text), 0);
                 }
                 const int hue = h.hue;
-                click(chip, [=] { lean(target, "hue", hue); act("light.hue", target, param("hue", hue), name, lower); });
+                click(chip, [ = ] { lean(target, "hue", hue); act("light.hue", target, param("hue", hue), name, lower); });
             }
         }
         y += b.color ? 136 : 104;
     }
-    if (bulbs.empty()) text(sc, "No lights here yet.", PAD, y, 280, c.text2, 11);
+    if (bulbs.empty()) {
+        text(sc, "No lights here yet.", PAD, y, 280, c.text2, 11);
+    }
 }
 
 void music_page()
@@ -879,26 +1101,40 @@ void music_page()
         vol_o.hidden = v < 30;
         lv_obj_t *label = text(track, "Volume " + std::to_string(v), 10, 6, 100, c.on_tint, 10, vol_o);
         const std::string target = sp.target;
-        drag_slider(track, 0, 0, bw, 26, v, [=](int nv, bool released) {
+        drag_slider(track, 0, 0, bw, 26, v, [ = ](int nv, bool released) {
             G.drag["music"] = nv;
             lv_obj_set_width(fill, std::max(1, P(bw * nv / 100)));
-            if (nv >= 1) lv_obj_remove_flag(fill, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(fill, LV_OBJ_FLAG_HIDDEN);
+            if (nv >= 1) {
+                lv_obj_remove_flag(fill, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(fill, LV_OBJ_FLAG_HIDDEN);
+            }
             lv_label_set_text(label, ("Volume " + std::to_string(nv)).c_str());
-            if (nv >= 30) lv_obj_remove_flag(label, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
-            if (!released) return;
+            if (nv >= 30) {
+                lv_obj_remove_flag(label, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+            }
+            if (!released) {
+                return;
+            }
             G.drag.erase("music");
             dirty();
             lean(target, "vol", nv);
             act("speaker.volume", target, param("level", nv), "Volume", "speaker");
         });
         const float bwid = (bw - 18) / 4;
-        struct B { std::string label; std::function<void()> fn; bool on; };
+        struct B {
+            std::string label;
+            std::function<void()> fn;
+            bool on;
+        };
         const bool mute = sp.mute, night = sp.night;
         const B buttons[] = {
-            {mute ? "Unmute" : "Mute", [=] { lean(target, "mute", !mute); act("speaker.mute", target, param("muted", !mute), "Mute", "speaker"); }, mute},
-            {"Night", [=] { act("speaker.night", target, param("on", !night), "Night mode", "speaker"); }, night},
-            {"Play", [=] { act("speaker.play", target, no_params(), "Play", "speaker"); }, sp.playing},
-            {"Pause", [=] { act("speaker.pause", target, no_params(), "Pause", "speaker"); }, false},
+            {mute ? "Unmute" : "Mute", [ = ] { lean(target, "mute", !mute); act("speaker.mute", target, param("muted", !mute), "Mute", "speaker"); }, mute},
+            {"Night", [ = ] { act("speaker.night", target, param("on", !night), "Night mode", "speaker"); }, night},
+            {"Play", [ = ] { act("speaker.play", target, no_params(), "Play", "speaker"); }, sp.playing},
+            {"Pause", [ = ] { act("speaker.pause", target, no_params(), "Pause", "speaker"); }, false},
         };
         for (int i = 0; i < 4; ++i) {
             PillOpts p;
@@ -917,7 +1153,7 @@ void music_page()
         const bool on = tv.on;
         RoundOpts r;
         r.active = on;
-        round_button(cardo, w - 50, 10, 36, "power", [=] { act("tv.power", target, param("on", !on), on ? "Turn off the TV" : "Turn on the TV", "TV"); }, r);
+        round_button(cardo, w - 50, 10, 36, "power", [ = ] { act("tv.power", target, param("on", !on), on ? "Turn off the TV" : "Turn on the TV", "TV"); }, r);
         auto key = [&](float x, float yy, const char *label, const char *k, const char *icon_name) {
             BoxOpts o;
             o.radius = 12;
@@ -925,10 +1161,13 @@ void music_page()
             o.fill = !strcmp(k, "ok") && on;
             o.opa = on ? 255 : 110;
             lv_obj_t *b = pressable(box(cardo, x, yy, 46, 34, o));
-            if (icon_name) icon(b, icon_name, 14, 8, 18, c.text, 1.3f);
-            else text(b, label, 0, 9, 46, c.text, 10, semi(LV_TEXT_ALIGN_CENTER));
+            if (icon_name) {
+                icon(b, icon_name, 14, 8, 18, c.text, 1.3f);
+            } else {
+                text(b, label, 0, 9, 46, c.text, 10, semi(LV_TEXT_ALIGN_CENTER));
+            }
             const std::string ks = k, ls = label;
-            if (on) click(b, [=] { act("tv.key", target, param("key", ks), ls, "TV"); });
+            if (on) click(b, [ = ] { act("tv.key", target, param("key", ks), ls, "TV"); });
         };
         const float cx = 22, cy = 56;
         key(cx + 50, cy, "Up", "up", "up");
@@ -953,7 +1192,7 @@ void music_page()
             p.on = on && tv.input == name;
             p.size = 9;
             p.disabled = !on;
-            pill(cardo, 14 + i * (iw + 4), 182, iw, 28, name, [=] { act("tv.input", target, param("input", name), name, "TV"); }, p);
+            pill(cardo, 14 + i * (iw + 4), 182, iw, 28, name, [ = ] { act("tv.input", target, param("input", name), name, "TV"); }, p);
             ++i;
         }
     }
@@ -971,7 +1210,9 @@ void pets_page()
         text(cardo, f.name, 14, 10, w - 28, c.text, 12, semi());
         text(cardo, f.known ? (f.last.empty() ? "No feed yet" : "Last fed " + f.last) : "Not reporting", 14, 28, w - 28, c.text2, 10);
         std::vector<int> grams;
-        for (JsonVariantConst g : capability(f.dev, "dispense")["grams"].as<JsonArrayConst>()) grams.push_back(g | 0);
+        for (JsonVariantConst g : capability(f.dev, "dispense")["grams"].as<JsonArrayConst>()) {
+            grams.push_back(g | 0);
+        }
         if (grams.empty()) grams = {10, 20, 30, 40, 50};
         const float gw = (w - 28 - (float(grams.size()) - 1) * 6) / float(grams.size());
         const std::string target = f.target;
@@ -980,7 +1221,7 @@ void pets_page()
             PillOpts p;
             p.disabled = !f.known || !hub.can("pets.feed");
             pill(cardo, 14 + i * (gw + 6), 56, gw, 34, std::to_string(g) + " g",
-                 [=] { act("pets.feed", target, param("grams", g), "Feed " + std::to_string(g) + " g", "feeder"); }, p);
+                 [ = ] { act("pets.feed", target, param("grams", g), "Feed " + std::to_string(g) + " g", "feeder"); }, p);
         }
         text(cardo, "Feeding asks you to confirm.", 14, 98, w - 28, c.text3, 9);
         y += 128;
@@ -993,20 +1234,26 @@ void pets_page()
         PillOpts p;
         p.disabled = !lb.known || lb.busy || !hub.can("pets.clean");
         const std::string target = lb.target;
-        pill(cardo, 14, 50, w - 28, 32, "Clean cycle", [=] { act("pets.clean", target, no_params(), "Clean cycle", "litter box"); }, p);
+        pill(cardo, 14, 50, w - 28, 32, "Clean cycle", [ = ] { act("pets.clean", target, no_params(), "Clean cycle", "litter box"); }, p);
     }
 }
 
 // Tier 2: what will happen, its consequences, and Go / Cancel (web core/guards.js).
 void confirm_page()
 {
-    if (!G.prep) { open(Page::Home); return; }
+    if (!G.prep) {
+        open(Page::Home);
+        return;
+    }
     const JsonDocument &prep = *G.prep;
     const float w = VIEW - 2 * PAD;
     lv_obj_t *cardo = card(G.root, PAD, 30, w, 240, 22);
     text(cardo, prep["label"] | "Confirm", 18, 18, w - 36, c.text, 16, semi());
     float y = 46;
-    if (prep["target_name"].is<const char *>()) { text(cardo, prep["target_name"].as<const char *>(), 18, y, w - 36, c.text2, 10); y += 20; }
+    if (prep["target_name"].is<const char *>()) {
+        text(cardo, prep["target_name"].as<const char *>(), 18, y, w - 36, c.text2, 10);
+        y += 20;
+    }
     if (prep["what"].is<const char *>()) {
         const std::string what = prep["what"].as<const char *>();
         text(cardo, what, 18, y, w - 36, c.text, 11, wrapped());
@@ -1017,7 +1264,9 @@ void confirm_page()
         text(cardo, line, 18, y, w - 36, c.text2, 10, wrapped());
         y += text_h(line, w - 36, 10) + 4;
     }
-    if (prep["warning"].is<const char *>()) text(cardo, prep["warning"].as<const char *>(), 18, y, w - 36, c.amber, 10, wrapped());
+    if (prep["warning"].is<const char *>()) {
+        text(cardo, prep["warning"].as<const char *>(), 18, y, w - 36, c.amber, 10, wrapped());
+    }
     const float half = (w - 36 - 10) / 2;
     pill(cardo, 18, 186, half, 40, "Cancel", [] { lean_settle(G.prep_target, false); G.prep.reset(); open(Page::Home); });
     PillOpts go;
@@ -1057,15 +1306,21 @@ void settings_page()
     text(info, "Paired with", 14, 10, w - 28, c.text2, 10);
     text(info, hub.cfg.hub, 14, 26, w - 28, c.text, 12, semi());
     text(info, "As " + (hub.cfg.name.empty() ? std::string("Wall display") : hub.cfg.name) + " \xC2\xB7 " +
-                   (hub.status.connected ? std::string("connected") : hub.status.message), 14, 48, w - 28, c.text2, 10);
+         (hub.status.connected ? std::string("connected") : hub.status.message), 14, 48, w - 28, c.text2, 10);
     y += 84;
     text(sc, "The owner can remove this display from the web app: More \xE2\x86\x92 Passkeys \xE2\x86\x92 Wall displays.", PAD + 2, y, w, c.text3, 9, wrapped());
     y += 30;
     PillOpts red;
     red.color = c.red;
     pill(sc, PAD, y, w, 40, G.confirm_unpair ? "Tap again to unpair" : "Unpair this display", [] {
-        if (G.confirm_unpair) { G.confirm_unpair = false; hub.unpair(); open(Page::Pair); }
-        else { G.confirm_unpair = true; dirty(); }
+        if (G.confirm_unpair) {
+            G.confirm_unpair = false;
+            hub.unpair();
+            open(Page::Pair);
+        } else {
+            G.confirm_unpair = true;
+            dirty();
+        }
     }, red);
     y += 48;
     pill(sc, PAD, y, w, 40, "Exit to Mosaico launcher", [] { if (G.exit_to_launcher) G.exit_to_launcher(); });
@@ -1076,7 +1331,12 @@ void edit_field(const std::string &title, const std::string &value, bool upper, 
                 std::function<void(const std::string &)> done)
 {
     G.edit.reset(new EditState{title, value, upper ? "upper" : "lower", upper, limit,
-                               [done](const std::string &t) { done(t); G.edit.reset(); open(Page::Pair); }});
+                               [done](const std::string & t)
+    {
+        done(t);
+        G.edit.reset();
+        open(Page::Pair);
+    }});
     open(Page::Edit);
 }
 
@@ -1085,7 +1345,7 @@ void pair_page()
     const float w = VIEW - 2 * PAD;
     text(G.root, "Swifty Home", PAD + 2, 14, w, c.text, 20, semi());
     text(G.root, "Pair this display with your hub.", PAD + 2, 42, w, c.text2, 11);
-    auto field = [&](float y, const char *label, const std::string &value, std::function<void()> fn) {
+    auto field = [&](float y, const char *label, const std::string & value, std::function<void()> fn) {
         lv_obj_t *b = card(G.root, PAD, y, w, 52, 14);
         text(b, label, 14, 8, w - 28, c.text2, 10);
         text(b, value, 14, 26, w - 40, c.text, 13, semi());
@@ -1093,26 +1353,52 @@ void pair_page()
         click(pressable(b), std::move(fn));
     };
     field(66, "Hub address", G.pair.hub.empty() ? "https://\xE2\x80\xA6" : G.pair.hub,
-          [] { edit_field("Hub address", G.pair.hub, false, 200, [](const std::string &t) { G.pair.hub = t; }); });
+          [] { edit_field("Hub address", G.pair.hub, false, 200, [](const std::string & t)
+    {
+        G.pair.hub = t;
+    });
+             });
     field(126, "Pairing code", G.pair.code.empty() ? "From the owner's More \xE2\x86\x92 Passkeys \xE2\x86\x92 Wall displays" : G.pair.code,
-          [] { edit_field("Pairing code", G.pair.code, true, 12, [](const std::string &t) { G.pair.code = t; }); });
-    if (!G.pair.message.empty()) text(G.root, G.pair.message, PAD + 2, 188, w, G.pair.ok ? c.ok : c.red, 10, wrapped());
+          [] { edit_field("Pairing code", G.pair.code, true, 12, [](const std::string & t)
+    {
+        G.pair.code = t;
+    });
+             });
+    if (!G.pair.message.empty()) {
+        text(G.root, G.pair.message, PAD + 2, 188, w, G.pair.ok ? c.ok : c.red, 10, wrapped());
+    }
     PillOpts go;
     go.on = true;
     pill(G.root, PAD, 236, w, 44, G.pair.busy ? "Pairing\xE2\x80\xA6" : "Pair", [] {
         if (G.pair.busy) return;
         const std::string &h = G.pair.hub;
         const bool valid_hub = (h.rfind("https://", 0) == 0 && h.size() > 8) || (h.rfind("http://", 0) == 0 && h.size() > 7);
-        if (!valid_hub || h.find(' ') != std::string::npos) { G.pair.message = "Enter the hub address, like https://home.example.org"; dirty(); return; }
+        if (!valid_hub || h.find(' ') != std::string::npos) {
+            G.pair.message = "Enter the hub address, like https://home.example.org";
+            dirty();
+            return;
+        }
         std::string code;
         for (char ch : G.pair.code) if (ch != ' ' && ch != '-') code += ch;
-        if (code.size() != 8) { G.pair.message = "The code has 8 letters and numbers."; dirty(); return; }
+        if (code.size() != 8)
+        {
+            G.pair.message = "The code has 8 letters and numbers.";
+            dirty();
+            return;
+        }
         G.pair.busy = true;
         G.pair.message.clear();
-        hub.pair(G.pair.hub, G.pair.code, [](bool ok, const std::string &message) {
+        hub.pair(G.pair.hub, G.pair.code, [](bool ok, const std::string & message)
+        {
             G.pair.busy = false;
-            if (ok) { G.pair.code.clear(); G.pair.message.clear(); open(Page::Home); }
-            else { G.pair.message = message; G.pair.ok = false; }
+            if (ok) {
+                G.pair.code.clear();
+                G.pair.message.clear();
+                open(Page::Home);
+            } else {
+                G.pair.message = message;
+                G.pair.ok = false;
+            }
             dirty();
         });
         dirty();
@@ -1123,7 +1409,10 @@ void pair_page()
 // is not rebuilt while it is open: see tick()).
 void edit_page()
 {
-    if (!G.edit) { open(Page::Pair); return; }
+    if (!G.edit) {
+        open(Page::Pair);
+        return;
+    }
     heading(G.root, G.edit->title, [] { G.edit.reset(); open(Page::Pair); });
     lv_obj_t *ta = lv_textarea_create(G.root);
     lv_obj_set_pos(ta, P(PAD), P(42));
@@ -1145,10 +1434,14 @@ void edit_page()
     lv_obj_set_style_width(ta, 2, LV_PART_CURSOR);
     lv_obj_add_state(ta, LV_STATE_FOCUSED);
     lv_obj_add_event_cb(ta, [](lv_event_t *e) {
-        if (G.edit) G.edit->text = lv_textarea_get_text(lv_event_get_current_target_obj(e));
+        if (G.edit) {
+            G.edit->text = lv_textarea_get_text(lv_event_get_current_target_obj(e));
+        }
     }, LV_EVENT_VALUE_CHANGED, nullptr);
     lv_obj_add_event_cb(ta, [](lv_event_t *e) {
-        if (!G.edit) return;
+        if (!G.edit) {
+            return;
+        }
         const auto done = G.edit->done;
         const std::string text = lv_textarea_get_text(lv_event_get_current_target_obj(e));
         done(text);  // opens another page; the rebuild happens on the next tick
@@ -1164,8 +1457,13 @@ void edit_page()
 
 void draw_toast()
 {
-    if (!G.toast.shown) return;
-    if (now_ms() - G.toast.at > 4000) { G.toast.shown = false; return; }
+    if (!G.toast.shown) {
+        return;
+    }
+    if (now_ms() - G.toast.at > 4000) {
+        G.toast.shown = false;
+        return;
+    }
     const float w = VIEW - 40;
     const bool fail = G.toast.kind == "fail";
     BoxOpts o;
@@ -1183,10 +1481,12 @@ bool apply_theme()
 {
     bool want = hub.prefs.theme == 0;
     if (hub.prefs.theme == 2) {
-        struct tm local{};
+        struct tm local {};
         want = !displayClockTm(time(nullptr), uint8_t(prefs_clock_zone()), local) || (local.tm_hour >= 6 && local.tm_hour < 22);
     }
-    if (want == light) return false;
+    if (want == light) {
+        return false;
+    }
     light = want;
     c = light ? light_palette() : dark_palette();
     return true;
@@ -1196,16 +1496,21 @@ bool finger_down()
 {
     for (lv_indev_t *i = lv_indev_get_next(nullptr); i; i = lv_indev_get_next(i))
         if (lv_indev_get_type(i) == LV_INDEV_TYPE_POINTER &&
-            (lv_indev_get_state(i) == LV_INDEV_STATE_PRESSED || lv_indev_get_scroll_obj(i)))
+                (lv_indev_get_state(i) == LV_INDEV_STATE_PRESSED || lv_indev_get_scroll_obj(i))) {
             return true;
+        }
     return G.scroller && lv_obj_is_scrolling(G.scroller);
 }
 
 void render()
 {
     G.dirty = false;
-    if (apply_theme()) G.has_rendered = false;
-    if (!hub.paired() && G.page != Page::Edit) G.page = Page::Pair;
+    if (apply_theme()) {
+        G.has_rendered = false;
+    }
+    if (!hub.paired() && G.page != Page::Edit) {
+        G.page = Page::Pair;
+    }
     const bool same_page = G.has_rendered && G.rendered == G.page;
     const int32_t scroll = same_page && G.scroller ? lv_obj_get_scroll_y(G.scroller) : 0;
     lv_obj_clean(G.root);
@@ -1215,8 +1520,11 @@ void render()
     lv_obj_set_style_bg_opa(G.root, light ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_bg_color(lv_obj_get_screen(G.root), lv_color_hex(c.bg), 0);
     if (G.backdrop) {
-        if (light) lv_obj_add_flag(G.backdrop, LV_OBJ_FLAG_HIDDEN);
-        else lv_obj_remove_flag(G.backdrop, LV_OBJ_FLAG_HIDDEN);
+        if (light) {
+            lv_obj_add_flag(G.backdrop, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_remove_flag(G.backdrop, LV_OBJ_FLAG_HIDDEN);
+        }
     }
     G.d = build();
     switch (G.page) {
@@ -1235,7 +1543,9 @@ void render()
         lv_obj_scroll_to_y(G.scroller, scroll, LV_ANIM_OFF);
     }
     // A new page rises in card by card; data refreshes stay still.
-    if (!same_page) mui::stagger(G.scroller ? G.scroller : G.root, 0, 15);
+    if (!same_page) {
+        mui::stagger(G.scroller ? G.scroller : G.root, 0, 15);
+    }
     G.rendered = G.page;
     G.has_rendered = true;
     G.last_render = now_ms();
@@ -1245,19 +1555,33 @@ void tick(lv_timer_t *)
 {
     const bool changed = hub.poll();
     hub.tick_timers();
-    if (!G.active) return;
-    if (hub.status.revision != G.last_revision) { G.last_revision = hub.status.revision; G.dirty = true; }
-    if (changed) G.dirty = true;
-    if (G.page == Page::Home && leans_due()) G.dirty = true;
+    if (!G.active) {
+        return;
+    }
+    if (hub.status.revision != G.last_revision) {
+        G.last_revision = hub.status.revision;
+        G.dirty = true;
+    }
+    if (changed) {
+        G.dirty = true;
+    }
+    if (G.page == Page::Home && leans_due()) {
+        G.dirty = true;
+    }
     // Toasts time out; the home page's times are minutes, so a refresh every
     // 30 s is enough (it rebuilt every second before, and stuttered).
     if (!G.dirty && ((G.toast.shown && now_ms() - G.last_render > 1000) ||
-                     (G.page == Page::Home && now_ms() - G.last_render > 30000)))
+                     (G.page == Page::Home && now_ms() - G.last_render > 30000))) {
         G.dirty = true;
+    }
     // The keyboard page keeps its shift state and text: only leaving rebuilds.
-    if (G.dirty && G.page == Page::Edit && G.rendered == Page::Edit && G.has_rendered) G.dirty = false;
+    if (G.dirty && G.page == Page::Edit && G.rendered == Page::Edit && G.has_rendered) {
+        G.dirty = false;
+    }
     // Never rebuild under a finger: the slider or scroll keeps its own state.
-    if (G.dirty && !finger_down()) render();
+    if (G.dirty && !finger_down()) {
+        render();
+    }
 }
 }  // namespace
 
@@ -1267,17 +1591,30 @@ void home_preview_open(int page)
     G.page = Page(page);
     render();
 }
-void home_preview_theme(int mode) { hub.prefs.theme = mode; render(); }
-void home_preview_toast(const char *message) { toast(message, "ok"); render(); }
+void home_preview_theme(int mode)
+{
+    hub.prefs.theme = mode;
+    render();
+}
+void home_preview_toast(const char *message)
+{
+    toast(message, "ok");
+    render();
+}
 
 }  // namespace home
 
-extern "C" void home_app_set_exit_handler(void (*exit_to_launcher)()) { home::G.exit_to_launcher = exit_to_launcher; }
+extern "C" void home_app_set_exit_handler(void (*exit_to_launcher)())
+{
+    home::G.exit_to_launcher = exit_to_launcher;
+}
 
 extern "C" void home_app_start(lv_obj_t *frame)
 {
     using namespace home;
-    if (G.built) return;
+    if (G.built) {
+        return;
+    }
     G.built = true;
     G.root = frame;
     lv_obj_update_layout(frame);  // the frame was just sized
@@ -1310,7 +1647,7 @@ extern "C" void home_app_summary(home_summary_t *out)
         return;
     }
     const Derived d = build();
-    struct tm local{};
+    struct tm local {};
     const bool timed = displayClockTm(time(nullptr), uint8_t(prefs_clock_zone()), local);
     auto [title, hint] = status_sentence(d, timed ? &local : nullptr, G.noresp);
     strlcpy(out->title, title.c_str(), sizeof(out->title));
@@ -1328,7 +1665,7 @@ extern "C" void home_app_summary(home_summary_t *out)
         out->music = true;
         out->volume = d.speaker->known ? d.speaker->vol : -1;
         strlcpy(out->music_state, !d.speaker->known ? "Not reporting" : d.speaker->playing ? "Playing"
-                                  : d.speaker->mute ? "Muted" : "Idle", sizeof(out->music_state));
+                : d.speaker->mute ? "Muted" : "Idle", sizeof(out->music_state));
     }
     if (d.tv) {
         out->tv = true;
@@ -1338,7 +1675,9 @@ extern "C" void home_app_summary(home_summary_t *out)
         strlcpy(out->tv_state, state.c_str(), sizeof(out->tv_state));
     }
     for (const Item &p : d.plugs) {
-        if (out->plug_count == 2) break;
+        if (out->plug_count == 2) {
+            break;
+        }
         auto &plug = out->plugs[out->plug_count++];
         strlcpy(plug.name, p.name.c_str(), sizeof(plug.name));
         plug.on = p.on;
@@ -1372,7 +1711,9 @@ extern "C" void home_app_pair(const char *hub_url, const char *code)
     const std::string h = hub_url ? hub_url : "";
     std::string clean;
     for (const char *c = code ? code : ""; *c; ++c)
-        if (*c != ' ' && *c != '-') clean += *c;
+        if (*c != ' ' && *c != '-') {
+            clean += *c;
+        }
     if (!G.built) {
         pairing_note = "failed: Home has not started yet";
         return;
@@ -1392,7 +1733,7 @@ extern "C" void home_app_pair(const char *hub_url, const char *code)
     }
     G.pair.busy = true;
     pairing_note = "pairing";
-    hub.pair(h, clean, [](bool ok, const std::string &message) {
+    hub.pair(h, clean, [](bool ok, const std::string & message) {
         G.pair.busy = false;
         pairing_note = ok ? "paired as " + hub.cfg.name : "failed: " + message;
         if (ok) {
@@ -1419,40 +1760,63 @@ namespace home {
 namespace {
 bool matches(const std::string &name, const char *want)
 {
-    if (!want || !*want || name.empty()) return false;
+    if (!want || !*want || name.empty()) {
+        return false;
+    }
     std::string a = name, b = want;
-    for (char &c : a) c = char(tolower(uint8_t(c)));
-    for (char &c : b) c = char(tolower(uint8_t(c)));
+    for (char &c : a) {
+        c = char(tolower(uint8_t(c)));
+    }
+    for (char &c : b) {
+        c = char(tolower(uint8_t(c)));
+    }
     return a == b || a.find(b) != std::string::npos || b.find(a) != std::string::npos;
 }
 
-void put(char *out, size_t cap, const std::string &text) { strlcpy(out, text.c_str(), cap); }
+void put(char *out, size_t cap, const std::string &text)
+{
+    strlcpy(out, text.c_str(), cap);
+}
 }  // namespace
 }  // namespace home
 
 extern "C" void home_app_describe(char *out, size_t capacity)
 {
     using namespace home;
-    if (!hub.paired()) return put(out, capacity, "Not paired with Swifty Home.");
-    if (!hub.state) return put(out, capacity, "No data from Swifty Home yet.");
+    if (!hub.paired()) {
+        return put(out, capacity, "Not paired with Swifty Home.");
+    }
+    if (!hub.state) {
+        return put(out, capacity, "No data from Swifty Home yet.");
+    }
     const Derived d = build();
     std::string t = hub.status.connected ? "Swifty Home, live.\n" : "Swifty Home (unreachable; last known).\n";
     for (JsonObjectConst r : rooms()) {
         std::vector<std::string> lights;
         for (const Item &b : d.bulbs)
-            if (room_of(b.target) == r)
+            if (room_of(b.target) == r) {
                 lights.push_back(b.name + (b.known ? (b.on ? " on " + std::to_string(b.bri) + "%" : " off") : " not reporting"));
-        if (lights.empty()) continue;
+            }
+        if (lights.empty()) {
+            continue;
+        }
         t += std::string("Room ") + (r["name"] | "") + ": ";
-        for (size_t i = 0; i < lights.size(); ++i) t += (i ? ", " : "") + lights[i];
+        for (size_t i = 0; i < lights.size(); ++i) {
+            t += (i ? ", " : "") + lights[i];
+        }
         t += "\n";
     }
     if (d.speaker) t += "Speaker " + d.speaker->name + ": " + (d.speaker->playing ? "playing" : "idle") + ", volume " +
-                        std::to_string(d.speaker->vol) + (d.speaker->mute ? ", muted" : "") + "\n";
-    if (d.tv) t += "TV " + d.tv->name + ": " + (d.tv->on ? "on" : "off") + (d.tv->input.empty() ? "" : ", input " + d.tv->input) + "\n";
-    for (const Item &p : d.plugs) t += "Plug " + p.name + ": " + (p.known ? (p.on ? "on" : "off") : "not reporting") + "\n";
-    for (const Item &a : d.acs)
+                            std::to_string(d.speaker->vol) + (d.speaker->mute ? ", muted" : "") + "\n";
+    if (d.tv) {
+        t += "TV " + d.tv->name + ": " + (d.tv->on ? "on" : "off") + (d.tv->input.empty() ? "" : ", input " + d.tv->input) + "\n";
+    }
+    for (const Item &p : d.plugs) {
+        t += "Plug " + p.name + ": " + (p.known ? (p.on ? "on" : "off") : "not reporting") + "\n";
+    }
+    for (const Item &a : d.acs) {
         t += "Air conditioner " + a.name + ": " + (a.on ? "on " + a.mode + (a.temp.empty() ? "" : " to " + a.temp) : "off") + "\n";
+    }
     put(out, capacity, t);
 }
 
@@ -1460,73 +1824,121 @@ extern "C" void home_app_command(const char *verb_c, const char *target_c, const
 {
     using namespace home;
     const std::string verb = verb_c ? verb_c : "", target = target_c ? target_c : "", value = value_c ? value_c : "";
-    if (!hub.paired()) return put(out, capacity, "Not paired with Swifty Home.");
+    if (!hub.paired()) {
+        return put(out, capacity, "Not paired with Swifty Home.");
+    }
     const Derived d = build();
     const bool all = target.empty() || matches("all", target.c_str()) || matches("everything", target.c_str());
     JsonObjectConst room;
     for (JsonObjectConst r : rooms())
-        if (matches(r["name"] | "", target.c_str())) room = r;
+        if (matches(r["name"] | "", target.c_str())) {
+            room = r;
+        }
     const Item *bulb = nullptr;
     for (const Item &b : d.bulbs)
-        if (matches(b.name, target.c_str())) bulb = &b;
+        if (matches(b.name, target.c_str())) {
+            bulb = &b;
+        }
     const int number = atoi(value.c_str());
-    auto sent = [&](const std::string &what) { put(out, capacity, "Sent: " + what + ". It takes a moment to show."); };
+    auto sent = [&](const std::string & what) {
+        put(out, capacity, "Sent: " + what + ". It takes a moment to show.");
+    };
     if (verb == "lights_on" || verb == "lights_off" || verb == "brightness") {
         const bool on = verb != "lights_off";
         const int pct = verb == "brightness" ? std::clamp(number, 0, 100) : 100;
         if (bulb && room.isNull()) {
-            if (!on || pct == 0) act("light.power", bulb->target, param("on", false), bulb->name, "light");
-            else if (verb == "brightness") act("light.brightness", bulb->target, param("percent", std::max(10, pct)), bulb->name, "light");
-            else act("light.power", bulb->target, param("on", true), bulb->name, "light");
+            if (!on || pct == 0) {
+                act("light.power", bulb->target, param("on", false), bulb->name, "light");
+            } else if (verb == "brightness") {
+                act("light.brightness", bulb->target, param("percent", std::max(10, pct)), bulb->name, "light");
+            } else {
+                act("light.power", bulb->target, param("on", true), bulb->name, "light");
+            }
             return sent(bulb->name + (on && pct ? " to " + std::to_string(pct) + "%" : " off"));
         }
         if (!room.isNull()) {
             const std::string id = room["id"] | "", name = room["name"] | "";
-            if (!on || pct == 0) act("room.power", id, param("on", false), name + " lights", "lights");
-            else act("room.brightness", id, param("percent", pct), name + " lights", "lights");
+            if (!on || pct == 0) {
+                act("room.power", id, param("on", false), name + " lights", "lights");
+            } else {
+                act("room.brightness", id, param("percent", pct), name + " lights", "lights");
+            }
             return sent(name + " lights " + (on && pct ? std::to_string(pct) + "%" : "off"));
         }
         if (all) {
-            if (!on || pct == 0) act("lights.power", "all_bulbs", param("on", false), "lights", "lights");
-            else act("lights.brightness", "all_bulbs", param("percent", std::max(1, pct)), "lights", "lights");
+            if (!on || pct == 0) {
+                act("lights.power", "all_bulbs", param("on", false), "lights", "lights");
+            } else {
+                act("lights.brightness", "all_bulbs", param("percent", std::max(1, pct)), "lights", "lights");
+            }
             return sent(std::string("all lights ") + (on && pct ? std::to_string(pct) + "%" : "off"));
         }
         return put(out, capacity, "No room or light called \"" + target + "\".");
     }
     if (verb == "color") {
-        static const struct { const char *name; int hue; } NAMES[] = {{"warm", 34}, {"cool", 210}, {"red", 0}, {"orange", 28},
-            {"yellow", 52}, {"green", 120}, {"blue", 225}, {"purple", 270}, {"pink", 320}};
+        static const struct {
+            const char *name;
+            int hue;
+        } NAMES[] = {{"warm", 34}, {"cool", 210}, {"red", 0}, {"orange", 28},
+            {"yellow", 52}, {"green", 120}, {"blue", 225}, {"purple", 270}, {"pink", 320}
+        };
         int hue = -1;
         for (const auto &n : NAMES)
-            if (matches(n.name, value.c_str())) hue = n.hue;
-        if (hue < 0 && !value.empty() && isdigit(uint8_t(value[0]))) hue = number % 360;
-        if (hue < 0) return put(out, capacity, "Name a colour (warm, cool, red, orange, yellow, green, blue, purple, pink) or a hue.");
+            if (matches(n.name, value.c_str())) {
+                hue = n.hue;
+            }
+        if (hue < 0 && !value.empty() && isdigit(uint8_t(value[0]))) {
+            hue = number % 360;
+        }
+        if (hue < 0) {
+            return put(out, capacity, "Name a colour (warm, cool, red, orange, yellow, green, blue, purple, pink) or a hue.");
+        }
         std::vector<const Item *> which;
         for (const Item &b : d.bulbs)
             if ((bulb && &b == bulb) || (!bulb && !room.isNull() && room_of(b.target) == room) || (!bulb && room.isNull() && all))
-                if (b.color) which.push_back(&b);
-        if (which.empty()) return put(out, capacity, "No colour light matches \"" + target + "\".");
-        for (const Item *b : which) act("light.hue", b->target, param("hue", hue), b->name, "light");
+                if (b.color) {
+                    which.push_back(&b);
+                }
+        if (which.empty()) {
+            return put(out, capacity, "No colour light matches \"" + target + "\".");
+        }
+        for (const Item *b : which) {
+            act("light.hue", b->target, param("hue", hue), b->name, "light");
+        }
         return sent(std::to_string(which.size()) + " light(s) to " + value);
     }
     if (verb == "scene") {
-        if (matches("movie", value.c_str())) act("scene.movie", "movie", no_params(), "Movie", "lights");
-        else if (matches("evening", value.c_str())) act("scene.apply", "evening", no_params(), "Evening", "lights");
-        else if (matches("lights off", value.c_str()) || matches("off", value.c_str())) act("scene.apply", "all_off", no_params(), "Lights off", "lights");
-        else return put(out, capacity, "Scenes: Movie, Evening, Lights off.");
+        if (matches("movie", value.c_str())) {
+            act("scene.movie", "movie", no_params(), "Movie", "lights");
+        } else if (matches("evening", value.c_str())) {
+            act("scene.apply", "evening", no_params(), "Evening", "lights");
+        } else if (matches("lights off", value.c_str()) || matches("off", value.c_str())) {
+            act("scene.apply", "all_off", no_params(), "Lights off", "lights");
+        } else {
+            return put(out, capacity, "Scenes: Movie, Evening, Lights off.");
+        }
         return sent("the " + value + " scene");
     }
     if (verb == "volume" || verb == "play" || verb == "pause" || verb == "mute" || verb == "unmute") {
-        if (!d.speaker) return put(out, capacity, "No speaker.");
+        if (!d.speaker) {
+            return put(out, capacity, "No speaker.");
+        }
         const std::string t = d.speaker->target;
-        if (verb == "volume") act("speaker.volume", t, param("level", std::clamp(number, 0, 100)), "Volume", "speaker");
-        else if (verb == "play") act("speaker.play", t, no_params(), "Play", "speaker");
-        else if (verb == "pause") act("speaker.pause", t, no_params(), "Pause", "speaker");
-        else act("speaker.mute", t, param("muted", verb == "mute"), "Mute", "speaker");
+        if (verb == "volume") {
+            act("speaker.volume", t, param("level", std::clamp(number, 0, 100)), "Volume", "speaker");
+        } else if (verb == "play") {
+            act("speaker.play", t, no_params(), "Play", "speaker");
+        } else if (verb == "pause") {
+            act("speaker.pause", t, no_params(), "Pause", "speaker");
+        } else {
+            act("speaker.mute", t, param("muted", verb == "mute"), "Mute", "speaker");
+        }
         return sent(verb == "volume" ? "volume " + std::to_string(std::clamp(number, 0, 100)) : verb);
     }
     if (verb == "tv_on" || verb == "tv_off") {
-        if (!d.tv) return put(out, capacity, "No TV.");
+        if (!d.tv) {
+            return put(out, capacity, "No TV.");
+        }
         act("tv.power", d.tv->target, param("on", verb == "tv_on"), verb == "tv_on" ? "Turn on the TV" : "Turn off the TV", "TV");
         return sent(verb == "tv_on" ? "TV on" : "TV off");
     }

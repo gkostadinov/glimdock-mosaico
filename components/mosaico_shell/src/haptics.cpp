@@ -55,7 +55,10 @@ void haptics_pulse(HapticPulse pulse)
     esp_timer_start_once(off_timer, duration_us);
 }
 
-bool haptics_enabled() { return enabled; }
+bool haptics_enabled()
+{
+    return enabled;
+}
 
 void haptics_set_enabled(bool value)
 {

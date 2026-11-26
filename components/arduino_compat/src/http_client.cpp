@@ -26,7 +26,7 @@ bool HTTPClient::begin(WiFiClient &client, const String &url)
     size_t authority_start = scheme_end + 3;
     size_t path_start = text.find_first_of("/?#", authority_start);
     std::string authority = text.substr(authority_start, path_start == std::string::npos ? std::string::npos
-                                                                                          : path_start - authority_start);
+                                        : path_start - authority_start);
     // Embedded credentials and IPv6 literals are not supported by Glimdock.
     if (authority.empty() || authority.find('@') != std::string::npos || authority[0] == '[') {
         return false;

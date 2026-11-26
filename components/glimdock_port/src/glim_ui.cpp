@@ -34,7 +34,9 @@
 static void wipe(void *p, size_t n)
 {
     volatile unsigned char *v = static_cast<volatile unsigned char *>(p);
-    while (n--) *v++ = 0;
+    while (n--) {
+        *v++ = 0;
+    }
 }
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
@@ -85,7 +87,7 @@ struct {
     int history_count = 0;
     char history_node[64] = {};
     lv_obj_t *screen = nullptr, *content = nullptr, *tab_bar = nullptr, *clock = nullptr, *picker = nullptr,
-             *status_dot = nullptr, *status = nullptr, *overlay = nullptr;
+              *status_dot = nullptr, *status = nullptr, *overlay = nullptr;
     // Connection form draft (the editor writes back here).
     string draft[5];
     bool draft_loaded = false;
@@ -113,7 +115,10 @@ struct {
     int seen_count = 0;
     char seen_node[64] = {};
     bool seen_primed = false;
-    struct { uint32_t id; uint8_t state; } node_states[MAX_NODES];
+    struct {
+        uint32_t id;
+        uint8_t state;
+    } node_states[MAX_NODES];
     int node_state_count = -1;
     lv_obj_t *popup = nullptr;
     // A Kordlet card's or session's chat (read only), in PSRAM.
@@ -139,10 +144,15 @@ string fmt(const char *f, ...)
     return buf;
 }
 const char *DASH = "\xE2\x80\x94";
-string num(double v, int decimals = 0) { return isfinite(v) ? fmt("%.*f", decimals, v) : string(DASH); }
+string num(double v, int decimals = 0)
+{
+    return isfinite(v) ? fmt("%.*f", decimals, v) : string(DASH);
+}
 string bytes(double b)
 {
-    if (!isfinite(b) || b < 0) return DASH;
+    if (!isfinite(b) || b < 0) {
+        return DASH;
+    }
     static const char *const units[] = {"B", "KB", "MB", "GB", "TB"};
     int u = 0;
     while (b >= 1000 && u < 4) {
@@ -151,23 +161,49 @@ string bytes(double b)
     }
     return fmt(b >= 100 || u == 0 ? "%.0f %s" : "%.1f %s", b, units[u]);
 }
-string gib(double b) { return isfinite(b) ? fmt("%.1f", b / 1073741824.0) : string(DASH); }
-string rate(double b) { return isfinite(b) ? bytes(b) + "/s" : string(DASH); }
+string gib(double b)
+{
+    return isfinite(b) ? fmt("%.1f", b / 1073741824.0) : string(DASH);
+}
+string rate(double b)
+{
+    return isfinite(b) ? bytes(b) + "/s" : string(DASH);
+}
 string span(double s)
 {
-    if (!isfinite(s) || s < 0) return DASH;
+    if (!isfinite(s) || s < 0) {
+        return DASH;
+    }
     const uint32_t t = uint32_t(s);
-    if (t >= 86400) return fmt("%ud %uh", t / 86400, t % 86400 / 3600);
-    if (t >= 3600) return fmt("%uh %um", t / 3600, t % 3600 / 60);
-    if (t >= 60) return fmt("%um", t / 60);
+    if (t >= 86400) {
+        return fmt("%ud %uh", t / 86400, t % 86400 / 3600);
+    }
+    if (t >= 3600) {
+        return fmt("%uh %um", t / 3600, t % 3600 / 60);
+    }
+    if (t >= 60) {
+        return fmt("%um", t / 60);
+    }
     return fmt("%us", t);
 }
-float pct_of(double used, double total) { return total > 0 && isfinite(used) ? float(100.0 * used / total) : NAN; }
-string pct(float v) { return isfinite(v) ? fmt("%d%%", int(lroundf(v))) : string(DASH); }
+float pct_of(double used, double total)
+{
+    return total > 0 && isfinite(used) ? float(100.0 * used / total) : NAN;
+}
+string pct(float v)
+{
+    return isfinite(v) ? fmt("%d%%", int(lroundf(v))) : string(DASH);
+}
 
 // ---- state of the feed -----------------------------------------------------------
-bool stale() { return !G.snap->valid || (millis() - G.snap->received) > HOMELAB_STALE_MS; }
-struct Feed { const char *text; uint32_t color; };
+bool stale()
+{
+    return !G.snap->valid || (millis() - G.snap->received) > HOMELAB_STALE_MS;
+}
+struct Feed {
+    const char *text;
+    uint32_t color;
+};
 Feed feed()
 {
     if (G.demo || G.snap->demo) return {"DEMO", VIOLET.glow};
@@ -179,13 +215,24 @@ Feed feed()
 }
 uint8_t node_state(const NodeDescriptor &n)  // 0 healthy, 1 attention, 2 offline
 {
-    if (!strcmp(n.status, "offline") || !strcmp(n.summary.status, "offline")) return 2;
+    if (!strcmp(n.status, "offline") || !strcmp(n.summary.status, "offline")) {
+        return 2;
+    }
     const char *s = n.summary.status[0] ? n.summary.status : n.status;
     return !strcmp(s, "healthy") ? 0 : 1;
 }
-uint32_t state_color(uint8_t s) { return s == 0 ? OK : s == 1 ? WARN : RED; }
-bool is_printer(const NodeDescriptor &n) { return !strcmp(n.type, "klipper"); }
-bool is_host(const NodeDescriptor &n) { return strstr(n.type, "proxmox") != nullptr; }
+uint32_t state_color(uint8_t s)
+{
+    return s == 0 ? OK : s == 1 ? WARN : RED;
+}
+bool is_printer(const NodeDescriptor &n)
+{
+    return !strcmp(n.type, "klipper");
+}
+bool is_host(const NodeDescriptor &n)
+{
+    return strstr(n.type, "proxmox") != nullptr;
+}
 
 // ---- small building blocks --------------------------------------------------------
 lv_obj_t *C = nullptr;  // the page being built
@@ -196,14 +243,20 @@ void on(lv_obj_t *o, lv_event_cb_t cb, void *data = nullptr)
     lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(o, cb, LV_EVENT_CLICKED, data);
 }
-lv_obj_t *card(int h, int x = 0, int w = CW, int r = 22) { return glass(C, x, Y, w, h, r, ACC); }
+lv_obj_t *card(int h, int x = 0, int w = CW, int r = 22)
+{
+    return glass(C, x, Y, w, h, r, ACC);
+}
 lv_obj_t *section(const char *title)
 {
     lv_obj_t *l = label(C, title, 6, Y, 400, TEXT3, 13, true);
     Y += 24;
     return l;
 }
-void key(lv_obj_t *p, const char *text, int x, int y, int w = 180) { label(p, text, x, y, w, TEXT3, 13, true); }
+void key(lv_obj_t *p, const char *text, int x, int y, int w = 180)
+{
+    label(p, text, x, y, w, TEXT3, 13, true);
+}
 // A big value with its unit on the baseline.
 void big(lv_obj_t *p, const string &value, const char *unit, int x, int y, int px, uint32_t color = TEXT)
 {
@@ -235,9 +288,14 @@ void sample_history()
         G.history_count = 0;
     }
     const float cpu = G.snap->cpu;
-    if (!isfinite(cpu)) return;
-    if (G.history_count == 48) memmove(G.history, G.history + 1, sizeof(float) * 47);
-    else ++G.history_count;
+    if (!isfinite(cpu)) {
+        return;
+    }
+    if (G.history_count == 48) {
+        memmove(G.history, G.history + 1, sizeof(float) * 47);
+    } else {
+        ++G.history_count;
+    }
     G.history[G.history_count - 1] = cpu;
 }
 
@@ -252,14 +310,21 @@ bool redirect = false;
 // The system the person chose (empty: all systems), until its data arrives.
 const NodeDescriptor *chosen()
 {
-    if (G.fleet) return nullptr;
+    if (G.fleet) {
+        return nullptr;
+    }
     if (G.node_key[0]) {
         const int i = nodeIndexForId(*G.snap, G.node_key);
-        if (i >= 0) return &G.snap->nodes[i];
+        if (i >= 0) {
+            return &G.snap->nodes[i];
+        }
     }
     return &G.snap->node;
 }
-bool loading_node() { return !G.fleet && G.node_key[0] && strcmp(G.snap->node.id, G.node_key); }
+bool loading_node()
+{
+    return !G.fleet && G.node_key[0] && strcmp(G.snap->node.id, G.node_key);
+}
 
 void choose_node(const char *id)
 {
@@ -318,12 +383,14 @@ void setup_card()
     lv_obj_t *c = card(232);
     label(c, "Connect Glimdock", 22, 20, 400, TEXT, 24, true);
     lv_obj_t *t = label(c, "Point it at your collector: Wi-Fi, the collector's snapshot address and a display "
-                           "token. Or look around with sample data first.", 22, 58, 416, TEXT2, 16);
+                        "token. Or look around with sample data first.", 22, 58, 416, TEXT2, 16);
     lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_height(t, LV_SIZE_CONTENT);
     // The firmware's own hint ("Use Configure on this display") is for its
     // old screens; only show other messages (errors) here.
-    if (G.net.message[0] && !strstr(G.net.message, "Not configured")) label(c, G.net.message, 22, 128, 416, WARN, 14);
+    if (G.net.message[0] && !strstr(G.net.message, "Not configured")) {
+        label(c, G.net.message, 22, 128, 416, WARN, 14);
+    }
     lv_obj_t *b = fill_button(c, 22, 160, 200, 50, "Set up", ACC, 17);
     on(b, goto_settings);
     lv_obj_t *d = field_button(c, 238, 160, 200, 50, "Preview demo", 17);
@@ -348,7 +415,9 @@ void system_card(int i, int x)
         label(c, s.printState[0] ? s.printState : "idle", 110, 82, 96, TEXT2, 14, false, LV_TEXT_ALIGN_RIGHT);
     } else {
         big(c, s.available ? num(s.cpu) : string(DASH), "% cpu", 18, 64, 32, ACC.glow);
-        if (s.available && isfinite(s.memory)) bar(c, 18, 108, 188, 6, int(s.memory), VIOLET, false);
+        if (s.available && isfinite(s.memory)) {
+            bar(c, 18, 108, 188, 6, int(s.memory), VIOLET, false);
+        }
     }
 }
 
@@ -374,9 +443,17 @@ void page_systems()
     int nc = 0, nm = 0;
     for (int i = 0; i < s.nNodes; ++i) {
         const NodeSummary &v = s.nodes[i].summary;
-        if (node_state(s.nodes[i]) == 0) ++healthy;
-        if (v.available && isfinite(v.cpu)) { cpu += v.cpu; ++nc; }
-        if (v.available && isfinite(v.memory)) { mem += v.memory; ++nm; }
+        if (node_state(s.nodes[i]) == 0) {
+            ++healthy;
+        }
+        if (v.available && isfinite(v.cpu)) {
+            cpu += v.cpu;
+            ++nc;
+        }
+        if (v.available && isfinite(v.memory)) {
+            mem += v.memory;
+            ++nm;
+        }
     }
     lv_obj_t *sum = card(104);
     big(sum, fmt("%d", healthy), fmt("/ %d", s.nNodes).c_str(), 22, 14, 46, healthy == s.nNodes ? OK : WARN);
@@ -388,7 +465,9 @@ void page_systems()
     Y += 104 + GAP;
     for (int i = 0; i < s.nNodes; i += 2) {
         system_card(i, 0);
-        if (i + 1 < s.nNodes) system_card(i + 1, HALF + GAP);
+        if (i + 1 < s.nNodes) {
+            system_card(i + 1, HALF + GAP);
+        }
         Y += 124 + GAP;
     }
 }
@@ -406,17 +485,20 @@ void page_clock()
     lv_obj_t *c = card(CONTENT_H - 8);
     static const char *const days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
     static const char *const months[] = {"January", "February", "March", "April", "May", "June", "July",
-                                          "August", "September", "October", "November", "December"};
+                                         "August", "September", "October", "November", "December"
+                                        };
     label(c, timed ? fmt("%02d:%02d", local.tm_hour, local.tm_min).c_str() : "--:--", 0, 34, 460, TEXT, 112, true,
           LV_TEXT_ALIGN_CENTER);
     label(c, timed ? fmt("%s %d %s", days[local.tm_wday % 7], local.tm_mday, months[local.tm_mon % 12]).c_str()
-                   : "Waiting for time sync",
+          : "Waiting for time sync",
           0, 172, 460, TEXT2, 20, true, LV_TEXT_ALIGN_CENTER);
     const Snapshot &s = *G.snap;
     int healthy = 0;
-    for (int i = 0; i < s.nNodes; ++i) healthy += node_state(s.nodes[i]) == 0;
+    for (int i = 0; i < s.nNodes; ++i) {
+        healthy += node_state(s.nodes[i]) == 0;
+    }
     const string line = s.nNodes ? fmt("%d of %d systems healthy", healthy, s.nNodes)
-                                 : s.valid ? string(s.host) : string("Glimdock");
+                        : s.valid ? string(s.host) : string("Glimdock");
     dot(c, 230 - text_width(line.c_str(), 16, false) / 2 - 16, 232, 9, s.nNodes && healthy < s.nNodes ? WARN : OK);
     label(c, line.c_str(), 0, 226, 460, TEXT2, 16, false, LV_TEXT_ALIGN_CENTER);
     Y += CONTENT_H;
@@ -442,14 +524,18 @@ void page_overview()
     key(mem, "MEMORY", 18, 16);
     big(mem, num(mp), "%", 18, 34, 46, VIOLET.glow);
     label(mem, fmt("%s / %s GiB", gib(s.memUsed).c_str(), gib(s.memTotal).c_str()).c_str(), 18, 94, 196, TEXT3, 13);
-    if (isfinite(mp)) bar(mem, 18, 122, HALF - 36, 8, int(mp), VIOLET);
+    if (isfinite(mp)) {
+        bar(mem, 18, 122, HALF - 36, 8, int(mp), VIOLET);
+    }
     Y += 150 + GAP;
     // Temperature, power, network.
     const int w3 = (CW - 2 * GAP) / 3;
     lv_obj_t *t = card(104, 0, w3);
     key(t, "TEMP", 16, 14);
     big(t, num(s.temp), "\xC2\xB0" "C", 16, 32, 32, isfinite(s.temp) && s.temp >= 80 ? RED : TEXT);
-    if (isfinite(s.temp)) bar(t, 16, 84, w3 - 32, 6, int(s.temp), s.temp >= 70 ? AMBER : GREEN);
+    if (isfinite(s.temp)) {
+        bar(t, 16, 84, w3 - 32, 6, int(s.temp), s.temp >= 70 ? AMBER : GREEN);
+    }
     lv_obj_t *pw = card(104, w3 + GAP, w3);
     key(pw, "POWER", 16, 14);
     big(pw, num(s.watts), "W", 16, 32, 32);
@@ -466,7 +552,9 @@ void page_overview()
         lv_obj_t *c = card(48 + rows * (ch + cell_gap) + 6);
         key(c, "CPU CORES", 16, 14);
         int busy = 0;
-        for (int i = 0; i < s.nCores; ++i) busy += isfinite(s.cores[i]) && s.cores[i] >= 80;
+        for (int i = 0; i < s.nCores; ++i) {
+            busy += isfinite(s.cores[i]) && s.cores[i] >= 80;
+        }
         label(c, busy ? fmt("%d busy of %u", busy, unsigned(s.nCores)).c_str() : fmt("%u logical", unsigned(s.nCores)).c_str(),
               CW - 196, 14, 180, busy ? WARN : TEXT3, 13, true, LV_TEXT_ALIGN_RIGHT);
         for (int i = 0; i < s.nCores; ++i) {
@@ -490,7 +578,9 @@ void page_overview()
         label(c, g.name, 20, 14, 300, TEXT, 16, true);
         label(c, fmt("%s \xC2\xB7 %s", g.vendor, g.owner).c_str(), 20, 40, 300, TEXT3, 13);
         big(c, num(g.utilization), "%", 330, 16, 32, ACC.glow);
-        if (isfinite(g.utilization)) bar(c, 20, 64, 420, 6, int(g.utilization), ACC, false);
+        if (isfinite(g.utilization)) {
+            bar(c, 20, 64, 420, 6, int(g.utilization), ACC, false);
+        }
         Y += 84 + GAP;
     }
     // About the system.
@@ -505,7 +595,9 @@ void page_overview()
     if (isfinite(s.batteryPercent))
         rows.push_back({"Battery", pct(float(s.batteryPercent)) + (s.batteryPlugged == 1 ? " \xC2\xB7 charging" : "")});
     lv_obj_t *info = card(20 + 30 * int(rows.size()));
-    for (size_t i = 0; i < rows.size(); ++i) row_text(info, rows[i].first, rows[i].second, 14 + 30 * int(i));
+    for (size_t i = 0; i < rows.size(); ++i) {
+        row_text(info, rows[i].first, rows[i].second, 14 + 30 * int(i));
+    }
     Y += 20 + 30 * int(rows.size()) + GAP;
 }
 
@@ -530,7 +622,9 @@ void page_guests()
                      span(g.uptime).c_str()).c_str(), 40, 40, 260, TEXT3, 13);
         big(c, num(g.cpu), "%", 330, 14, 28, running ? ACC.glow : TEXT3);
         const float mp = pct_of(g.used, g.total);
-        if (isfinite(mp)) bar(c, 40, 64, 260, 6, int(mp), VIOLET, false);
+        if (isfinite(mp)) {
+            bar(c, 40, 64, 260, 6, int(mp), VIOLET, false);
+        }
         label(c, fmt("%s / %s GiB", gib(g.used).c_str(), gib(g.total).c_str()).c_str(), 310, 58, 130, TEXT3, 13,
               false, LV_TEXT_ALIGN_RIGHT);
         Y += 84 + 10;
@@ -548,7 +642,9 @@ void page_storage()
         empty("No storage reported.");
         return;
     }
-    if (s.nPools) section("POOLS");
+    if (s.nPools) {
+        section("POOLS");
+    }
     for (int i = 0; i < s.nPools; ++i) {
         const Pool &p = s.pools[i];
         const float u = pct_of(p.used, p.total);
@@ -557,10 +653,14 @@ void page_storage()
         label(c, fmt("%s of %s \xC2\xB7 %s", bytes(p.used).c_str(), bytes(p.total).c_str(), p.status).c_str(), 20, 40,
               300, TEXT3, 13);
         big(c, num(u), "%", 350, 12, 28, isfinite(u) && u >= 90 ? RED : isfinite(u) && u >= 75 ? WARN : TEXT);
-        if (isfinite(u)) bar(c, 20, 66, 420, 7, int(u), u >= 90 ? AMBER : ACC, false);
+        if (isfinite(u)) {
+            bar(c, 20, 66, 420, 7, int(u), u >= 90 ? AMBER : ACC, false);
+        }
         Y += 86 + 10;
     }
-    if (s.nDisks) section("DISKS");
+    if (s.nDisks) {
+        section("DISKS");
+    }
     for (int i = 0; i < s.nDisks; ++i) {
         const Disk &d = s.disks[i];
         const bool ok = !strcmp(d.health, "passed") || !strcmp(d.health, "ok") || !strcmp(d.health, "OK");
@@ -591,10 +691,16 @@ void page_sensors()
         for (int i = 0; i < s.nSensors; ++i) {
             const char *kind = s.sensors[i].kind;
             bool known = false;
-            for (int j = 0; kinds[j]; ++j) known |= !strcmp(kind, kinds[j]);
-            if (kinds[k] ? !strcmp(kind, kinds[k]) : !known) list.push_back(i);
+            for (int j = 0; kinds[j]; ++j) {
+                known |= !strcmp(kind, kinds[j]);
+            }
+            if (kinds[k] ? !strcmp(kind, kinds[k]) : !known) {
+                list.push_back(i);
+            }
         }
-        if (list.empty()) continue;
+        if (list.empty()) {
+            continue;
+        }
         section(titles[k]);
         lv_obj_t *c = card(14 + 52 * int(list.size()));
         for (size_t j = 0; j < list.size(); ++j) {
@@ -690,7 +796,9 @@ void page_job()
     label(c, p.state[0] ? p.state : p.klippyState, 240, 16, 200, WARN, 14, true, LV_TEXT_ALIGN_RIGHT);
     big(c, num(p.progress), "%", 20, 40, 64, WARN);
     label(c, p.filename[0] ? p.filename : "No file", 20, 122, 420, TEXT, 16, true);
-    if (isfinite(p.progress)) bar(c, 20, 152, 420, 10, int(p.progress), AMBER);
+    if (isfinite(p.progress)) {
+        bar(c, 20, 152, 420, 10, int(p.progress), AMBER);
+    }
     label(c, fmt("Elapsed %s \xC2\xB7 left %s", span(p.printDuration).c_str(), span(p.remaining).c_str()).c_str(), 20,
           172, 420, TEXT3, 13);
     Y += 200 + GAP;
@@ -699,9 +807,13 @@ void page_job()
         lv_obj_t *hc = card(96, i * (HALF + GAP), HALF);
         key(hc, h.name, 18, 14, 190);
         big(hc, num(h.temp), "\xC2\xB0" "C", 18, 34, 34, isfinite(h.target) && h.target > 0 ? WARN : TEXT);
-        if (isfinite(h.target) && h.target > 0) label(hc, fmt("of %.0f", h.target).c_str(), 140, 50, 66, TEXT3, 13, false, LV_TEXT_ALIGN_RIGHT);
+        if (isfinite(h.target) && h.target > 0) {
+            label(hc, fmt("of %.0f", h.target).c_str(), 140, 50, 66, TEXT3, 13, false, LV_TEXT_ALIGN_RIGHT);
+        }
     }
-    if (p.nHeaters) Y += 96 + GAP;
+    if (p.nHeaters) {
+        Y += 96 + GAP;
+    }
     if (isfinite(p.currentLayer) && isfinite(p.totalLayers)) {
         lv_obj_t *l = card(64);
         row_text(l, "Layer", fmt("%.0f of %.0f", p.currentLayer, p.totalLayers), 20, TEXT);
@@ -728,26 +840,34 @@ void page_temps()
         label(c, isfinite(h.target) && h.target > 0 ? fmt("target %.0f\xC2\xB0" "C", h.target).c_str() : "off", 20, 42,
               240, TEXT3, 13);
         big(c, num(h.temp), "\xC2\xB0" "C", 300, 14, 34, isfinite(h.target) && h.target > 0 ? WARN : TEXT);
-        if (isfinite(h.temp) && isfinite(h.target) && h.target > 0)
+        if (isfinite(h.temp) && isfinite(h.target) && h.target > 0) {
             bar(c, 20, 72, 420, 7, int(std::min(100.0f, 100 * h.temp / h.target)), AMBER, false);
+        }
         Y += 96 + GAP;
     }
     if (p.nTemps) {
         lv_obj_t *c = card(14 + 40 * p.nTemps);
-        for (int i = 0; i < p.nTemps; ++i)
+        for (int i = 0; i < p.nTemps; ++i) {
             row_text(c, p.temperatures[i].name, num(p.temperatures[i].temp) + "\xC2\xB0" "C", 14 + 40 * i, TEXT);
+        }
         Y += 14 + 40 * p.nTemps + GAP;
     }
 }
 
 // ---- settings: connection form and keyboard editor -------------------------------------
 const char *const FIELD_TITLES[] = {"Wi-Fi name", "Wi-Fi password", "Collector endpoint", "Display token",
-                                    "Setup token"};
-bool secret(int i) { return i == 1 || i == 3 || i == 4; }
+                                    "Setup token"
+                                   };
+bool secret(int i)
+{
+    return i == 1 || i == 3 || i == 4;
+}
 
 void load_draft()
 {
-    if (G.draft_loaded) return;
+    if (G.draft_loaded) {
+        return;
+    }
     G.draft_loaded = true;
     G.draft[0] = G.conn.ssid[0] ? G.conn.ssid : homelabPlatformSsid();
     G.draft[2] = G.conn.endpoint;
@@ -756,8 +876,12 @@ void load_draft()
 
 string shown(int i)
 {
-    if (!secret(i)) return G.draft[i].empty() ? string("Not set") : G.draft[i];
-    if (!G.draft[i].empty()) return string(G.draft[i].size(), '*');
+    if (!secret(i)) {
+        return G.draft[i].empty() ? string("Not set") : G.draft[i];
+    }
+    if (!G.draft[i].empty()) {
+        return string(G.draft[i].size(), '*');
+    }
     const bool saved = i == 1 ? G.conn.passwordSaved : i == 3 ? G.conn.displayTokenSaved : G.conn.setupTokenSaved;
     return saved ? "Saved" : i == 4 ? "Optional" : "Not set";
 }
@@ -765,10 +889,14 @@ string shown(int i)
 void open_form();
 void editor_done(lv_event_t *e)
 {
-    if (lv_event_get_code(e) == LV_EVENT_READY && G.edit.target) *G.edit.target = lv_textarea_get_text(G.editor_area);
+    if (lv_event_get_code(e) == LV_EVENT_READY && G.edit.target) {
+        *G.edit.target = lv_textarea_get_text(G.editor_area);
+    }
     G.edit.target = nullptr;
     close_overlay();
-    if (G.edit.back) G.edit.back();
+    if (G.edit.back) {
+        G.edit.back();
+    }
 }
 
 // A full-screen text editor with the on-screen keyboard. On Done or Cancel it
@@ -840,7 +968,9 @@ void form_save(lv_event_t *)
     strlcpy(u.setupToken, G.draft[4].c_str(), sizeof(u.setupToken));
     if (requestConnectionUpdate(u)) {
         G.demo = false;
-        for (auto &d : G.draft) std::fill(d.begin(), d.end(), '\0');
+        for (auto &d : G.draft) {
+            std::fill(d.begin(), d.end(), '\0');
+        }
         G.draft_loaded = false;
         close_overlay();
         G.fleet = true;
@@ -874,7 +1004,10 @@ void open_form()
     stagger(o, 0, 15);
 }
 
-void form_cb(lv_event_t *) { open_form(); }
+void form_cb(lv_event_t *)
+{
+    open_form();
+}
 
 void sound_cb(lv_event_t *e)
 {
@@ -885,7 +1018,9 @@ void sound_cb(lv_event_t *e)
         p.putBool("sound", G.sound);
         p.end();
     }
-    if (G.sound) boardAudioPlay(AudioCue::Test);
+    if (G.sound) {
+        boardAudioPlay(AudioCue::Test);
+    }
 }
 
 void page_settings()
@@ -901,7 +1036,9 @@ void page_settings()
     row_text(cc, "Wi-Fi", c.ssid[0] ? c.ssid : homelabPlatformSsid(), 52);
     row_text(cc, "Endpoint", c.endpoint[0] ? c.endpoint : "Not set", 80);
     row_text(cc, "Display token", c.displayTokenSaved ? "Saved" : "Not set", 108);
-    if (c.message[0]) label(cc, c.message, 20, 138, 420, c.saved ? OK : WARN, 13);
+    if (c.message[0]) {
+        label(cc, c.message, 20, 138, 420, c.saved ? OK : WARN, 13);
+    }
     Y += ch + GAP;
     lv_obj_t *edit = fill_button(C, 0, Y, HALF, 52, "Connection", ACC, 17);
     on(edit, form_cb);
@@ -913,8 +1050,11 @@ void page_settings()
     label(demo, G.demo ? "Showing demo systems" : "Preview Glimdock without a collector", 20, 42, 300, TEXT3, 13);
     lv_obj_t *t = toggle(demo, 384, 22, G.demo, ACC);
     lv_obj_add_event_cb(t, [](lv_event_t *e) {
-        if (toggle_on(lv_event_get_current_target_obj(e))) start_demo(e);
-        else stop_demo(e);
+        if (toggle_on(lv_event_get_current_target_obj(e))) {
+            start_demo(e);
+        } else {
+            stop_demo(e);
+        }
     }, LV_EVENT_VALUE_CHANGED, nullptr);
     Y += 76 + GAP;
     lv_obj_t *snd = card(76);
@@ -925,18 +1065,28 @@ void page_settings()
     Y += 76 + GAP;
 }
 
-
 // ---- collector nodes (Settings > Collector nodes) --------------------------------------------
-void back_to_settings(lv_event_t *) { open_page(SETTINGS); }
-void back_to_nodes(lv_event_t *) { open_page(NODES); }
-void rebuild_later() { G.dirty = true; }
+void back_to_settings(lv_event_t *)
+{
+    open_page(SETTINGS);
+}
+void back_to_nodes(lv_event_t *)
+{
+    open_page(NODES);
+}
+void rebuild_later()
+{
+    G.dirty = true;
+}
 
 void page_header(const char *title, const char *detail, lv_event_cb_t back)
 {
     lv_obj_t *b = field_button(C, 0, Y, 92, 40, "Back", 15, TEXT2);
     on(b, back);
     label(C, title, 106, Y + 2, 240, TEXT, 20, true);
-    if (detail) label(C, detail, 106, Y + 26, 340, TEXT3, 13);
+    if (detail) {
+        label(C, detail, 106, Y + 26, 340, TEXT3, 13);
+    }
     Y += 52;
 }
 
@@ -954,12 +1104,16 @@ void note_card(const string &text, uint32_t color = TEXT2)
 
 string node_kind(const ConfigNode &n)
 {
-    if (deviceNodeType(n.type))
+    if (deviceNodeType(n.type)) {
         return string(platformName(n.platform)) + (localNodeType(n.type) ? " \xC2\xB7 local" : agentNodeType(n.type) ? " \xC2\xB7 agent" : " \xC2\xB7 feed");
+    }
     return !strcmp(n.type, "local-proxmox") ? "Local Proxmox" : !strcmp(n.type, "klipper") ? "Klipper" : "Remote Proxmox feed";
 }
 
-void refresh_nodes_cb(lv_event_t *) { requestNodeConfiguration(); }
+void refresh_nodes_cb(lv_event_t *)
+{
+    requestNodeConfiguration();
+}
 
 void begin_node(const ConfigNode &n, bool existing)
 {
@@ -981,7 +1135,9 @@ void begin_node(const ConfigNode &n, bool existing)
 void edit_node_cb(lv_event_t *e)
 {
     const int i = int(intptr_t(lv_event_get_user_data(e)));
-    if (i >= 0 && i < G.cfg->count) begin_node(G.cfg->nodes[i], true);
+    if (i >= 0 && i < G.cfg->count) {
+        begin_node(G.cfg->nodes[i], true);
+    }
 }
 
 void add_node_cb(lv_event_t *)
@@ -1000,7 +1156,9 @@ void page_nodes()
     page_header("Collector nodes",
                 c.available ? fmt("%d active \xC2\xB7 %d saved", activeConfiguredNodes(c), c.count).c_str() : nullptr,
                 back_to_settings);
-    if (c.message[0]) note_card(c.message, c.busy ? ACC.glow : WARN);
+    if (c.message[0]) {
+        note_card(c.message, c.busy ? ACC.glow : WARN);
+    }
     if (!c.available) {
         lv_obj_t *b = fill_button(C, 0, Y, CW, 52, c.busy ? "Loading\xE2\x80\xA6" : "Load collector settings", ACC, 17);
         on(b, refresh_nodes_cb);
@@ -1021,7 +1179,9 @@ void page_nodes()
         icon(r, "chev", 420, 28, 20, TEXT3, 1.6f);
         Y += 78 + 10;
     }
-    if (!c.count) note_card("No nodes yet. Add a monitor below.");
+    if (!c.count) {
+        note_card("No nodes yet. Add a monitor below.");
+    }
     const bool room = c.count < MAX_CONFIG_NODES && activeConfiguredNodes(c) < MAX_NODES && activeConfiguredRoots(c) < 4;
     if (room) {
         lv_obj_t *b = fill_button(C, 0, Y, CW, 52, "Add node", ACC, 17);
@@ -1034,7 +1194,9 @@ void page_nodes()
 
 void node_type_cb(lv_event_t *e)
 {
-    if (G.node_existing) return;
+    if (G.node_existing) {
+        return;
+    }
     const int sel = capsule_selected(lv_event_get_current_target_obj(e));
     const NodeConfiguration &c = *G.cfg;
     if (sel == 0 && c.localEnabled) {
@@ -1043,7 +1205,7 @@ void node_type_cb(lv_event_t *e)
         return;
     }
     strlcpy(G.node.type, sel == 0 ? (!strcmp(c.localType, "server") ? "local-server" : "local-proxmox")
-                         : sel == 1 ? "klipper" : sel == 2 ? "proxmox-feed" : "server-feed", sizeof(G.node.type));
+            : sel == 1 ? "klipper" : sel == 2 ? "proxmox-feed" : "server-feed", sizeof(G.node.type));
     G.node.platform[0] = 0;
     if (sel == 0) {
         strlcpy(G.node.platform, c.localPlatform, sizeof(G.node.platform));
@@ -1077,15 +1239,22 @@ void node_platform_cb(lv_event_t *)
     static const char *const values[] = {"", "linux", "macos", "windows", "router", "other"};
     int next = 0;
     for (int i = 0; i < 6; ++i)
-        if (!strcmp(G.node.platform, values[i])) next = (i + 1) % 6;
+        if (!strcmp(G.node.platform, values[i])) {
+            next = (i + 1) % 6;
+        }
     strlcpy(G.node.platform, values[next], sizeof(G.node.platform));
     rebuild_later();
 }
 
-void back_to_node_form() { G.page = NODE_FORM; G.dirty = true; }
+void back_to_node_form()
+{
+    G.page = NODE_FORM;
+    G.dirty = true;
+}
 
 const char *const NODE_FIELDS[] = {"Node name", "Service URL", "Service token", "ID (optional slug)",
-                                   "Poll interval (seconds)", "Timeout (seconds)", "Freshness TTL (seconds)"};
+                                   "Poll interval (seconds)", "Timeout (seconds)", "Freshness TTL (seconds)"
+                                  };
 void node_field_cb(lv_event_t *e)
 {
     const int i = int(intptr_t(lv_event_get_user_data(e)));
@@ -1112,18 +1281,21 @@ void node_save_cb(lv_event_t *)
     }
     NodeConfigDraft d;
     d.node = G.node;
-    if (localNodeType(d.node.type))
+    if (localNodeType(d.node.type)) {
         strlcpy(d.node.platform, deviceNodeType(d.node.type) ? c.localPlatform : "linux", sizeof(d.node.platform));
+    }
     strlcpy(d.node.name, G.nd[0].c_str(), sizeof(d.node.name));
     strlcpy(d.node.url, G.nd[1].c_str(), sizeof(d.node.url));
-    if (!G.node_existing && !localNodeType(d.node.type)) strlcpy(d.node.id, G.nd[3].c_str(), sizeof(d.node.id));
+    if (!G.node_existing && !localNodeType(d.node.type)) {
+        strlcpy(d.node.id, G.nd[3].c_str(), sizeof(d.node.id));
+    }
     strlcpy(d.secret, G.nd[2].c_str(), sizeof(d.secret));
     d.clearSecret = G.node_clear_secret;
     d.node.poll = draft_number(G.nd[4]);
     d.node.timeout = draft_number(G.nd[5]);
     d.node.ttl = draft_number(G.nd[6]);
     if (!localNodeType(d.node.type) && (!isfinite(d.node.poll) || (!agentNodeType(d.node.type) && !isfinite(d.node.timeout)) ||
-                                         !isfinite(d.node.ttl))) {
+                                        !isfinite(d.node.ttl))) {
         G.node_message = "Enter valid polling, timeout and TTL numbers.";
     } else if (requestNodeUpsert(d, c.version)) {
         G.node_save_pending = true;
@@ -1199,7 +1371,7 @@ void page_node_form()
     if (!local) {
         form_row(NODE_FIELDS[1], G.nd[1].empty() ? "Not set" : G.nd[1], 1);
         const string token = G.node_clear_secret ? "Will be cleared" : !G.nd[2].empty() ? string(G.nd[2].size(), '*')
-                           : n.hasSecret ? "Saved" : "Not set";
+                             : n.hasSecret ? "Saved" : "Not set";
         form_row(NODE_FIELDS[2], token, 2, !G.node_clear_secret);
         if (G.node_existing && n.hasSecret) {
             lv_obj_t *cl = card(56);
@@ -1207,7 +1379,9 @@ void page_node_form()
             lv_obj_t *t = toggle(cl, 384, 12, G.node_clear_secret, ACC);
             lv_obj_add_event_cb(t, [](lv_event_t *e) {
                 G.node_clear_secret = toggle_on(lv_event_get_current_target_obj(e));
-                if (G.node_clear_secret) G.nd[2].clear();
+                if (G.node_clear_secret) {
+                    G.nd[2].clear();
+                }
                 rebuild_later();
             }, LV_EVENT_VALUE_CHANGED, nullptr);
             Y += 56 + 8;
@@ -1215,17 +1389,23 @@ void page_node_form()
         form_row(NODE_FIELDS[3], G.node_existing ? string(n.id) : G.nd[3].empty() ? "From the name" : G.nd[3], 3,
                  !G.node_existing);
         form_row(NODE_FIELDS[4], G.nd[4], 4);
-        if (!agentNodeType(n.type)) form_row(NODE_FIELDS[5], G.nd[5], 5);
+        if (!agentNodeType(n.type)) {
+            form_row(NODE_FIELDS[5], G.nd[5], 5);
+        }
         form_row(NODE_FIELDS[6], G.nd[6], 6);
     }
     lv_obj_t *en = card(56);
     label(en, "Monitoring enabled", 20, 17, 300, TEXT, 16, true);
     lv_obj_t *t = toggle(en, 384, 12, n.enabled, ACC);
-    lv_obj_add_event_cb(t, [](lv_event_t *e) { G.node.enabled = toggle_on(lv_event_get_current_target_obj(e)); },
-                        LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_add_event_cb(t, [](lv_event_t *e) {
+        G.node.enabled = toggle_on(lv_event_get_current_target_obj(e));
+    },
+    LV_EVENT_VALUE_CHANGED, nullptr);
     Y += 56 + GAP;
     const string message = !G.node_message.empty() ? G.node_message : (c.busy || c.message[0]) ? string(c.message) : string();
-    if (!message.empty()) note_card(message, c.busy ? ACC.glow : WARN);
+    if (!message.empty()) {
+        note_card(message, c.busy ? ACC.glow : WARN);
+    }
     lv_obj_t *save = fill_button(C, 0, Y, G.node_existing ? HALF : CW, 52, c.busy ? "Saving\xE2\x80\xA6" : "Save", ACC, 17);
     on(save, node_save_cb);
     if (G.node_existing) {
@@ -1237,7 +1417,9 @@ void page_node_form()
 
 void poll_nodes()
 {
-    if (!readNodeConfiguration(*G.cfg) || G.cfg->revision == G.cfg_revision) return;
+    if (!readNodeConfiguration(*G.cfg) || G.cfg->revision == G.cfg_revision) {
+        return;
+    }
     G.cfg_revision = G.cfg->revision;
     if ((G.node_save_pending || G.node_delete_pending) && !G.cfg->busy) {
         const bool ok = G.cfg->saved || G.cfg->applying;
@@ -1249,7 +1431,9 @@ void poll_nodes()
             G.node_message = G.cfg->message;
         }
     }
-    if (G.page == NODES || G.page == NODE_FORM) G.dirty = true;
+    if (G.page == NODES || G.page == NODE_FORM) {
+        G.dirty = true;
+    }
 }
 
 void nodes_cb(lv_event_t *)
@@ -1262,19 +1446,28 @@ void nodes_cb(lv_event_t *)
 double ops_age(double sampled)
 {
     const ops::Snapshot &o = *G.ops;
-    if (!o.valid || !isfinite(sampled)) return NAN;
+    if (!o.valid || !isfinite(sampled)) {
+        return NAN;
+    }
     const double elapsed = uint32_t(millis() - o.received) / 1000.0;
     double now = double(time(nullptr));
-    if (now < 1700000000) now = o.generated + elapsed;
+    if (now < 1700000000) {
+        now = o.generated + elapsed;
+    }
     return sampled > now + 30 ? NAN : std::max(0.0, now - sampled);
 }
 uint32_t ops_color(const char *state)
 {
-    if (!strcmp(state, "failed") || !strcmp(state, "error")) return RED;
-    if (!strcmp(state, "blocked") || !strcmp(state, "waiting") || !strcmp(state, "degraded")) return WARN;
+    if (!strcmp(state, "failed") || !strcmp(state, "error")) {
+        return RED;
+    }
+    if (!strcmp(state, "blocked") || !strcmp(state, "waiting") || !strcmp(state, "degraded")) {
+        return WARN;
+    }
     if (!strcmp(state, "running") || !strcmp(state, "healthy") || !strcmp(state, "ready") || !strcmp(state, "active") ||
-        !strcmp(state, "completed") || !strcmp(state, "done"))
+            !strcmp(state, "completed") || !strcmp(state, "done")) {
         return OK;
+    }
     return TEXT3;
 }
 string ago(double sampled)
@@ -1282,7 +1475,10 @@ string ago(double sampled)
     const double a = ops_age(sampled);
     return isfinite(a) ? span(a) + " ago" : string("age unknown");
 }
-const char *system_name(uint8_t i) { return i < G.ops->nSystems ? G.ops->systems[i].name : ""; }
+const char *system_name(uint8_t i)
+{
+    return i < G.ops->nSystems ? G.ops->systems[i].name : "";
+}
 
 void demo_operations(ops::Snapshot &o)
 {
@@ -1311,7 +1507,9 @@ void demo_operations(ops::Snapshot &o)
     // The build farm is a Kordlet board.
     o.systems[0].board = true;
     const double lanes[ops::LANES] = {4, 1, 2, 1, 1, 9};
-    for (int l = 0; l < ops::LANES; ++l) o.systems[0].lanes[l] = lanes[l];
+    for (int l = 0; l < ops::LANES; ++l) {
+        o.systems[0].lanes[l] = lanes[l];
+    }
     o.systems[0].needsYou = 1;
     o.systems[0].cardsTotal = 18;
     const char *agents[] = {"builder-1", "builder-2", "reviewer", "scholar"};
@@ -1371,8 +1569,14 @@ uint32_t lane_color(int lane)
 {
     return lane == 5 ? OK : lane == 4 ? WARN : lane == 2 || lane == 3 ? ACC.glow : lane == 1 ? VIOLET.glow : TEXT3;
 }
-uint32_t attention_color(const char *level) { return !strcmp(level, "error") ? RED : !strcmp(level, "info") ? ACC.glow : WARN; }
-const char *lane_label(int lane) { return lane >= 0 && lane < ops::LANES ? ops::LANE_LABELS[lane] : "No lane"; }
+uint32_t attention_color(const char *level)
+{
+    return !strcmp(level, "error") ? RED : !strcmp(level, "info") ? ACC.glow : WARN;
+}
+const char *lane_label(int lane)
+{
+    return lane >= 0 && lane < ops::LANES ? ops::LANE_LABELS[lane] : "No lane";
+}
 
 void open_chat(const char *system, const char *id, bool card, const char *title);
 
@@ -1380,7 +1584,9 @@ void card_tap_cb(lv_event_t *e)
 {
     const int i = int(intptr_t(lv_event_get_user_data(e)));
     const ops::Snapshot &o = *G.ops;
-    if (i < 0 || i >= o.nTasks || !o.tasks[i].chat || o.tasks[i].system >= o.nSystems) return;
+    if (i < 0 || i >= o.nTasks || !o.tasks[i].chat || o.tasks[i].system >= o.nSystems) {
+        return;
+    }
     open_chat(o.systems[o.tasks[i].system].id, o.tasks[i].id, true, o.tasks[i].title);
 }
 
@@ -1388,7 +1594,9 @@ void session_tap_cb(lv_event_t *e)
 {
     const int i = int(intptr_t(lv_event_get_user_data(e)));
     const ops::Snapshot &o = *G.ops;
-    if (i < 0 || i >= o.nAgents || !o.agents[i].chat || o.agents[i].system >= o.nSystems) return;
+    if (i < 0 || i >= o.nAgents || !o.agents[i].chat || o.agents[i].system >= o.nSystems) {
+        return;
+    }
     open_chat(o.systems[o.agents[i].system].id, o.agents[i].id, false, o.agents[i].name);
 }
 
@@ -1442,11 +1650,22 @@ void page_agents()
     const char *currency = "";
     for (int i = 0; i < o.nSystems; ++i) {
         const ops::System &s = o.systems[i];
-        if (isfinite(s.running)) running += s.running;
-        if (isfinite(s.queued)) queued += s.queued;
-        if (isfinite(s.blocked)) blocked += s.blocked;
-        if (isfinite(s.failed)) failed += s.failed;
-        if (isfinite(s.usage.cost)) { cost += s.usage.cost; currency = s.usage.currency; }
+        if (isfinite(s.running)) {
+            running += s.running;
+        }
+        if (isfinite(s.queued)) {
+            queued += s.queued;
+        }
+        if (isfinite(s.blocked)) {
+            blocked += s.blocked;
+        }
+        if (isfinite(s.failed)) {
+            failed += s.failed;
+        }
+        if (isfinite(s.usage.cost)) {
+            cost += s.usage.cost;
+            currency = s.usage.currency;
+        }
     }
     lv_obj_t *sum = card(104);
     key(sum, "RUNNING", 22, 16, 100);
@@ -1486,7 +1705,9 @@ void page_agents()
         for (int pass = 0; pass < 3; ++pass)
             for (int i = 0; i < o.nAgents; ++i) {
                 const bool session = !strcmp(o.agents[i].kind, "session"), machine = !strcmp(o.agents[i].kind, "machine");
-                if ((pass == 0 && session) || (pass == 1 && machine) || (pass == 2 && !session && !machine)) order[n++] = i;
+                if ((pass == 0 && session) || (pass == 1 && machine) || (pass == 2 && !session && !machine)) {
+                    order[n++] = i;
+                }
             }
         for (int k = 0; k < n; ++k) {
             const int i = order[k];
@@ -1504,7 +1725,9 @@ void page_agents()
             // What it works on: the card's title when it is in this snapshot.
             const char *work = a.task;
             for (int j = 0; j < o.nTasks; ++j)
-                if (o.tasks[j].system == a.system && !strcmp(o.tasks[j].id, a.task)) work = o.tasks[j].title;
+                if (o.tasks[j].system == a.system && !strcmp(o.tasks[j].id, a.task)) {
+                    work = o.tasks[j].title;
+                }
             label(c, a.activity[0] ? a.activity : work[0] ? work : ("heartbeat " + ago(a.heartbeat)).c_str(), 40, 56,
                   a.chat ? 360 : 400, a.activity[0] ? ACC.glow : TEXT2, 14);
             if (a.chat) {  // its conversation, read only
@@ -1515,7 +1738,9 @@ void page_agents()
             }
             Y += 84 + 10;
         }
-        if (!o.nAgents) empty(cards ? "No sessions reported." : "No agents reported.");
+        if (!o.nAgents) {
+            empty(cards ? "No sessions reported." : "No agents reported.");
+        }
     } else if (G.ops_tab == 1) {
         for (int i = 0; i < o.nTasks; ++i) {
             const ops::Task &tk = o.tasks[i];
@@ -1546,10 +1771,14 @@ void page_agents()
             label(c, tk.state, 340, 13, 100, ops_color(tk.state), 13, true, LV_TEXT_ALIGN_RIGHT);
             label(c, fmt("%s \xC2\xB7 %s \xC2\xB7 %s", system_name(tk.system), tk.agent[0] ? tk.agent : "unassigned",
                          ago(tk.updated).c_str()).c_str(), 40, 36, 400, TEXT3, 13);
-            if (isfinite(tk.progress)) bar(c, 40, 62, 400, 6, int(tk.progress), ACC, false);
+            if (isfinite(tk.progress)) {
+                bar(c, 40, 62, 400, 6, int(tk.progress), ACC, false);
+            }
             Y += 84 + 10;
         }
-        if (!o.nTasks) empty(cards ? "No cards reported." : "No tasks reported.");
+        if (!o.nTasks) {
+            empty(cards ? "No cards reported." : "No tasks reported.");
+        }
     } else {
         for (int i = 0; i < o.nEvents; ++i) {
             const ops::Event &ev = o.events[i];
@@ -1562,14 +1791,18 @@ void page_agents()
                   38, 400, TEXT3, 13);
             Y += 70 + 10;
         }
-        if (!o.nEvents) empty("No recent events.");
+        if (!o.nEvents) {
+            empty("No recent events.");
+        }
     }
 }
 
 void poll_operations()
 {
     if (G.demo) {
-        if (!G.ops->valid || !G.ops->demo) demo_operations(*G.ops);
+        if (!G.ops->valid || !G.ops->demo) {
+            demo_operations(*G.ops);
+        }
         G.ops_net.connected = true;
     } else {
         readOperations(*G.ops, G.ops_net);
@@ -1577,7 +1810,9 @@ void poll_operations()
     if (G.ops->sequence != G.ops_sequence || G.ops_net.revision != G.ops_revision) {
         G.ops_sequence = G.ops->sequence;
         G.ops_revision = G.ops_net.revision;
-        if (G.page == AGENTS) G.dirty = true;
+        if (G.page == AGENTS) {
+            G.dirty = true;
+        }
     }
 }
 
@@ -1593,7 +1828,8 @@ void demo_chat(agentchat::Model &m)
     const char *roles[] = {"user", "assistant", "user", "assistant"};
     const char *texts[] = {"Make the board's Glimdock show the Kordlet lanes.",
                            "Done: Agents now shows Needs you and the six lanes, and cards open their chat.",
-                           "Keep the chat read only.", "It is: replies stay in Kordlet."};
+                           "Keep the chat read only.", "It is: replies stay in Kordlet."
+                          };
     const double now = double(time(nullptr));
     for (int i = 0; i < 4; ++i) {
         auto &x = m.messages[m.count++];
@@ -1606,7 +1842,9 @@ void demo_chat(agentchat::Model &m)
 
 void render_chat()
 {
-    if (!G.chat_body) return;
+    if (!G.chat_body) {
+        return;
+    }
     lv_obj_clean(G.chat_body);
     const agentchat::Model &m = *G.chat;
     int y = 0;
@@ -1617,7 +1855,9 @@ void render_chat()
         if (!G.chat_state.loading) {
             lv_obj_t *b = field_button(G.chat_body, 130, 200, 160, 44, "Try again", 15, TEXT);
             on(b, [](lv_event_t *) {
-                if (!G.demo) requestAgentChat(G.chat_system, G.chat_card, G.chat_id);
+                if (!G.demo) {
+                    requestAgentChat(G.chat_system, G.chat_card, G.chat_id);
+                }
             });
         }
         return;
@@ -1657,8 +1897,12 @@ void render_chat()
 
 void close_chat()
 {
-    if (!G.chat_overlay) return;
-    if (!G.demo) stopAgentChat();
+    if (!G.chat_overlay) {
+        return;
+    }
+    if (!G.demo) {
+        stopAgentChat();
+    }
     lv_obj_delete_async(G.chat_overlay);
     G.chat_overlay = G.chat_body = nullptr;
     G.chat_revision = ~0u;
@@ -1666,7 +1910,9 @@ void close_chat()
 
 void open_chat(const char *system, const char *id, bool card, const char *title)
 {
-    if (!G.chat || !agentchat::validId(system) || !agentchat::validId(id)) return;
+    if (!G.chat || !agentchat::validId(system) || !agentchat::validId(id)) {
+        return;
+    }
     close_chat();
     strlcpy(G.chat_system, system, sizeof(G.chat_system));
     strlcpy(G.chat_id, id, sizeof(G.chat_id));
@@ -1675,7 +1921,9 @@ void open_chat(const char *system, const char *id, bool card, const char *title)
     new (G.chat) agentchat::Model{};
     G.chat_state = agentchat::State{};
     G.chat_state.loading = !G.demo;  // "Loading", never the idle hint, until the network answers
-    if (G.demo) demo_chat(*G.chat);
+    if (G.demo) {
+        demo_chat(*G.chat);
+    }
     G.chat_requested = G.demo || requestAgentChat(system, card, id);
     lv_obj_t *o = box(G.screen, 0, 0, PANEL, PANEL);
     lv_obj_set_style_bg_color(o, lv_color_black(), 0);
@@ -1686,7 +1934,9 @@ void open_chat(const char *system, const char *id, bool card, const char *title)
     lv_obj_set_style_bg_color(back, lv_color_hex(FIELD), 0);
     lv_obj_set_style_bg_opa(back, LV_OPA_COVER, 0);
     icon(back, "back", 10, 10, 24, TEXT, 2.0f);
-    on(back, [](lv_event_t *) { close_chat(); });
+    on(back, [](lv_event_t *) {
+        close_chat();
+    });
     press_fx(back);
     lv_obj_t *t = label(o, title, 112, 12, 300, TEXT, 18, true);
     lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_DOTS);
@@ -1701,14 +1951,20 @@ void open_chat(const char *system, const char *id, bool card, const char *title)
 
 void poll_chat()
 {
-    if (!G.chat_overlay || G.demo) return;
+    if (!G.chat_overlay || G.demo) {
+        return;
+    }
     if (!G.chat_requested) {
         G.chat_requested = requestAgentChat(G.chat_system, G.chat_card, G.chat_id);
         return;
     }
     agentchat::State state;
-    if (!readAgentChat(*G.chat, state)) return;
-    if (!state.active) return;  // not this request's state yet
+    if (!readAgentChat(*G.chat, state)) {
+        return;
+    }
+    if (!state.active) {
+        return;    // not this request's state yet
+    }
     G.chat_state = state;
     if (G.chat_state.revision != G.chat_revision) {
         G.chat_revision = G.chat_state.revision;
@@ -1720,18 +1976,27 @@ void poll_chat()
 uint32_t hash(const char *a, const char *b = "")
 {
     uint32_t h = 2166136261u;
-    for (const char *s : {a, "\x1f", b})
-        for (; *s; ++s) h = (h ^ uint8_t(*s)) * 16777619u;
+    for (const char *s : {
+                a, "\x1f", b
+            })
+        for (; *s; ++s) {
+            h = (h ^ uint8_t(*s)) * 16777619u;
+        }
     return h;
 }
 
 void dismiss_popup()
 {
-    if (G.popup) lv_obj_delete_async(G.popup);
+    if (G.popup) {
+        lv_obj_delete_async(G.popup);
+    }
     G.popup = nullptr;
 }
 
-void popup_y(void *o, int32_t v) { lv_obj_set_y(static_cast<lv_obj_t *>(o), v); }
+void popup_y(void *o, int32_t v)
+{
+    lv_obj_set_y(static_cast<lv_obj_t *>(o), v);
+}
 
 void popup_cb(lv_event_t *)
 {
@@ -1766,14 +2031,18 @@ void show_popup(const char *title, const char *detail, uint32_t color, const cha
     lv_anim_set_duration(&a, 260);
     lv_anim_set_path_cb(&a, lv_anim_path_overshoot);
     lv_anim_start(&a);
-    if (G.sound) boardAudioPlay(AudioCue::Alert);
+    if (G.sound) {
+        boardAudioPlay(AudioCue::Alert);
+    }
 }
 
 // New alerts on the shown system, and systems turning worse in the fleet.
 void watch_alerts()
 {
     const Snapshot &s = *G.snap;
-    if (!s.valid) return;
+    if (!s.valid) {
+        return;
+    }
     if (strcmp(G.seen_node, s.node.id)) {  // another system: learn its alerts quietly
         strlcpy(G.seen_node, s.node.id, sizeof(G.seen_node));
         G.seen_count = 0;
@@ -1782,8 +2051,12 @@ void watch_alerts()
     for (int i = 0; i < s.nAlerts; ++i) {
         const uint32_t h = hash(s.alerts[i].id, s.alerts[i].message);
         bool known = false;
-        for (int j = 0; j < G.seen_count; ++j) known |= G.seen[j] == h;
-        if (known) continue;
+        for (int j = 0; j < G.seen_count; ++j) {
+            known |= G.seen[j] == h;
+        }
+        if (known) {
+            continue;
+        }
         if (G.seen_count == 32) {
             memmove(G.seen, G.seen + 1, sizeof(uint32_t) * 31);
             --G.seen_count;
@@ -1811,12 +2084,13 @@ void watch_alerts()
     G.node_state_count = count;
 }
 
-
 // ---- private conversations -----------------------------------------------------------------
 string when(double epoch)
 {
     const double now = double(time(nullptr));
-    if (!isfinite(epoch) || now < 1700000000) return DASH;
+    if (!isfinite(epoch) || now < 1700000000) {
+        return DASH;
+    }
     return span(std::max(0.0, now - epoch)) + " ago";
 }
 
@@ -1832,12 +2106,18 @@ void tab_cb(lv_event_t *e)
 const TabSet *tabs_for_view()
 {
     static const TabSet fleet{FLEET_PAGES, FLEET_LABELS, 4}, host{HOST_PAGES, HOST_LABELS, 5},
-        server{SERVER_PAGES, SERVER_LABELS, 4}, printer{PRINTER_PAGES, PRINTER_LABELS, 3};
-    if (G.fleet) return &fleet;
+           server{SERVER_PAGES, SERVER_LABELS, 4}, printer{PRINTER_PAGES, PRINTER_LABELS, 3};
+    if (G.fleet) {
+        return &fleet;
+    }
     const NodeDescriptor &n = *chosen();
     const bool here = !loading_node();
-    if (is_printer(n) || (here && G.snap->printer.present)) return &printer;
-    if (is_host(n) || (here && G.snap->nGuests)) return &host;
+    if (is_printer(n) || (here && G.snap->printer.present)) {
+        return &printer;
+    }
+    if (is_host(n) || (here && G.snap->nGuests)) {
+        return &host;
+    }
     return &server;
 }
 
@@ -1847,9 +2127,13 @@ void update_tabs()
     int index = 0;
     const Page shown_page = G.page == NODES || G.page == NODE_FORM ? SETTINGS : G.page;
     for (int i = 0; i < t->count; ++i)
-        if (t->pages[i] == shown_page) index = i;
+        if (t->pages[i] == shown_page) {
+            index = i;
+        }
     if (t != G.tabs || !G.tab_bar) {
-        if (G.tab_bar) lv_obj_delete(G.tab_bar);
+        if (G.tab_bar) {
+            lv_obj_delete(G.tab_bar);
+        }
         G.tabs = t;
         G.tab_bar = capsule(G.screen, 34, 412, 412, 50, t->labels, t->count, index, ACC, t->count > 4 ? 13 : 15);
         lv_obj_add_event_cb(G.tab_bar, tab_cb, LV_EVENT_VALUE_CHANGED, nullptr);
@@ -1865,7 +2149,9 @@ void picker_cb(lv_event_t *)
     lv_obj_set_style_bg_color(o, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
     lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(o, [](lv_event_t *) { close_overlay(); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(o, [](lv_event_t *) {
+        close_overlay();
+    }, LV_EVENT_CLICKED, nullptr);
     G.overlay = o;
     label(o, "Choose a system", 40, 24, 400, TEXT, 26, true, LV_TEXT_ALIGN_CENTER);
     lv_obj_t *list = box(o, 0, 70, PANEL, 340);
@@ -1886,16 +2172,22 @@ void picker_cb(lv_event_t *)
         dot(r, 24, 23, 10, state_color(node_state(n)));
         label(r, n.name[0] ? n.name : n.id, 54, 8, 300, TEXT, 17, true);
         label(r, nodeTypeName(n), 54, 31, 300, TEXT3, 13);
-        if (!G.fleet && !strcmp(n.id, s.node.id)) icon(r, "check", 418, 16, 24, ACC.glow, 2.0f);
+        if (!G.fleet && !strcmp(n.id, s.node.id)) {
+            icon(r, "check", 418, 16, 24, ACC.glow, 2.0f);
+        }
     }
     lv_obj_t *close = field_button(o, 150, 420, 180, 44, "Close", 16, TEXT2);
-    on(close, [](lv_event_t *) { close_overlay(); });
+    on(close, [](lv_event_t *) {
+        close_overlay();
+    });
     stagger(list, 0, 15);
 }
 
 void close_overlay()
 {
-    if (G.overlay) lv_obj_delete_async(G.overlay);
+    if (G.overlay) {
+        lv_obj_delete_async(G.overlay);
+    }
     G.overlay = nullptr;
     G.editor_area = nullptr;
 }
@@ -1947,7 +2239,9 @@ void update_header()
     }
     const NodeDescriptor *n = chosen();
     const char *name = !n ? "All systems" : n->name[0] ? n->name : G.snap->host[0] ? G.snap->host : "This system";
-    if (strcmp(lv_label_get_text(G.picker), name)) lv_label_set_text(G.picker, name);
+    if (strcmp(lv_label_get_text(G.picker), name)) {
+        lv_label_set_text(G.picker, name);
+    }
     tm local{};
     uint8_t zone = 0;
     char clock[8] = "--:--";
@@ -1956,16 +2250,21 @@ void update_header()
         zone = p.getUChar("clockZone", 0) % DISPLAY_CLOCK_ZONE_COUNT;
         p.end();
     }
-    if (displayClockTm(time(nullptr), zone, local)) snprintf(clock, sizeof(clock), "%02d:%02d", local.tm_hour, local.tm_min);
-    if (strcmp(lv_label_get_text(G.clock), clock)) lv_label_set_text(G.clock, clock);
+    if (displayClockTm(time(nullptr), zone, local)) {
+        snprintf(clock, sizeof(clock), "%02d:%02d", local.tm_hour, local.tm_min);
+    }
+    if (strcmp(lv_label_get_text(G.clock), clock)) {
+        lv_label_set_text(G.clock, clock);
+    }
 }
 
 bool finger_down()
 {
     for (lv_indev_t *i = lv_indev_get_next(nullptr); i; i = lv_indev_get_next(i))
         if (lv_indev_get_type(i) == LV_INDEV_TYPE_POINTER &&
-            (lv_indev_get_state(i) == LV_INDEV_STATE_PRESSED || lv_indev_get_scroll_obj(i)))
+                (lv_indev_get_state(i) == LV_INDEV_STATE_PRESSED || lv_indev_get_scroll_obj(i))) {
             return true;
+        }
     return lv_obj_is_scrolling(G.content);
 }
 
@@ -2011,7 +2310,9 @@ void rebuild()
         lv_obj_update_layout(G.content);
         lv_obj_scroll_to_y(G.content, scroll, LV_ANIM_OFF);
     }
-    if (!same) stagger(G.content, 0, 15);
+    if (!same) {
+        stagger(G.content, 0, 15);
+    }
     rendered_page = G.page;
     rendered_fleet = G.fleet;
     has_rendered = true;
@@ -2021,7 +2322,9 @@ void rebuild()
 // the rebuild happens on the next poll.
 void open_page(Page p)
 {
-    if (p != AGENTS) close_chat();
+    if (p != AGENTS) {
+        close_chat();
+    }
     if (p == AGENTS && G.page != AGENTS) {
         requestOperationsRefresh();
         poll_operations();
@@ -2046,31 +2349,47 @@ void poll(lv_timer_t *)
             readConnectionSettings(G.conn);
         }
         if (G.snap->sequence != G.sequence || G.net.revision != G.revision || G.conn.revision != G.conn_revision) {
-            if (G.snap->sequence != G.sequence) sample_history();
+            if (G.snap->sequence != G.sequence) {
+                sample_history();
+            }
             G.sequence = G.snap->sequence;
             G.revision = G.net.revision;
             G.conn_revision = G.conn.revision;
             G.dirty = true;
         }
         watch_alerts();
-        if (G.page == NODES || G.page == NODE_FORM || G.node_save_pending || G.node_delete_pending) poll_nodes();
-        if (G.page == AGENTS) poll_operations();
+        if (G.page == NODES || G.page == NODE_FORM || G.node_save_pending || G.node_delete_pending) {
+            poll_nodes();
+        }
+        if (G.page == AGENTS) {
+            poll_operations();
+        }
         poll_chat();
     }
-    if (!G.active) return;
+    if (!G.active) {
+        return;
+    }
     if (now - G.last_clock >= 1000) {
         G.last_clock = now;
         update_header();
-        if (G.page == CLOCK) G.dirty = true;
+        if (G.page == CLOCK) {
+            G.dirty = true;
+        }
     }
-    if (G.popup && now - G.popup_at > 6000) dismiss_popup();
-    if (G.dirty && !G.overlay && !finger_down()) rebuild();
+    if (G.popup && now - G.popup_at > 6000) {
+        dismiss_popup();
+    }
+    if (G.dirty && !G.overlay && !finger_down()) {
+        rebuild();
+    }
 }
 }  // namespace
 
 void glim_ui_start(lv_obj_t *screen)
 {
-    if (G.started) return;
+    if (G.started) {
+        return;
+    }
     G.started = true;
     G.screen = screen;
 #ifdef ESP_PLATFORM
@@ -2090,14 +2409,14 @@ void glim_ui_start(lv_obj_t *screen)
     G.cfg = static_cast<NodeConfiguration *>(malloc(sizeof(NodeConfiguration)));
     G.ops = static_cast<ops::Snapshot *>(malloc(sizeof(ops::Snapshot)));
 #endif
-    if (G.cfg) new (G.cfg) NodeConfiguration{};
+    if (G.cfg) new (G.cfg) NodeConfiguration {};
     if (G.ops) new (G.ops) ops::Snapshot{};
 #ifdef ESP_PLATFORM
     G.chat = static_cast<agentchat::Model *>(heap_caps_malloc(sizeof(agentchat::Model), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
 #else
     G.chat = static_cast<agentchat::Model *>(malloc(sizeof(agentchat::Model)));
 #endif
-    if (G.chat) new (G.chat) agentchat::Model{};
+    if (G.chat) new (G.chat) agentchat::Model {};
     if (!G.cfg || !G.ops) {
         label(screen, "Glimdock needs PSRAM", 40, 220, 400, RED, 20, true, LV_TEXT_ALIGN_CENTER);
         return;
@@ -2126,7 +2445,9 @@ void glim_ui_start(lv_obj_t *screen)
 void glim_ui_set_active(bool active)
 {
     G.active = active && G.started;
-    if (G.active) G.dirty = true;
+    if (G.active) {
+        G.dirty = true;
+    }
 }
 
 // Host preview: a page with demo data (node -1: all systems) or the setup
@@ -2149,7 +2470,9 @@ void glim_ui_preview(int page, int node, bool demo)
     }
     G.fleet = node < 0;
     G.node_key[0] = 0;
-    if (!G.fleet) strlcpy(G.node_key, G.snap->node.id, sizeof(G.node_key));
+    if (!G.fleet) {
+        strlcpy(G.node_key, G.snap->node.id, sizeof(G.node_key));
+    }
     G.history_count = 0;
     for (int i = 0; i < 24; ++i) {
         G.history[i] = 18 + 9 * sinf(i * 0.55f) + (i % 3) * 2;
@@ -2163,14 +2486,18 @@ void glim_ui_preview(int page, int node, bool demo)
 
 void glim_ui_preview_overlay(int which)
 {
-    if (which == 0) picker_cb(nullptr);
-    else if (which == 1) open_form();
-    else if (which == 2) {
+    if (which == 0) {
+        picker_cb(nullptr);
+    } else if (which == 1) {
+        open_form();
+    } else if (which == 2) {
         load_draft();
         open_editor(&G.draft[2], FIELD_TITLES[2], 240, false, nullptr, open_form);
     } else if (which == 3) {  // the first collector node, in its form
         readNodeConfiguration(*G.cfg);
-        if (G.cfg->count) begin_node(G.cfg->nodes[0], true);
+        if (G.cfg->count) {
+            begin_node(G.cfg->nodes[0], true);
+        }
         rebuild();
     } else if (which == 4) {
         show_popup("Virtual host \xC2\xB7 critical", "Disk sda reports 3 reallocated sectors", RED, nullptr);
@@ -2179,6 +2506,6 @@ void glim_ui_preview_overlay(int which)
         G.ops_tab = 1;
         rebuild();
         if (which == 6 && G.ops->nTasks) open_chat(G.ops->systems[G.ops->tasks[0].system].id, G.ops->tasks[0].id, true,
-                                                    G.ops->tasks[0].title);
+                                                       G.ops->tasks[0].title);
     }
 }
