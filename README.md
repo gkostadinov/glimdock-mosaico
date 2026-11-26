@@ -16,7 +16,7 @@ bootloader, Vibe Mode and their settings alone.
 | **Glimdock** | Homelab dashboard for a [Glimdock](https://github.com/gkostadinov/glimdock) collector: hosts, services, alerts, operations and the Kordlet agent chat. |
 | **Home** | Wall display for a self-hosted Swifty Home hub: rooms, lights, music, TV and plugs, paired with a one-time display code. |
 | **Swifty** | Voice and text assistant: any OpenAI-compatible model, push-to-talk speech recognition over WebSocket, optional Tavily web search, and tools to open apps and drive the board (lights, IR TV remote, Interaction board). |
-| **Camera** | Viewfinder, filters and photos for the camera module; finds front or rear by itself, gallery, NAS sync. |
+| **Camera** | Viewfinder, filters and photos for the camera module; finds front or rear by itself, gallery (tap for the photo alone, double-tap or pinch to zoom), NAS sync. |
 | **Files** | The board's NAND storage and SMB shares, with image and text previews. |
 | **Tools** | Torch, spirit level, compass, calculator, the Interaction module (buttons, PIR, light sensor, LEDs, IR remote) and a USB webcam (UVC, MJPEG 1280 × 720 or 640 × 480). |
 | **Settings** | Brightness, haptics, auto-rotate, the panel's corner radius, time zone and camera options. |
