@@ -92,6 +92,13 @@ void set_line_color(lv_obj_t *o, lv_color_t c);
 void set_shadow_color(lv_obj_t *o, lv_color_t c);
 void set_shadow_opa(lv_obj_t *o, lv_opa_t opa);
 
+// The fingers on the panel, for two-finger gestures (pinch). LVGL's pointer
+// follows only the first; the shell notes them all on every touch read.
+// Read on the LVGL task: touches() fills up to two points and returns how
+// many fingers are down (0 where nothing notes them, as in the preview).
+void note_touches(int count, const lv_point_t *points);
+int touches(lv_point_t points[2]);
+
 // Segmented capsule with a springing indicator (selected -1: none yet).
 // Sends VALUE_CHANGED.
 lv_obj_t *capsule(lv_obj_t *parent, int x, int y, int w, int h, const char *const *labels, int count, int selected,

@@ -562,6 +562,29 @@ void set_shadow_opa(lv_obj_t *o, lv_opa_t opa)
     }
 }
 
+namespace {
+struct {
+    int count = 0;
+    lv_point_t points[2] = {};
+} fingers;
+}  // namespace
+
+void note_touches(int count, const lv_point_t *points)
+{
+    fingers.count = std::max(0, count);
+    for (int i = 0; i < std::min(count, 2); ++i) {
+        fingers.points[i] = points[i];
+    }
+}
+
+int touches(lv_point_t points[2])
+{
+    for (int i = 0; i < std::min(fingers.count, 2); ++i) {
+        points[i] = fingers.points[i];
+    }
+    return fingers.count;
+}
+
 // ---- capsule -------------------------------------------------------------------
 namespace {
 struct CapsuleState {

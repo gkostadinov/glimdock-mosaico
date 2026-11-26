@@ -58,6 +58,7 @@ struct {
               *files_screen = nullptr, *tools_screen = nullptr, *gallery_screen = nullptr;
     lv_obj_t *home_screen = nullptr, *home_frame = nullptr;
     lv_indev_read_cb_t touch_read = nullptr;
+    esp_lcd_touch_handle_t touch = nullptr;
     bool touch_pressed = false;
 } shell;
 
@@ -208,9 +209,102 @@ bool is_control(lv_obj_t *o)
     return false;
 }
 
+// RPC 48: a scripted touch, to test gestures (a pinch takes two fingers)
+// without a finger on the glass. Keyframes of 11 bytes, little endian: the
+// time from the start in ms (u16), the fingers down (0 to 2), then two points
+// (x, y: i16). Between keyframes with the same fingers the points move in a
+// straight line. The panel is ignored until the last keyframe.
+struct TouchKey {
+    int ms, n;
+    lv_point_t p[2];
+};
+struct {
+    TouchKey keys[32];
+    int count = 0;
+    std::atomic<bool> pending{false}, running{false};
+    int64_t start = 0;
+    lv_point_t last = {};
+} script;
+
+esp_err_t touch_script_rpc(const esp_iris_rpc_request_t *request, uint8_t *, size_t, size_t *size, void *)
+{
+    *size = 0;
+    const size_t n = request->payload_size / 11;
+    if (!n || n > std::size(script.keys) || request->payload_size % 11) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (script.pending || script.running) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const auto u16 = [](const uint8_t *b) {
+        return int(b[0] | b[1] << 8);
+    };
+    for (size_t i = 0; i < n; ++i) {
+        const uint8_t *b = request->payload + i * 11;
+        TouchKey &k = script.keys[i];
+        k.ms = u16(b), k.n = std::min<int>(b[2], 2);
+        for (int f = 0; f < 2; ++f) {
+            k.p[f] = {int16_t(u16(b + 3 + f * 4)), int16_t(u16(b + 5 + f * 4))};
+        }
+    }
+    script.count = int(n);
+    script.pending = true;  // the touch read starts it
+    return ESP_OK;
+}
+
+// Replaces what the panel read with the script's fingers at this moment.
+void play_touch_script(lv_indev_data_t *data)
+{
+    if (script.pending) {
+        script.pending = false;
+        script.running = true;
+        script.start = esp_timer_get_time();
+    }
+    const int ms = int((esp_timer_get_time() - script.start) / 1000);
+    int k = 0;
+    while (k + 1 < script.count && script.keys[k + 1].ms <= ms) {
+        ++k;
+    }
+    const TouchKey &a = script.keys[k];
+    lv_point_t p[2] = {a.p[0], a.p[1]};
+    if (k + 1 < script.count && script.keys[k + 1].n == a.n) {
+        const TouchKey &b = script.keys[k + 1];
+        const float t = float(ms - a.ms) / float(std::max(1, b.ms - a.ms));
+        for (int f = 0; f < 2; ++f) {
+            p[f] = {int32_t(lroundf(a.p[f].x + (b.p[f].x - a.p[f].x) * t)), int32_t(lroundf(a.p[f].y + (b.p[f].y - a.p[f].y) * t))};
+        }
+    }
+    if (k + 1 >= script.count) {
+        script.running = false;  // the last keyframe: back to the panel
+    }
+    if (a.n) {
+        script.last = p[0];
+    }
+    data->point = script.last;
+    data->state = a.n ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    mui::note_touches(a.n, p);
+}
+
 void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
     shell.touch_read(indev, data);
+    // Every finger, for pinch: the adapter passes LVGL the first only, and
+    // reading the touch's last report again does not consume it.
+    if (shell.touch) {
+        esp_lcd_touch_point_data_t t[2] = {};
+        uint8_t n = 0;
+        lv_point_t p[2];
+        if (esp_lcd_touch_get_data(shell.touch, t, &n, 2) != ESP_OK || data->state != LV_INDEV_STATE_PRESSED) {
+            n = 0;
+        }
+        for (int i = 0; i < n; ++i) {
+            p[i] = {int32_t(t[i].x), int32_t(t[i].y)};
+        }
+        mui::note_touches(n, p);
+    }
+    if (script.pending || script.running) {
+        play_touch_script(data);
+    }
     const bool pressed = data->state == LV_INDEV_STATE_PRESSED;
     if (pressed != shell.touch_pressed) {
         shell.touch_pressed = pressed;
@@ -1340,6 +1434,9 @@ extern "C" esp_err_t mosaico_shell_start(void)
     lv_indev_t *touch = bsp_display_get_input_dev();
     if (touch) {
         shell.touch_read = lv_indev_get_read_cb(touch);
+        if (bsp_touch_new(bsp_display_get_rotation(), &shell.touch) != ESP_OK) {  // the one the BSP made
+            shell.touch = nullptr;
+        }
         lv_indev_set_read_cb(touch, touch_read);
         // A pulse when a tap is a click on a control (LVGL sends no click for a
         // scroll), or a long press that does something: not for every touch.
@@ -1396,6 +1493,7 @@ extern "C" esp_err_t mosaico_shell_start(void)
     boot_stage("screenshot");
     esp_iris_rpc_register(0x4744, 30, open_rpc, nullptr);
     esp_iris_rpc_register(0x4744, 43, webcam_mode::test_rpc, nullptr);
+    esp_iris_rpc_register(0x4744, 48, touch_script_rpc, nullptr);
     // 47: as the AI key, for timing the voice start from anywhere. Payload 1:
     // past its hold time (opens Swifty when needed, talks); 0: released; 2: a
     // real press (key down, the hold 300 ms later); 3: as a touch (activity).
