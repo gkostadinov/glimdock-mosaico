@@ -55,6 +55,11 @@ extern "C" void glimdock_app_open(lv_obj_t *screen)
     glim_ui_set_active(true);
 }
 
+extern "C" void glimdock_app_select(int page)
+{
+    glim_ui_select(page);
+}
+
 extern "C" void glimdock_app_set_active(bool value)
 {
     glim_ui_set_active(value && started);

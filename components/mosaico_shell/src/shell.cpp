@@ -335,9 +335,13 @@ esp_err_t open_rpc(const esp_iris_rpc_request_t *request, uint8_t *, size_t, siz
     if (!bsp_display_lock(1000)) {
         return ESP_ERR_TIMEOUT;
     }
-    // Tools may name its tab too (a second byte: 0 torch ... 4 the Interaction board).
+    // Tools may name its tab too (a second byte: 0 torch ... 4 the Interaction
+    // board), and Glimdock its page (0 Systems, 1 Clock, ... 10 Agents).
     if (request->payload_size >= 2 && request->payload[0] == uint8_t(ShellApp::Tools)) {
         tools_app_select(request->payload[1]);
+    }
+    if (request->payload_size >= 2 && request->payload[0] == uint8_t(ShellApp::Glimdock)) {
+        glimdock_app_select(request->payload[1]);
     }
     lv_async_call(open_async, reinterpret_cast<void *>(uintptr_t(request->payload[0])));
     bsp_display_unlock();

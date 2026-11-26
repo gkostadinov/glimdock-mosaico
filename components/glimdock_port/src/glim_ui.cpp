@@ -2375,7 +2375,11 @@ void poll(lv_timer_t *)
     if (now - G.last_clock >= 1000) {
         G.last_clock = now;
         update_header();
-        if (G.page == CLOCK) {
+        // The clock shows minutes: a new page on a new minute, not every second.
+        static long shown_minute = -1;
+        const long minute = long(time(nullptr) / 60);
+        if (G.page == CLOCK && minute != shown_minute) {
+            shown_minute = minute;
             G.dirty = true;
         }
     }
@@ -2443,6 +2447,13 @@ void glim_ui_start(lv_obj_t *screen)
     build_chrome();
     rebuild();
     lv_timer_create(poll, 50, nullptr);
+}
+
+void glim_ui_select(int page)
+{
+    if (page >= SYSTEMS && page <= AGENTS && G.started) {
+        open_page(Page(page));
+    }
 }
 
 void glim_ui_set_active(bool active)

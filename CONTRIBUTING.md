@@ -59,12 +59,12 @@ The shell registers RPCs on service `0x4744` (18244), callable with
 | Method | Payload | Reply |
 | --- | --- | --- |
 | 10 | none, or `01 r` / `02 e` / `03 m` | Orientation: accelerometer, gravity, rotation; force a rotation, toggle auto-rotate or set the axis map. |
-| 11 | `01` resets | Frame statistics: frames, render and flush times. |
+| 11 | `01` resets | Frame statistics: frames, render, flush-wait and layout times. |
 | 13, 14 | none | Mark, then CPU per task since the mark. |
 | 15 | seconds (starts) / none (result) | Time spent in every LVGL timer callback, by address (symbolise with `addr2line`). |
 | 16 | none | Internal and DMA memory (free, largest block, lowest, blocks) and every task whose stack is in internal RAM, with its unused bytes. |
 | 24 | none | Camera facing and why. |
-| 30 | app (`00` launcher … `06` Tools, then a Tools tab) | Opens an app. |
+| 30 | app (`00` launcher … `07` Gallery), then a Tools tab or a Glimdock page (`00` Systems, `01` Clock, … `0A` Agents) | Opens an app. |
 | 41, 42 | text / `01`, `00` | Swifty says something / listens. |
 | 43 | seconds, `01` (encode with no computer watching), rotation ÷ 90 + 1, `02` (YUV420) | A timed USB webcam session that ends by itself. |
 | 44 | none | The last webcam session: USB setup, stream commits, frames, the latest control requests. |

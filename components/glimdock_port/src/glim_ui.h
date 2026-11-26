@@ -12,6 +12,8 @@
 void glim_ui_start(lv_obj_t *screen);
 // While inactive the UI is not rebuilt; the network keeps polling.
 void glim_ui_set_active(bool active);
+// Opens a page (0 Systems, 1 Clock, 2 Settings, 3 Overview, ...), as its tab.
+void glim_ui_select(int page);
 
 // Host preview only.
 void glim_ui_preview(int page, int node, bool demo);
