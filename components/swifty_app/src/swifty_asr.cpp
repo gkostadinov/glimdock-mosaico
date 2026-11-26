@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "swifty_asr.h"
 
+#include <errno.h>
 #include <math.h>
 #include <string.h>
 
@@ -17,10 +18,12 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_tls_errors.h"
+#include "esp_transport.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/idf_additions.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "swifty_config.h"
 
@@ -56,6 +59,8 @@ struct State {
     std::atomic<bool> idle_dead{false};    // the waiting connection was dropped
     std::atomic<int64_t> warm_until{0};    // keep one ready until then (esp_timer us)
     TaskHandle_t keeper = nullptr;
+    // Timing for the log: when the socket was opened and when the press came.
+    std::atomic<int64_t> opened_at{0}, pressed_at{0};
 } S;
 
 // ---- loudness: ESP-Claw's envelope (noise floor tracking, compressed level) -------------
@@ -181,6 +186,7 @@ void handle_text(const std::string &text)
         ESP_LOGI(TAG, "%s", event);
     }
     if (!strcmp(event, "task-started")) {
+        ESP_LOGI(TAG, "recognising %lld ms after the press", (long long)((esp_timer_get_time() - S.pressed_at) / 1000));
         xEventGroupSetBits(S.bits, STARTED);
     } else if (!strcmp(event, "task-finished")) {
         xEventGroupSetBits(S.bits, FINISHED);
@@ -270,7 +276,8 @@ void on_event(void *, esp_event_base_t, int32_t id, void *data)
     auto *e = static_cast<esp_websocket_event_data_t *>(data);
     switch (id) {
     case WEBSOCKET_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "connected%s", S.active ? "" : " (ready for the next press)");
+        ESP_LOGI(TAG, "connected in %lld ms%s", (long long)((esp_timer_get_time() - S.opened_at) / 1000),
+                 S.active ? "" : " (ready for the next press)");
         S.idle_dead = false;
         xEventGroupSetBits(S.bits, CONNECTED);
         break;
@@ -376,6 +383,7 @@ void close_socket()
 bool open_socket(const Config &c)
 {
     std::lock_guard<std::mutex> g(S.socket_lock);
+    S.opened_at = esp_timer_get_time();
     esp_websocket_client_config_t ws = {};
     ws.uri = c.asr_url.c_str();
     ws.buffer_size = 8192;
@@ -385,6 +393,7 @@ bool open_socket(const Config &c)
     // screen froze for its length when the mic started.
     ws.task_prio = 2;
     ws.task_stack = 6144;
+    ws.task_name = "swifty-ws";  // its connects run in a helper (__wrap_esp_transport_connect)
     ws.user_agent = "swifty-mosaico";
     if (!S.ca.empty()) {
         ws.cert_pem = S.ca.c_str();
@@ -463,6 +472,11 @@ constexpr int64_t WARM_US = 180 * 1000000LL;  // keep a connection ready this lo
 void keeper_task(void *)
 {
     int64_t retry_at = 0;
+    // Failed connections retry later each time (3, 6, 12, 24, then every 60 s):
+    // each attempt is a ~1.3 s TLS handshake, and when memory is short every
+    // one fails, which kept a core busy and slowed the whole board.
+    int failures = 0;
+    const auto backoff = [&failures] { return std::min<int64_t>(60, 3LL << std::min(failures++, 4)) * 1000000LL; };
     while (esp_timer_get_time() < S.warm_until.load()) {
         if (!S.active) {
             bool missing, dropped;
@@ -481,15 +495,17 @@ void keeper_task(void *)
                 S.idle_dead = false;
                 xEventGroupClearBits(S.bits, CONNECTED);
                 if (!open_socket(c)) {
-                    retry_at = now + 10 * 1000000LL;
+                    retry_at = now + std::max<int64_t>(10 * 1000000LL, backoff());
                 } else {
                     // Connected, failed, or a press took it over (up to 12 s).
                     for (int i = 0; i < 120 && !S.active && !S.idle_dead && !(xEventGroupGetBits(S.bits) & CONNECTED); ++i) {
                         vTaskDelay(pdMS_TO_TICKS(100));
                     }
-                    if (!S.active && !(xEventGroupGetBits(S.bits) & CONNECTED)) {
+                    if (xEventGroupGetBits(S.bits) & CONNECTED) {
+                        failures = 0;
+                    } else if (!S.active) {
                         close_socket();  // did not connect: again in a while
-                        retry_at = esp_timer_get_time() + (S.idle_dead ? 3 : 15) * 1000000LL;
+                        retry_at = esp_timer_get_time() + (S.idle_dead ? backoff() : std::max<int64_t>(15 * 1000000LL, backoff()));
                     }
                 }
             }
@@ -532,6 +548,7 @@ bool asr_start(const AsrEvents &events)
     if (S.active) {
         return false;
     }
+    S.pressed_at = esp_timer_get_time();
     const Config c = config();
     if (!c.asr_ready()) {
         return false;
@@ -660,3 +677,44 @@ void asr_cancel()
 }
 
 }  // namespace swifty
+
+// The websocket client connects (DNS, TCP, TLS, upgrade) while holding its own
+// client lock. A moment's contention with Wi-Fi (23) or lwIP (18) on lwIP's
+// lock raises its task to their priority, and FreeRTOS only drops an inherited
+// priority once a task holds no mutex: the ~1.3 s handshake then ran at 18-23
+// and froze the screen for 0.5-0.7 s at every reconnect (about once a minute
+// while Swifty is open). The speech socket's connect runs in a helper task that
+// holds no lock while its own task waits (linker --wrap, see CMakeLists.txt).
+namespace {
+struct Connect {
+    esp_transport_handle_t t;
+    const char *host;
+    int port, timeout_ms, result, err;
+    SemaphoreHandle_t done;
+};
+}  // namespace
+
+extern "C" int __real_esp_transport_connect(esp_transport_handle_t t, const char *host, int port, int timeout_ms);
+
+extern "C" int __wrap_esp_transport_connect(esp_transport_handle_t t, const char *host, int port, int timeout_ms)
+{
+    if (strcmp(pcTaskGetName(nullptr), "swifty-ws") != 0) {
+        return __real_esp_transport_connect(t, host, port, timeout_ms);
+    }
+    static SemaphoreHandle_t done = xSemaphoreCreateBinary();  // one speech socket at a time
+    Connect c = {t, host, port, timeout_ms, -1, 0, done};
+    // An internal stack, as the websocket task's: TLS may hand stack buffers to DMA.
+    if (xTaskCreatePinnedToCore(
+    [](void *arg) {
+    Connect *c = static_cast<Connect *>(arg);
+        c->result = __real_esp_transport_connect(c->t, c->host, c->port, c->timeout_ms);
+        c->err = errno;
+        xSemaphoreGive(c->done);  // c is gone after this
+        vTaskDelete(nullptr);
+    },
+    "swifty-tls", 6144, &c, 2, nullptr, tskNO_AFFINITY) != pdPASS)
+    return __real_esp_transport_connect(t, host, port, timeout_ms);
+    xSemaphoreTake(done, portMAX_DELAY);
+    errno = c.err;
+    return c.result;
+}

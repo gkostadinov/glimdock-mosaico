@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <string>
 
 namespace swifty {
 
@@ -30,8 +31,16 @@ public:
     void set_glow(bool glow);  // the soft halo behind the bird (on by default)
     void set_level(float level);  // microphone loudness 0..1 while listening
     void step(float dt);          // seconds
+    // Doing something on purpose (listening, thinking, talking, a shot, the
+    // mic's level): worth a higher frame rate than the idle sway.
+    bool busy() const;
+    // Where render time went since the last call (per frame): for tuning.
+    std::string stats(bool reset);
     // Draws into a size x size BGRA buffer (LVGL ARGB8888, straight alpha).
     void render(uint8_t *bgra);
+    // The same, premultiplied (LVGL ARGB8888_PREMULTIPLIED): no division per
+    // pixel, for the animation (render() costs ~4 ms more a frame on the board).
+    void render_premultiplied(uint8_t *bgra);
     int size() const;
 
 private:

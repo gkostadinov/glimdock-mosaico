@@ -454,10 +454,14 @@ std::atomic<bool> ai_holding{false};
 void swifty_listen_async(void *on)
 {
     if (on) {
+        const int64_t t0 = esp_timer_get_time();
         if (shell.current != ShellApp::Swifty) {
             shell_show(ShellApp::Swifty);
         }
+        const int64_t t1 = esp_timer_get_time();
         swifty_app_talk(true);
+        ESP_LOGI(TAG, "AI key: Swifty shown in %lld ms, listening %lld ms later", (long long)((t1 - t0) / 1000),
+                 (long long)((esp_timer_get_time() - t1) / 1000));
     } else {
         swifty_app_talk(false);
     }
@@ -470,6 +474,13 @@ void ai_key_double(void *, void *)
         lv_async_call(open_async, reinterpret_cast<void *>(uintptr_t(ShellApp::Swifty)));
         bsp_display_unlock();
     }
+}
+
+// The key is down: a click goes to the launcher, a hold talks. Start the
+// speech connection now, so a hold finds it (nearly) ready.
+void ai_key_down(void *, void *)
+{
+    swifty_app_prewarm(true);
 }
 
 void ai_key_hold(void *, void *)
@@ -504,13 +515,22 @@ void start_ai_key()
     // Click: the launcher (as before). Double click: Swifty. Hold: talk to Swifty.
     // The hold starts listening after 0.45 s (the button default, 1.5 s, felt
     // as if nothing happened).
-    iot_button_set_param(buttons[BSP_BUTTON_AI], BUTTON_LONG_PRESS_TIME_MS, reinterpret_cast<void *>(uintptr_t(450)));
+    // Hold to talk: 300 ms tells a hold from a click (under ~200 ms) and starts
+    // listening a third sooner than the 450 ms it was.
+    iot_button_set_param(buttons[BSP_BUTTON_AI], BUTTON_LONG_PRESS_TIME_MS, reinterpret_cast<void *>(uintptr_t(300)));
     iot_button_register_cb(buttons[BSP_BUTTON_AI], BUTTON_SINGLE_CLICK, nullptr, ai_key_clicked, nullptr);
     iot_button_register_cb(buttons[BSP_BUTTON_AI], BUTTON_DOUBLE_CLICK, nullptr, ai_key_double, nullptr);
+    iot_button_register_cb(buttons[BSP_BUTTON_AI], BUTTON_PRESS_DOWN, nullptr, ai_key_down, nullptr);
     iot_button_register_cb(buttons[BSP_BUTTON_AI], BUTTON_LONG_PRESS_START, nullptr, ai_key_hold, nullptr);
     iot_button_register_cb(buttons[BSP_BUTTON_AI], BUTTON_PRESS_UP, nullptr, ai_key_up, nullptr);
 }
 }  // namespace
+
+// The camera apps and webcam mode: no speech connection kept meanwhile.
+static bool camera_screen()
+{
+    return shell.current == ShellApp::Camera || shell.current == ShellApp::Gallery || usb_webcam_owns_usb();
+}
 
 void shell_show(ShellApp app)
 {
@@ -524,7 +544,9 @@ void shell_show(ShellApp app)
     tools_app_set_active(false);
     gallery_app_set_active(false);
     shell.current = app;
+    const int64_t t0 = esp_timer_get_time();
     save_app(app);
+    const int64_t t1 = esp_timer_get_time();
     switch (app) {
     case ShellApp::Glimdock:
         lv_screen_load(shell.glim_screen);
@@ -563,7 +585,9 @@ void shell_show(ShellApp app)
         break;
     }
     static const char *const NAMES[SHELL_APPS] = {"launcher", "Glimdock", "Home", "Camera", "Swifty", "Files", "Tools", "Gallery"};
-    ESP_LOGI(TAG, "showing %s", NAMES[int(app) % SHELL_APPS]);
+    ESP_LOGI(TAG, "showing %s (saving it %lld ms, opening %lld ms)", NAMES[int(app) % SHELL_APPS], (long long)((t1 - t0) / 1000),
+             (long long)((esp_timer_get_time() - t1) / 1000));
+    swifty_app_prewarm(!camera_screen());  // at once: a press right after leaving the camera finds it ready sooner
 }
 
 namespace {
@@ -1013,6 +1037,7 @@ void worker(void *arg)
 {
     if (arg) {
         vTaskDelay(pdMS_TO_TICKS(500));  // let a reply over ESP-Iris go out first
+        swifty_app_prewarm(false);  // the webcam needs the internal memory its task holds
         if (usb_webcam_start() == ESP_OK) {
             camera_app_set_frame_sink(usb_webcam_push, view);
         }
@@ -1169,9 +1194,10 @@ extern "C" esp_err_t mosaico_shell_start(void)
     adopt_amoled_once();
     boot_stage("display start");
     // Glimdock's loop() and the TrueType rasterizer run on the LVGL task; the
-    // adapter's default 8 KB stack overflowed (CPU lockup resets).
+    // adapter's default 8 KB stack overflowed (CPU lockup resets). Every app
+    // opened peaks at ~6.5 KB (RPC 16); 32 KB kept 26 KB of internal RAM idle.
     bsp_display_config_t display_config = BSP_DISPLAY_DEFAULT_CONFIG();
-    display_config.task_stack_size = 32 * 1024;
+    display_config.task_stack_size = 20 * 1024;
     display_config.buffer_height = 8;  // replaced by use_internal_draw_buffers
     // TE sync waits for a fresh panel refresh before every flush; with strip
     // buffers a full screen then took ~20 refreshes and painted top to bottom.
@@ -1324,6 +1350,14 @@ extern "C" esp_err_t mosaico_shell_start(void)
         lv_indev_set_scroll_limit(touch, 20);
     }
     lv_timer_create(refresh_launcher, 1000, nullptr);
+    // A speech connection kept ready on every screen, so a press of the AI key
+    // starts recognising at once (a new one takes ~1.3 s: the server's
+    // certificate chain is verified in software and it does not resume
+    // sessions). Let go in the camera apps and webcam mode, which need the
+    // internal memory its task holds. shell_show switches it at once too.
+    lv_timer_create([](lv_timer_t *) {
+        swifty_app_prewarm(!camera_screen());
+    }, 20000, nullptr);
     lv_timer_create([](lv_timer_t *) {
         if (PairRequest *r = pending_pair.exchange(nullptr)) {
             ESP_LOGI(TAG, "pairing with Swifty Home at %s", r->hub);
@@ -1358,6 +1392,34 @@ extern "C" esp_err_t mosaico_shell_start(void)
     boot_stage("screenshot");
     esp_iris_rpc_register(0x4744, 30, open_rpc, nullptr);
     esp_iris_rpc_register(0x4744, 43, webcam_mode::test_rpc, nullptr);
+    // 47: as the AI key, for timing the voice start from anywhere. Payload 1:
+    // past its hold time (opens Swifty when needed, talks); 0: released; 2: a
+    // real press (key down, the hold 300 ms later); 3: as a touch (activity).
+    esp_iris_rpc_register(0x4744, 47, [](const esp_iris_rpc_request_t *request, uint8_t *, size_t, size_t *size, void *) {
+        *size = 0;
+        if (request->payload_size < 1) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        const uint8_t what = request->payload[0];
+        if (what == 2) {
+            ai_key_down(nullptr, nullptr);
+        }
+        if (!bsp_display_lock(1000)) {
+            return ESP_ERR_TIMEOUT;
+        }
+        if (what == 3) {
+            lv_display_trigger_activity(nullptr);
+        } else if (what == 2) {
+            lv_timer_t *t = lv_timer_create([](lv_timer_t *) {
+                swifty_listen_async(reinterpret_cast<void *>(1));
+            }, 300, nullptr);
+            lv_timer_set_repeat_count(t, 1);
+        } else {
+            lv_async_call(swifty_listen_async, what ? reinterpret_cast<void *>(1) : nullptr);
+        }
+        bsp_display_unlock();
+        return ESP_OK;
+    }, nullptr);
     // 45: the LVGL loop and CPU per task during the last webcam session.
     esp_iris_rpc_register(0x4744, 45, webcam_diag::rpc, nullptr);
     // 46: the last webcam JPEG, payload a 32-bit offset (little-endian); 0 bytes at its end.

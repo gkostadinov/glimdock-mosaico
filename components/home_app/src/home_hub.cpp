@@ -30,9 +30,14 @@ struct Job {
     uint32_t id;
     HttpRequest request;
 };
+// A finished request, parsed and hashed here on the worker: a reply's JSON
+// (the device lists especially) took up to ~100 ms to parse on the UI task,
+// also while Home was hidden behind another app.
 struct Done {
     uint32_t id;
     HttpResponse response;
+    DocPtr doc;
+    size_t hash = 0;
 };
 
 // One worker serializes HTTP, as the Lua worker did.
@@ -57,8 +62,16 @@ void worker()
         for (auto &header : job.request.headers) {
             std::fill(header.second.begin(), header.second.end(), '\0');
         }
+        Done done{job.id, std::move(response), nullptr, 0};
+        if (!done.response.body.empty()) {
+            done.doc = std::make_shared<JsonDocument>();
+            if (deserializeJson(*done.doc, done.response.body, DeserializationOption::NestingLimit(24))) {
+                done.doc.reset();
+            }
+            done.hash = std::hash<std::string>()(done.response.body);
+        }
         std::lock_guard<std::mutex> lock(mutex);
-        finished.push_back({job.id, std::move(response)});
+        finished.push_back(std::move(done));
     }
 }
 
@@ -78,11 +91,14 @@ void Hub::start()
         worker_started = true;
 #ifdef ESP_PLATFORM
         esp_pthread_cfg_t thread_cfg = esp_pthread_get_default_config();
-        thread_cfg.stack_size = 10 * 1024;  // TLS handshakes
+        thread_cfg.stack_size = 14 * 1024;  // TLS handshakes, then parsing the reply
         thread_cfg.thread_name = "home-http";
-        // Only HTTP runs here (no flash writes: replies are handled on the UI
-        // task), so the stack can live in PSRAM and leave internal DMA memory
-        // to the display's SPI transfers.
+        // Below LVGL's draw threads (3): the default (5) let its TLS handshakes
+        // and reply parsing hold the screen's drawing up.
+        thread_cfg.prio = 2;
+        // Only HTTP and JSON parsing run here (no flash writes: replies are
+        // handled on the UI task), so the stack can live in PSRAM and leave
+        // internal DMA memory to the display's SPI transfers.
         thread_cfg.stack_alloc_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
         esp_pthread_set_cfg(&thread_cfg);
 #endif
@@ -218,16 +234,9 @@ bool Hub::poll()
         }
         Handler handler = std::move(it->second);
         pending_.erase(it);
-        DocPtr doc;
-        if (!done.response.body.empty()) {
-            doc = std::make_shared<JsonDocument>();
-            if (deserializeJson(*doc, done.response.body, DeserializationOption::NestingLimit(24))) {
-                doc.reset();
-            }
-        }
         if (handler) {
-            body_hash_ = std::hash<std::string>()(done.response.body);
-            handler(done.response.code, doc, done.response.error);
+            body_hash_ = done.hash;
+            handler(done.response.code, done.doc, done.response.error);
         }
     }
     const bool changed = status.revision != revision;

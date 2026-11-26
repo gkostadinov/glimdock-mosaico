@@ -20,10 +20,25 @@ holds the checks).
   USB afterwards.
 - **Shutdown handlers must not block**; a blocked restart ends by watchdog and
   leaves USB DMA running into the next boot.
-- **The FreeRTOS tick is 100 Hz**: `pdMS_TO_TICKS()` below 10 ms is 0 ticks, so
-  a short `vTaskDelay` spins. Wait on notifications, or delay whole ticks.
+- **Keep the 1 kHz FreeRTOS tick** (`sdkconfig.defaults`). At 100 Hz any wait
+  under 10 ms rounds to 0 ticks and spins: the LVGL adapter's "sleep until the
+  next timer" took ~45 % of a core at priority 6. Prefer notifications to
+  polling either way.
+- **Internal RAM is the scarce memory.** `malloc()` and `new` go to PSRAM
+  first (`CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0`); ask for internal or DMA
+  memory with `heap_caps_malloc` only where it is needed. TLS handshakes, task
+  stacks and the display's transfers need it: when it ran out, the speech
+  connection failed and retried until the board slowed down. Give tasks that
+  never touch flash a PSRAM stack (`xTaskCreatePinnedToCoreWithCaps`), and
+  check what each app keeps with RPC 16.
 - **Priorities:** tasks at or above LVGL's draw threads (priority 3) can starve
-  the UI. Keep background work at 2 or below unless it blocks quickly.
+  the UI. Keep background work at 2 or below unless it blocks quickly. Swifty's
+  bird renders at 1, below network and TLS work (2); its 10-second log line
+  shows where each frame's time goes. Don't hold a mutex across slow work: a
+  moment's contention raises the holder to the waiter's priority, and FreeRTOS
+  keeps it raised until the task holds no mutex at all (the speech socket's TLS
+  connect ran at 18-23 and froze the screen; it now runs in a helper task). A
+  frame over 500 ms logs the running tasks with their base priorities.
 
 ## Checks
 
@@ -47,6 +62,7 @@ The shell registers RPCs on service `0x4744` (18244), callable with
 | 11 | `01` resets | Frame statistics: frames, render and flush times. |
 | 13, 14 | none | Mark, then CPU per task since the mark. |
 | 15 | seconds (starts) / none (result) | Time spent in every LVGL timer callback, by address (symbolise with `addr2line`). |
+| 16 | none | Internal and DMA memory (free, largest block, lowest, blocks) and every task whose stack is in internal RAM, with its unused bytes. |
 | 24 | none | Camera facing and why. |
 | 30 | app (`00` launcher … `06` Tools, then a Tools tab) | Opens an app. |
 | 41, 42 | text / `01`, `00` | Swifty says something / listens. |
@@ -54,6 +70,7 @@ The shell registers RPCs on service `0x4744` (18244), callable with
 | 44 | none | The last webcam session: USB setup, stream commits, frames, the latest control requests. |
 | 45 | none | The last webcam session's effect on the board: LVGL loop gaps, CPU windows, time per frame by stage. |
 | 46 | 32-bit offset (little-endian) | The last webcam JPEG, 960 bytes at a time. |
+| 47 | `01` held / `00` released / `02` a real press (down, then held 300 ms later) / `03` a touch | As the AI key: opens Swifty when needed and talks. The log times each step (Swifty shown, microphone open, connection, recognition). |
 
 While the USB webcam is on, ESP-Iris is stopped: read 44–46 after it ends.
 

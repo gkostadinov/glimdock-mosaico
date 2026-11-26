@@ -28,6 +28,10 @@ void swifty_app_open(lv_obj_t *screen);
 void swifty_app_set_active(bool active);
 // Push-to-talk from the AI key: pressed starts listening, released sends.
 void swifty_app_talk(bool pressed);
+// A speech connection kept ready for the next press (on), or let go (off;
+// kept while Swifty is open). The shell keeps it while the board is in use,
+// so the AI key starts recognising at once from any screen. Any task.
+void swifty_app_prewarm(bool on);
 // Attach a camera photo (by index) to the next message.
 void swifty_app_attach_photo(int index);
 

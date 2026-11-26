@@ -7,9 +7,11 @@
 #include "swifty_figure.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <algorithm>
+#include <chrono>
 #include <array>
 #include <vector>
 
@@ -326,6 +328,14 @@ struct Figure::Impl {
     } fid;
     std::vector<Bit> bits;
     uint32_t seed = 12345;
+    // profile (Figure::stats): microseconds by part, clear and copy; pixels
+    int64_t prof_put[7] = {}, prof_clear = 0, prof_copy = 0, prof_tested = 0, prof_shaded = 0;
+    int64_t prof_vert = 0, prof_tris = 0;
+    int prof_frames = 0;
+    static int64_t now_us()
+    {
+        return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
     // uniforms that span a frame
     float uC[3] = {0, 0, 0}, uG[3] = {0, 0, 0}, uE[4] = {1, 0, 0, 1};
 
@@ -368,14 +378,22 @@ struct Figure::Impl {
             const float wv = (len2(qx / .77f, (qy + .06f) / .64f) - 1) * .64f;
             const float k = clampf(.5f + 5 * (wv - l), 0, 1), d = mixf(wv, l, k) - .1f * k * (1 - k);
             const float m = (1 - smooth(-x, x, d)) * stepf(0, o[2]);
-            V3 fc = mixv({1, .906f, .769f}, {1, .996f, .976f}, smooth(-.7f, .6f, qy));
-            fc = mixv(fc, {1, .5f, .66f}, uG[2] * .8f * (1 - smooth(.3f, 1.25f, len2((fabsf(qx) - .52f) / .17f, (qy + .3f) / .115f))));
-            fc = fc * (.84f + .16f * smooth(.27f, .43f, len2(fabsf(qx) - .36f, qy - .07f)));
-            fc = fc * (.87f + .13f * smooth(.04f, .2f, len2(qx, (qy + .27f) * 1.3f)));
-            const float f = 1 - std::max(n.z, 0.f);
-            b = mixv(b, {.082f, .196f, .66f}, .4f * f * f);
-            const V3 body = lit(b, {.4f, .47f, .8f}, n, .3f) + ONE * (.2f * p5(std::max(dot(n, {-.5f, .7f, .51f}), 0.f)));
-            c = mixv(body, lit(fc, {.9f, .82f, .86f}, n, .1f), m);
+            // The face mask is 0 over most of the body and 1 inside the face:
+            // light only what shows (both, blended, along the face's edge).
+            V3 body{0, 0, 0}, face{0, 0, 0};
+            if (m < 1) {
+                const float f = 1 - std::max(n.z, 0.f);
+                b = mixv(b, {.082f, .196f, .66f}, .4f * f * f);
+                body = lit(b, {.4f, .47f, .8f}, n, .3f) + ONE * (.2f * p5(std::max(dot(n, {-.5f, .7f, .51f}), 0.f)));
+            }
+            if (m > 0) {
+                V3 fc = mixv({1, .906f, .769f}, {1, .996f, .976f}, smooth(-.7f, .6f, qy));
+                fc = mixv(fc, {1, .5f, .66f}, uG[2] * .8f * (1 - smooth(.3f, 1.25f, len2((fabsf(qx) - .52f) / .17f, (qy + .3f) / .115f))));
+                fc = fc * (.84f + .16f * smooth(.27f, .43f, len2(fabsf(qx) - .36f, qy - .07f)));
+                fc = fc * (.87f + .13f * smooth(.04f, .2f, len2(qx, (qy + .27f) * 1.3f)));
+                face = lit(fc, {.9f, .82f, .86f}, n, .1f);
+            }
+            c = m <= 0 ? body : m >= 1 ? face : mixv(body, face, m);
             break;
         }
         case 2: {
@@ -439,11 +457,20 @@ struct Figure::Impl {
     // ---- rasterizer ----------------------------------------------------------------------
     void put(const Part &mesh, const M4 &m, const Uniforms &u, bool blend, bool depth_test)
     {
+        const int pi = &mesh == &BALL ? 0 : &mesh == &EYEBALL ? 1 : &mesh == &LEAF ? 2 : &mesh == &WING ? 3
+                       : &mesh == &HOOP ? 4 : &mesh == &HAZE ? 5 : 6;
+        const int64_t t0 = now_us();
+        put_mesh(mesh, m, u, blend, depth_test);
+        prof_put[pi] += now_us() - t0;
+    }
+    void put_mesh(const Part &mesh, const M4 &m, const Uniforms &u, bool blend, bool depth_test)
+    {
         const M3 nm = nmat(m);
         const M4 mvp = mul(view, m);
         if (int(verts.size()) < mesh.vcount) {
             verts.resize(mesh.vcount);
         }
+        const int64_t v0 = now_us();
         const float half = rw * .5f;
         for (int i = 0; i < mesh.vcount; ++i) {
             const float *s = &VS[size_t(mesh.vfrom + i) * 9];
@@ -477,6 +504,8 @@ struct Figure::Impl {
             v.o[0] = s[6] * iw, v.o[1] = s[7] * iw, v.o[2] = s[8] * iw;
             v.w[0] = wx * iw, v.w[1] = wy * iw, v.w[2] = wz * iw;
         }
+        prof_vert += now_us() - v0;
+        prof_tris += mesh.icount / 3;
         const uint16_t *idx = &IS[size_t(mesh.ifrom)];
         for (int t = 0; t < mesh.icount; t += 3) {
             tri(verts[idx[t] - mesh.vfrom], verts[idx[t + 1] - mesh.vfrom], verts[idx[t + 2] - mesh.vfrom], u, blend, depth_test);
@@ -500,13 +529,38 @@ struct Figure::Impl {
             return;
         }
         const float inv = 1 / area;
+        // Each barycentric weight is linear along a row (A px + B): the row's
+        // pixels inside the triangle form one span. Walking only that span (a
+        // hair wider each side; the exact test below still decides) skips the
+        // bounding box's empty corners, which were ~15 tests per shaded pixel.
+        const float A0 = (b.sy - c.sy) * inv, A1 = (c.sy - a.sy) * inv, A2 = -(A0 + A1);
+        // a row's bounds are -B / A: the reciprocals once per triangle, not per row
+        const float R0 = fabsf(A0) > 1e-9f ? 1 / A0 : 0, R1 = fabsf(A1) > 1e-9f ? 1 / A1 : 0, R2 = fabsf(A2) > 1e-9f ? 1 / A2 : 0;
         for (int y = y0; y <= y1; ++y) {
             const float py = y + .5f;
-            for (int x = x0; x <= x1; ++x) {
+            const float B0 = (b.sx * (c.sy - py) - c.sx * (b.sy - py)) * inv, B1 = (c.sx * (a.sy - py) - a.sx * (c.sy - py)) * inv,
+                        B2 = 1 - B0 - B1;
+            float lo = float(x0), hi = float(x1);
+            auto limit = [&](float A, float R, float B) {  // A (x + .5) + B >= 0
+                if (A > 1e-9f) {
+                    lo = std::max(lo, -B * R - .55f);
+                } else if (A < -1e-9f) {
+                    hi = std::min(hi, -B * R - .45f);
+                } else if (B < -1e-3f) {
+                    hi = lo - 1;    // parallel to the row and outside it
+                }
+            };
+            limit(A0, R0, B0), limit(A1, R1, B1), limit(A2, R2, B2);
+            if (!(hi >= lo)) {
+                continue;
+            }
+            const int xs = std::max(x0, int(floorf(lo))), xe = std::min(x1, int(ceilf(hi)));
+            for (int x = xs; x <= xe; ++x) {
                 const float px = x + .5f;
                 const float w0 = ((b.sx - px) * (c.sy - py) - (b.sy - py) * (c.sx - px)) * inv;
                 const float w1 = ((c.sx - px) * (a.sy - py) - (c.sy - py) * (a.sx - px)) * inv;
                 const float w2 = 1 - w0 - w1;
+                ++prof_tested;
                 if (w0 < 0 || w1 < 0 || w2 < 0) {
                     continue;
                 }
@@ -515,6 +569,7 @@ struct Figure::Impl {
                 if (depth_test && z >= zb) {
                     continue;
                 }
+                ++prof_shaded;
                 const float iw = 1 / (w0 * a.iw + w1 * b.iw + w2 * c.iw);
                 auto lerp = [&](const float * pa, const float * pb, const float * pc, float * out) {
                     for (int i = 0; i < 3; ++i) {
@@ -720,12 +775,15 @@ struct Figure::Impl {
 
     void draw()
     {
+        const int64_t t0 = now_us();
         if (glow && halo.size() == color.size()) {
             memcpy(color.data(), halo.data(), color.size());
         } else {
             std::fill(color.begin(), color.end(), 0);
         }
         std::fill(depth.begin(), depth.end(), 1e30f);
+        prof_clear += now_us() - t0;
+        ++prof_frames;
         const float flap = P[FA] * sinf(ph), by = P[Y] + .045f * sinf(clock * 1.9f) - P[FA] * .1f * cosf(ph),
                     bx = P[X] + .02f * sinf(clock * 1.1f), q = 1 + P[SQ] + .012f * sinf(clock * 2.6f);
         const M4 R = trs(bx, by, 0, P[PIT], P[YAW] + spin, P[ROL], 1 / sqrtf(q), q, 1 / sqrtf(q));
@@ -749,7 +807,8 @@ struct Figure::Impl {
             u.f[1] = P[GL] * .5f, u.f[3] = .15f;
             put(QUAD, trs(bx * .7f, by * .7f + .05f, -2, 0, 0, 0, 2.6f), u, true, false);
         }
-        put(BALL, B(trs(0, 0, 0, 0, 0, 0, 1, .98f, .95f)), U(1), false, true);
+        // Opaque parts front to back: the depth test then turns away hidden
+        // body pixels before they are shaded (the body is the costly shader).
         const float tf = P[TF], low = std::max(0.f, -tf);
         for (int si = 0; si < 2; ++si) {
             const float s = si ? 1.f : -1.f;
@@ -757,6 +816,22 @@ struct Figure::Impl {
             const float open = sat(P[EO] - bl - std::max(0.f, s * P[EQ])), wide = .27f * (1 + .1f * P[EW]);
             uE[0] = open, uE[1] = P[EH], uE[2] = P[ES], uE[3] = s;
             put(EYEBALL, B(trs(s * .324f, .063f, .795f, -.07f, s * .369f, 0, wide, wide * (1 + .06f * P[EW]), .15f)), U(2, 1 / wide), false, true);
+        }
+        // the beak opens on a hinge, with the dark of the mouth behind it
+        Uniforms beak = U(0);
+        beak.a = BEAK[0], beak.z = BEAK[1], beak.s = WARM, beak.f[0] = .55f;
+        put(LEAF, B(trs(0, -.15f, .84f, PI / 2 + .42f - P[BK] * .2f, 0, 0, .165f, .36f, .095f)), beak, false, true);
+        Uniforms chin = U(0);
+        chin.a = CHIN[0], chin.z = CHIN[1], chin.s = WARM, chin.f[0] = .2f;
+        put(LEAF, B(trs(0, -.21f, .82f, PI / 2 + .85f + P[BK] * .8f, 0, 0, .12f, .27f, .065f)), chin, false, true);
+        if (P[BK] > .05f) {
+            Uniforms mouth = U(0);
+            mouth.a = MOUTH[0], mouth.z = MOUTH[1], mouth.s = WARM;
+            put(EYEBALL, B(trs(0, -.21f, .9f, 0, 0, 0, .085f, .02f + .06f * P[BK], .05f)), mouth, false, true);
+        }
+        put(BALL, B(trs(0, 0, 0, 0, 0, 0, 1, .98f, .95f)), U(1), false, true);
+        for (int si = 0; si < 2; ++si) {
+            const float s = si ? 1.f : -1.f;
             // a wing: lifted at the shoulder, swept back, twisted, bent by its own beat
             const M4 W = trs(-.7f, .05f, -.2f, P[WT], -P[WS], .89f - (s < 0 ? P[WL] : P[WR]) - flap, 1);
             Uniforms w = U(3);
@@ -774,18 +849,6 @@ struct Figure::Impl {
         Uniforms crest = U(0);
         crest.a = CREST[0], crest.z = CREST[1], crest.f[0] = .25f, crest.f[1] = .6f, crest.b[1] = P[TW] * 1.2f;
         put(LEAF, B(trs(0, .9f, -.03f, -.12f + low * .5f - tf * .12f, 0, P[TW] * .5f, .1f, .56f * (1 + tf * .1f), .05f)), crest, false, true);
-        // the beak opens on a hinge, with the dark of the mouth behind it
-        Uniforms beak = U(0);
-        beak.a = BEAK[0], beak.z = BEAK[1], beak.s = WARM, beak.f[0] = .55f;
-        put(LEAF, B(trs(0, -.15f, .84f, PI / 2 + .42f - P[BK] * .2f, 0, 0, .165f, .36f, .095f)), beak, false, true);
-        Uniforms chin = U(0);
-        chin.a = CHIN[0], chin.z = CHIN[1], chin.s = WARM, chin.f[0] = .2f;
-        put(LEAF, B(trs(0, -.21f, .82f, PI / 2 + .85f + P[BK] * .8f, 0, 0, .12f, .27f, .065f)), chin, false, true);
-        if (P[BK] > .05f) {
-            Uniforms mouth = U(0);
-            mouth.a = MOUTH[0], mouth.z = MOUTH[1], mouth.s = WARM;
-            put(EYEBALL, B(trs(0, -.21f, .9f, 0, 0, 0, .085f, .02f + .06f * P[BK], .05f)), mouth, false, true);
-        }
         // the orbit and its spark, behind the body where they pass behind it
         const M4 O = mul(trs(bx, by, 0, 0, 0, 0, 1), trs(0, 0, 0, .5f, 0, -.3f, mixf(1.34f, 1.75f, P[OP])));
         const float a = fmodf(ring, TAU), cx = cosf(a), sz = sinf(a);
@@ -867,14 +930,71 @@ void Figure::step(float dt)
 {
     d->step(std::min(dt, .034f));
 }
+bool Figure::busy() const
+{
+    return d->st != Mood::Idle || d->shot.on || d->talk > d->clock || d->level_in > .02f || !d->bits.empty();
+}
 int Figure::size() const
 {
     return d->size;
 }
 
+std::string Figure::stats(bool reset)
+{
+    const double n = d->prof_frames ? d->prof_frames : 1;
+    char s[384];
+    snprintf(s, sizeof(s),
+             "%.1f ms clear, ball %.1f, eyes+mouth %.1f, leaves %.1f, wings %.1f, hoop %.1f, haze %.1f, quads %.1f, copy %.1f; "
+             "%.0f px tested, %.0f shaded; vertices %.1f ms, %.0f triangles",
+             d->prof_clear / n / 1000, d->prof_put[0] / n / 1000, d->prof_put[1] / n / 1000, d->prof_put[2] / n / 1000,
+             d->prof_put[3] / n / 1000, d->prof_put[4] / n / 1000, d->prof_put[5] / n / 1000, d->prof_put[6] / n / 1000,
+             d->prof_copy / n / 1000, d->prof_tested / n, d->prof_shaded / n, d->prof_vert / n / 1000, d->prof_tris / n);
+    if (reset) {
+        for (auto &v : d->prof_put) {
+            v = 0;
+        }
+        d->prof_clear = d->prof_copy = d->prof_tested = d->prof_shaded = 0;
+        d->prof_vert = d->prof_tris = 0;
+        d->prof_frames = 0;
+    }
+    return s;
+}
+
+void Figure::render_premultiplied(uint8_t *bgra)
+{
+    d->draw();
+    const int64_t copy_from = Impl::now_us();
+    const int ss = d->ss, rw = d->rw, n = ss * ss, size = d->size;
+    const uint8_t *c = d->color.data();
+    if (ss == 1) {
+        // Additive glow can leave colour above alpha: clamp to it, as render()'s
+        // straight alpha did (and LVGL's premultiplied blend expects).
+        for (int i = 0, end = size * size; i < end; ++i, c += 4, bgra += 4) {
+            const uint8_t al = c[3];
+            bgra[0] = std::min(c[2], al), bgra[1] = std::min(c[1], al), bgra[2] = std::min(c[0], al), bgra[3] = al;
+        }
+    } else {
+        for (int y = 0; y < size; ++y)
+            for (int x = 0; x < size; ++x) {
+                int sum[4] = {0, 0, 0, 0};
+                for (int j = 0; j < ss; ++j)
+                    for (int i = 0; i < ss; ++i)
+                        for (int k = 0; k < 4; ++k) {
+                            sum[k] += c[((size_t(y) * ss + j) * rw + size_t(x) * ss + i) * 4 + k];
+                        }
+                uint8_t *o = &bgra[(size_t(y) * size + x) * 4];
+                const int al = sum[3] / n;
+                o[0] = uint8_t(std::min(sum[2] / n, al)), o[1] = uint8_t(std::min(sum[1] / n, al)),
+                                                                 o[2] = uint8_t(std::min(sum[0] / n, al)), o[3] = uint8_t(al);
+            }
+    }
+    d->prof_copy += Impl::now_us() - copy_from;
+}
+
 void Figure::render(uint8_t *bgra)
 {
     d->draw();
+    const int64_t copy_from = Impl::now_us();
     const int ss = d->ss, rw = d->rw, n = ss * ss;
     for (int y = 0; y < d->size; ++y)
         for (int x = 0; x < d->size; ++x) {
@@ -890,12 +1010,17 @@ void Figure::render(uint8_t *bgra)
                 o[0] = o[1] = o[2] = o[3] = 0;
                 continue;
             }
+            if (a == 255) {  // opaque (most of the bird): no unpremultiply
+                o[0] = uint8_t(b / n), o[1] = uint8_t(g / n), o[2] = uint8_t(r / n), o[3] = 255;
+                continue;
+            }
             // straight alpha for LVGL
             o[0] = uint8_t(std::min(255, b / n * 255 / a));
             o[1] = uint8_t(std::min(255, g / n * 255 / a));
             o[2] = uint8_t(std::min(255, r / n * 255 / a));
             o[3] = uint8_t(a);
         }
+    d->prof_copy += Impl::now_us() - copy_from;
 }
 
 }  // namespace swifty

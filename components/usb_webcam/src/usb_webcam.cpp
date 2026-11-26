@@ -283,7 +283,7 @@ void stream_task(void *)
         }
     }
     streamer = nullptr;
-    vTaskDelay(2);  // a push or a callback that read the handle just before may still notify it
+    vTaskDelay(pdMS_TO_TICKS(20));  // a push or a callback that read the handle just before may still notify it
     vTaskDeleteWithCaps(nullptr);  // its stack is in PSRAM
 }
 }  // namespace

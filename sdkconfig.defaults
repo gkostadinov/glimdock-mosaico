@@ -79,9 +79,12 @@ CONFIG_LWIP_SNTP_MAX_SERVERS=2
 # The template bootloader (never installed; the board keeps its retained one)
 # must still fit before 0x8000 for the build's size check.
 CONFIG_BOOTLOADER_LOG_LEVEL_ERROR=y
-# Keep internal RAM for ESP-Iris, Wi-Fi and DMA: Glimdock/Home UI objects,
-# strings and JSON go to PSRAM.
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512
+# Keep internal RAM for ESP-Iris, Wi-Fi, TLS and DMA: malloc() always tries
+# PSRAM first. At 512, the apps' small strings and lists (40-120 bytes each)
+# filled internal RAM as they opened, until the speech connection's TLS and the
+# display's transfers failed and the board slowed down. Code that needs
+# internal or DMA memory asks for it (heap_caps_malloc).
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # TLS buffers in PSRAM: two apps keep sessions open, and the display needs
 # internal DMA memory for every SPI transfer.
@@ -118,3 +121,8 @@ CONFIG_NAND_FLASH_ENABLE_BDL=y
 # memory", MBEDTLS_ERR_SSL_HW_ACCEL_FAILED): speech and HTTPS connections
 # dropped at random. The traffic is small; SHA, MPI and ECC stay in hardware.
 # CONFIG_MBEDTLS_HARDWARE_AES is not set
+
+# A 1 ms tick: at 100 Hz any wait under 10 ms rounds to 0 ticks and spins.
+# The LVGL adapter sleeps "until the next timer" (often a few ms), so it span
+# at priority 6, taking ~45 % of a core and starving whatever shared it.
+CONFIG_FREERTOS_HZ=1000

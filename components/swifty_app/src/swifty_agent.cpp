@@ -476,6 +476,9 @@ std::string run_tool(const Call &call, const AgentEvents &ev, Jpeg *photo)
         if (ev.tool) {
             ev.tool("Taking a photo\xE2\x80\xA6");
         }
+        if (ev.camera) {
+            ev.camera();
+        }
         const int index = camera_app_take_photo(15000);  // a cold start resets and opens the sensor
         if (index < 0) {
             return "The camera did not take a photo (is the camera module in the left slot?).";
@@ -492,6 +495,9 @@ std::string run_tool(const Call &call, const AgentEvents &ev, Jpeg *photo)
         return "Took photo " + std::to_string(index + 1) + "; it is shown on the screen and attached in the next message.";
     }
     if (call.name == "show_photo") {
+        if (ev.camera) {
+            ev.camera();
+        }
         const int count = camera_app_photo_count();
         if (!count) {
             return "There are no photos yet.";

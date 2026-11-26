@@ -23,6 +23,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mui.h"
 #include "png.h"
@@ -37,7 +38,10 @@ using namespace swifty;
 
 namespace {
 const char *TAG = "swifty";
-constexpr int W = 480, FIG = 136, CHAT_X = 24, CHAT_Y = 128, CHAT_W = 432, CHAT_H = 270, BUBBLE = 360;
+// The chat starts just below the bird (y -4 to 131): the bird redraws ~12
+// times a second, and any overlap redrew the chat's top bubbles with it, a cost
+// that grew with the conversation.
+constexpr int W = 480, FIG = 136, CHAT_X = 24, CHAT_Y = 132, CHAT_W = 432, CHAT_H = 266, BUBBLE = 360;
 constexpr uint32_t SKY = 0x35B2FF, SKY_HI = 0x7DF3FF, SKY_DEEP = 0x2B5CF2, BUBBLE_ME = 0x1F4FD8, BUBBLE_SWIFTY = 0x161A22;
 constexpr int BARS = 15;
 const int BAR_MAX[BARS] = {18, 22, 28, 36, 44, 52, 58, 64, 58, 52, 44, 36, 28, 22, 18};
@@ -188,6 +192,10 @@ struct {
                                                                                                            *camera_btn = nullptr, *keys_btn = nullptr, *attach_row = nullptr, *entry = nullptr, *entry_ta = nullptr;
     // the reply being written
     lv_obj_t *reply = nullptr, *reply_body = nullptr, *reply_tool = nullptr, *draft = nullptr;
+    // While a reply streams in: its finished paragraphs (rendered once each) and
+    // the one still growing (rendered again on each update).
+    lv_obj_t *reply_done = nullptr, *reply_live = nullptr;
+    size_t reply_done_len = 0;
     std::string reply_text;
     bool reply_dirty = false;
     uint32_t reply_drawn = 0;
@@ -249,7 +257,7 @@ void figure_task(void *)
         fig.step(float(start - last) / 1e6f);
         last = start;
         const int back = U.fig_shown ^ 1;
-        fig.render(U.fig_px[back]);
+        fig.render_premultiplied(U.fig_px[back]);
         busy_us += esp_timer_get_time() - start;
         ++frames;
         post([back] {
@@ -260,11 +268,16 @@ void figure_task(void *)
             }
         });
         if (start - stats > 10000000) {
-            ESP_LOGI(TAG, "figure: %.1f fps, %.1f ms a frame", frames * 1e6 / double(start - stats), busy_us / 1000.0 / frames);
+            ESP_LOGI(TAG, "figure: %.1f fps, %.1f ms a frame (%s)", frames * 1e6 / double(start - stats), busy_us / 1000.0 / frames,
+                     fig.stats(true).c_str());
             stats = start, frames = 0, busy_us = 0;
         }
+        // A frame takes ~40 ms of core 0. 20 fps while the bird does something,
+        // 12.5 at rest, and always a real rest between frames (back to back it
+        // held core 0 at ~90 %, slowing the speech connection and the agent).
         const int64_t spent = (esp_timer_get_time() - start) / 1000;
-        vTaskDelay(pdMS_TO_TICKS(std::max<int64_t>(8, 40 - spent)));
+        const int64_t period = fig.busy() ? 50 : 80;
+        vTaskDelay(pdMS_TO_TICKS(std::max<int64_t>(10, period - spent)));
     }
 }
 
@@ -277,13 +290,13 @@ lv_obj_t *plain(lv_obj_t *parent)
     return o;
 }
 
-void scroll_end()
+void scroll_end(bool animate = true)
 {
     if (!U.chat) {
         return;
     }
     lv_obj_update_layout(U.chat);
-    lv_obj_scroll_to_y(U.chat, LV_COORD_MAX, LV_ANIM_ON);
+    lv_obj_scroll_to_y(U.chat, LV_COORD_MAX, animate ? LV_ANIM_ON : LV_ANIM_OFF);
 }
 
 void update_empty()
@@ -298,6 +311,24 @@ void update_empty()
 
 lv_obj_t *bubble(bool mine)
 {
+    // The chat keeps the latest bubbles only: every one stays in LVGL's tree
+    // (layout, hit tests, its photos in PSRAM), so a long session slowed down.
+    // The agent keeps its own, shorter history.
+    constexpr uint32_t KEEP = 30;
+    while (lv_obj_get_child_count(U.chat) >= KEEP) {
+        lv_obj_t *old = lv_obj_get_child(U.chat, 0);
+        const auto holds = [old](lv_obj_t *o) {
+            for (; o; o = lv_obj_get_parent(o))
+                if (o == old) {
+                    return true;
+                }
+            return false;
+        };
+        if (holds(U.reply) || holds(U.draft)) {
+            break;
+        }
+        lv_obj_delete(old);
+    }
     lv_obj_t *row = plain(U.chat);
     lv_obj_set_size(row, CHAT_W, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
@@ -439,7 +470,7 @@ void fetch_task(void *arg)
         show_image(holder, img, 14);
         scroll_end();
     });
-    vTaskDelete(nullptr);
+    vTaskDeleteWithCaps(nullptr);  // its stack is in PSRAM
 }
 
 void fetch(const std::string &url, lv_obj_t *holder, int photo = -1)
@@ -468,6 +499,8 @@ void begin_reply()
     lv_obj_set_flex_flow(U.reply_body, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(U.reply_body, 6, 0);
     text_label(U.reply_body, "\xE2\x80\xA2 \xE2\x80\xA2 \xE2\x80\xA2", SKY, 18);
+    U.reply_done = U.reply_live = nullptr;
+    U.reply_done_len = 0;
     U.reply_text.clear();
     U.reply_dirty = false;
     scroll_end();
@@ -487,6 +520,41 @@ void reply_photo(int index)
     fetch("", holder, index);
 }
 
+lv_obj_t *reply_column(lv_obj_t *parent)
+{
+    lv_obj_t *o = plain(parent);
+    lv_obj_set_size(o, BUBBLE - 28, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(o, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(o, 6, 0);
+    return o;
+}
+
+// Where the finished paragraphs end, from a paragraph start: just after the
+// last blank line that is not inside a code block (npos-free: from if none).
+size_t finished_paragraphs(const std::string &t, size_t from)
+{
+    size_t end = from, line = from;
+    bool fence = false;
+    while (line < t.size()) {
+        const size_t nl = t.find('\n', line);
+        if (nl == std::string::npos) {
+            break;    // the last line may still be growing
+        }
+        const std::string l = t.substr(line, nl - line);
+        size_t k = 0;
+        while (k < l.size() && (l[k] == ' ' || l[k] == '\t')) {
+            ++k;
+        }
+        if (l.compare(k, 3, "```") == 0) {
+            fence = !fence;
+        } else if (!fence && k == l.size()) {
+            end = nl + 1;    // a blank line ends a paragraph
+        }
+        line = nl + 1;
+    }
+    return end;
+}
+
 void render_reply(bool final)
 {
     if (!U.reply_body) {
@@ -494,9 +562,41 @@ void render_reply(bool final)
     }
     U.reply_dirty = false;
     U.reply_drawn = lv_tick_get();
-    md_render(U.reply_body, U.reply_text.empty() ? std::string("\xE2\x80\xA6") : U.reply_text, BUBBLE - 28,
-              final ? LOAD_IMAGES : ImageLoader());
-    scroll_end();
+    const std::string &t = U.reply_text;
+    // A streamed reply without images is already laid out but for its tail:
+    // finish it in place rather than building it all again.
+    const bool images = t.find("![") != std::string::npos || t.find("<img") != std::string::npos;
+    if (final && (images || !U.reply_live)) {  // once, in full, with its images
+        md_render(U.reply_body, t.empty() ? std::string("\xE2\x80\xA6") : t, BUBBLE - 28, LOAD_IMAGES);
+        U.reply_done = U.reply_live = nullptr;
+        U.reply_done_len = 0;
+        scroll_end();
+        return;
+    }
+    // Streaming: re-rendering the whole reply each update grew with its length
+    // and restarted an animated scroll (the chat redrawn every frame meanwhile).
+    if (!U.reply_live) {
+        lv_obj_clean(U.reply_body);  // the "..." placeholder
+        U.reply_done = reply_column(U.reply_body);
+        U.reply_live = reply_column(U.reply_body);
+        U.reply_done_len = 0;
+    }
+    const size_t done = finished_paragraphs(t, U.reply_done_len);
+    if (done > U.reply_done_len) {
+        md_render(reply_column(U.reply_done), t.substr(U.reply_done_len, done - U.reply_done_len), BUBBLE - 28, ImageLoader());
+        U.reply_done_len = done;
+    }
+    const std::string live = t.substr(U.reply_done_len);
+    if (live.empty()) {
+        lv_obj_clean(U.reply_live);
+    } else {
+        md_render(U.reply_live, live, BUBBLE - 28, ImageLoader());
+    }
+    if (final) {
+        U.reply_done = U.reply_live = nullptr;
+        U.reply_done_len = 0;
+    }
+    scroll_end(!final ? false : true);
 }
 
 void set_pill(const char *text, bool live);
@@ -537,9 +637,28 @@ void send(const std::string &text, bool spoken, lv_obj_t *draft)
     ev.show_photo = [](int index) {
         post([index] { reply_photo(index); });
     };
+    // The camera app starts on its first use, not with Swifty: its capture task
+    // and NAS list hold internal RAM the speech connection's TLS needs.
+    ev.camera = [] {  // from the agent's task, one tool at a time
+        static SemaphoreHandle_t done = xSemaphoreCreateBinary();
+        xSemaphoreTake(done, 0);  // a late give from an earlier call
+        post([] {
+            if (U.hooks.camera_ready) U.hooks.camera_ready();
+            xSemaphoreGive(done);
+        });
+        xSemaphoreTake(done, pdMS_TO_TICKS(3000));
+        for (int i = 0; i < 40 && camera_app_photos_state() == 0; ++i)
+        {
+            vTaskDelay(pdMS_TO_TICKS(100));    // the NAS list
+        }
+    };
     ev.done = [](const std::string & t, Shot mood, bool failed) {
         post([t, mood, failed] {
-            U.reply_text = failed ? "*" + t + "*" : t;
+            const std::string text = failed ? "*" + t + "*" : t;
+            // What was laid out while streaming no longer matches (a failure in
+            // italics, or a final text that differs): build it all again.
+            if (text.compare(0, U.reply_done_len, U.reply_text, 0, U.reply_done_len) != 0) U.reply_live = nullptr;
+            U.reply_text = text;
             render_reply(true);
             if (U.reply_tool) lv_obj_add_flag(U.reply_tool, LV_OBJ_FLAG_HIDDEN);
             U.reply = U.reply_body = U.reply_tool = nullptr;
@@ -604,7 +723,10 @@ void start_listening()
     ev.level = [](float l) {
         U.level = l;
     };
-    if (!asr_start(ev)) {
+    const int64_t t0 = esp_timer_get_time();
+    const bool started = asr_start(ev);
+    ESP_LOGI(TAG, "listening: microphone open in %lld ms", (long long)((esp_timer_get_time() - t0) / 1000));
+    if (!started) {
         add_note("The microphone isn't available right now.");
         shoot(Shot::Sorry);
         return;
@@ -647,7 +769,7 @@ void stop_listening()
             }
             send(text, true, draft && lv_obj_is_valid(draft) ? draft : nullptr);
         });
-        vTaskDelete(nullptr);
+        vTaskDeleteWithCaps(nullptr);  // its stack is in PSRAM
     },
     "swifty-fin", 6144, nullptr, 4, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
@@ -740,7 +862,7 @@ void camera_cb(lv_event_t *e)
                 add_note("The camera didn't take a photo. Is the camera module in the left slot?");
             }
         });
-        vTaskDelete(nullptr);
+        vTaskDeleteWithCaps(nullptr);  // its stack is in PSRAM
     },
     "swifty-cam", 6144, latest ? reinterpret_cast<void *>(1) : nullptr, 4, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
@@ -845,7 +967,7 @@ void build(lv_obj_t *s)
         U.fig_px[i] = static_cast<uint8_t *>(heap_caps_calloc(1, FIG * FIG * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
         lv_image_dsc_t &d = U.fig_dsc[i];
         d.header.magic = LV_IMAGE_HEADER_MAGIC;
-        d.header.cf = LV_COLOR_FORMAT_ARGB8888;
+        d.header.cf = LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED;  // render_premultiplied
         d.header.w = FIG;
         d.header.h = FIG;
         d.header.stride = FIG * 4;
@@ -936,12 +1058,20 @@ void build(lv_obj_t *s)
         if (U.reply_dirty && lv_tick_elaps(U.reply_drawn) > 140) {
             render_reply(false);
         }
+        // While Swifty is open, keep a speech connection ready for the next press
+        // (asr_warm alone lapses 3 minutes after Swifty opened).
+        static uint32_t warmed = 0;
+        if (U.active && lv_tick_elaps(warmed) > 20000) {
+            asr_warm(true);
+            warmed = lv_tick_get();
+        }
     }, 30, nullptr);
-    // Below LVGL's draw thread (3) and the camera (4): the bird takes the CPU
-    // that is left. At or above them it starved LVGL, which then held the
-    // display lock for seconds (screenshots, rotation, the AI key timed out).
-    // Core 0: core 1 is busy with LVGL (which preempted it there, 10 fps), while core 0 idles.
-    xTaskCreatePinnedToCore(figure_task, "swifty-fig", 6144, nullptr, 2, nullptr, 0);
+    // The bird takes the CPU that is left: below LVGL's draw threads (3) and
+    // the camera (4), which it starved at or above them (the display lock then
+    // stayed taken for seconds), and below the speech connection and network
+    // (2), whose TLS handshakes it slowed sharing their priority. Core 0, as
+    // core 1 carries LVGL.
+    xTaskCreatePinnedToCore(figure_task, "swifty-fig", 6144, nullptr, 1, nullptr, 0);
 }
 }  // namespace
 
@@ -979,9 +1109,6 @@ extern "C" void swifty_app_init(const swifty_hooks_t *hooks)
 
 extern "C" void swifty_app_open(lv_obj_t *screen)
 {
-    if (U.hooks.camera_ready) {
-        U.hooks.camera_ready();    // so take_photo works from the agent's task
-    }
     if (!U.built) {
         U.built = true;
         build(screen);
@@ -1015,7 +1142,11 @@ extern "C" void swifty_app_attach_photo(int index)
 extern "C" void swifty_app_set_active(bool active)
 {
     U.active = active && U.built;
-    asr_warm(U.active);  // a speech connection ready for the next press
+    // A speech connection ready for the next press. Leaving Swifty does not drop
+    // it: the shell keeps one while the board is in use (swifty_app_prewarm).
+    if (U.active) {
+        asr_warm(true);
+    }
     if (!U.active && U.listening) {
         asr_cancel();
         U.listening = false;
@@ -1026,6 +1157,15 @@ extern "C" void swifty_app_set_active(bool active)
             set_mood(Mood::Idle);
             set_pill(nullptr, false);
         });
+    }
+}
+
+extern "C" void swifty_app_prewarm(bool on)
+{
+    if (on) {
+        asr_warm(true);
+    } else if (!U.active) {
+        asr_warm(false);
     }
 }
 

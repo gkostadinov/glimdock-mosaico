@@ -22,6 +22,7 @@ struct AgentEvents {
     std::function<void(const std::string &text)> text;         // the reply so far (replace-only)
     std::function<void(const std::string &what)> tool;         // a tool started, in words
     std::function<void(int photo)> show_photo;                 // put a camera photo in the chat
+    std::function<void()> camera;                              // start the camera app and its photo list (waits)
     std::function<void(const std::string &text, Shot mood, bool failed)> done;
 };
 

@@ -15,8 +15,10 @@
 #include <atomic>
 
 #include "bsp/esp_mosaico.h"
+#include "esp_heap_caps.h"
 #include "esp_iris.h"
 #include "esp_log.h"
+#include "esp_memory_utils.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -34,7 +36,8 @@ constexpr int64_t SCROLL_US = 3000000;
 struct {
     std::atomic<uint32_t> frames{0}, slow{0};
     std::atomic<int64_t> render_us{0}, wait_us{0}, worst_us{0}, since{0};
-    int64_t render_start = 0, wait_start = 0;
+    std::atomic<int64_t> render_start{0};
+    int64_t wait_start = 0, stall_reported = 0;
     // scripted scroll
     lv_obj_t *target = nullptr;
     bool vertical = true;
@@ -42,6 +45,46 @@ struct {
     int64_t scroll_start = 0;
     lv_timer_t *timer = nullptr;
 } P;
+
+// A frame still rendering after half a second (seen a few times in the first
+// minutes after a boot): who has the CPU meanwhile, and the memory, once per frame.
+void stall_check(void *)
+{
+    const int64_t start = P.render_start;
+    if (!start || P.stall_reported == start || esp_timer_get_time() - start < 500000) {
+        return;
+    }
+    P.stall_reported = start;
+    static TaskStatus_t *tasks = static_cast<TaskStatus_t *>(heap_caps_malloc(sizeof(TaskStatus_t) * 64, MALLOC_CAP_SPIRAM));
+    if (!tasks) {
+        return;
+    }
+    const UBaseType_t n = uxTaskGetSystemState(tasks, 64, nullptr);
+    // name/priority (base priority when a mutex raised it); blocked: the
+    // high-priority tasks waiting, one of which a raised task's mutex holds.
+    char who[400], waiting[200];
+    int k = 0, w = 0;
+    who[0] = waiting[0] = 0;
+    for (UBaseType_t i = 0; i < n; ++i) {
+        const TaskStatus_t &t = tasks[i];
+        const eTaskState st = t.eCurrentState;
+        if ((st == eRunning || st == eReady) && k >= 0 && size_t(k) < sizeof(who)) {
+            k += snprintf(who + k, sizeof(who) - k, "%s%s/%u", k ? " " : "", t.pcTaskName, unsigned(t.uxCurrentPriority));
+            if (k >= 0 && size_t(k) < sizeof(who) && t.uxBasePriority != t.uxCurrentPriority) {
+                k += snprintf(who + k, sizeof(who) - k, "(base %u)", unsigned(t.uxBasePriority));
+            }
+            if (k >= 0 && size_t(k) < sizeof(who) && st == eRunning) {
+                k += snprintf(who + k, sizeof(who) - k, "*");
+            }
+        } else if (st == eBlocked && t.uxBasePriority >= 4 && w >= 0 && size_t(w) < sizeof(waiting)) {
+            w += snprintf(waiting + w, sizeof(waiting) - w, "%s%s/%u", w ? " " : "", t.pcTaskName, unsigned(t.uxBasePriority));
+        }
+    }
+    ESP_LOGW(TAG, "a frame has rendered for %lld ms; running* and ready: %s; blocked: %s; internal %u free (largest %u), DMA %u (largest %u)",
+             (long long)((esp_timer_get_time() - start) / 1000), who, waiting, unsigned(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+             unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)), unsigned(heap_caps_get_free_size(MALLOC_CAP_DMA)),
+             unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_DMA)));
+}
 
 void reset()
 {
@@ -198,6 +241,30 @@ esp_err_t mark_rpc(const esp_iris_rpc_request_t *, uint8_t *, size_t, size_t *si
 {
     snapshot(mark);
     *size = 0;
+    return ESP_OK;
+}
+
+// Method 16: internal and DMA memory, and the tasks whose stacks take
+// internal RAM (name:high-water bytes), for finding what holds it.
+esp_err_t mem_rpc(const esp_iris_rpc_request_t *, uint8_t *out, size_t capacity, size_t *size, void *)
+{
+    multi_heap_info_t in = {}, dma = {};
+    heap_caps_get_info(&in, MALLOC_CAP_INTERNAL);
+    heap_caps_get_info(&dma, MALLOC_CAP_DMA);
+    std::string r = "internal " + std::to_string(in.total_free_bytes) + " free (largest " + std::to_string(in.largest_free_block) +
+                    ", min " + std::to_string(in.minimum_free_bytes) + ", " + std::to_string(in.allocated_blocks) + " blocks " +
+                    std::to_string(in.total_allocated_bytes) + " B) | DMA " + std::to_string(dma.total_free_bytes) + " free (largest " +
+                    std::to_string(dma.largest_free_block) + ", " + std::to_string(dma.allocated_blocks) + " blocks " +
+                    std::to_string(dma.total_allocated_bytes) + " B) | PSRAM " +
+                    std::to_string(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)) + " | internal stacks:";
+    std::vector<TaskStatus_t> tasks(uxTaskGetNumberOfTasks() + 8);
+    tasks.resize(uxTaskGetSystemState(tasks.data(), tasks.size(), nullptr));
+    for (const TaskStatus_t &t : tasks)
+        if (!esp_ptr_external_ram(t.pxStackBase)) {
+            r += std::string(" ") + t.pcTaskName + ":" + std::to_string(t.usStackHighWaterMark);
+        }
+    *size = std::min(r.size(), capacity);
+    memcpy(out, r.data(), *size);
     return ESP_OK;
 }
 
@@ -389,9 +456,17 @@ void perf_start(lv_display_t *display)
         prof_poll();
     }, 100, nullptr);
     reset();
+    static esp_timer_handle_t stall = nullptr;
+    const esp_timer_create_args_t args = {.callback = stall_check, .arg = nullptr, .dispatch_method = ESP_TIMER_TASK,
+                                          .name = "stall-check", .skip_unhandled_events = true
+                                         };
+    if (!stall && esp_timer_create(&args, &stall) == ESP_OK) {
+        esp_timer_start_periodic(stall, 250000);
+    }
     esp_iris_rpc_register(RPC_SERVICE, 11, stats_rpc, nullptr);
     esp_iris_rpc_register(RPC_SERVICE, 12, scroll_rpc, nullptr);
     esp_iris_rpc_register(RPC_SERVICE, 13, mark_rpc, nullptr);
     esp_iris_rpc_register(RPC_SERVICE, 14, cpu_rpc, nullptr);
     esp_iris_rpc_register(RPC_SERVICE, 15, prof_rpc, nullptr);
+    esp_iris_rpc_register(RPC_SERVICE, 16, mem_rpc, nullptr);
 }
