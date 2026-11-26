@@ -675,7 +675,10 @@ void tile(lv_obj_t *root, float x, float y, float w, float h, bool lights)
     const uint32_t fg = lights ? 0x2A1A05 : c.on_tint;
     icon(cardo, icon_name, 12, 12, 16, covered_left ? fg : c.text, 1.4f);
     text(cardo, title, 34, 12, w - 34 - 40, covered_left ? fg : c.text, fit(title, w - 74, 12, true), semi());
-    text(cardo, state, 12, h - 24, w * 0.6f, covered_left ? fg : c.text2, 10);
+    // The state ends before the big number (right-aligned at w - 12): on a
+    // narrow tile "TV not reporting" ran under the volume.
+    const float state_w = std::min(w * 0.6f, w - 12 - text_w(big, 32, true) - 8 - 12);
+    text(cardo, state, 12, h - 24, std::max(20.0f, state_w), covered_left ? fg : c.text2, 10);
     lv_obj_t *big_label = text(cardo, big, w - 110, h - 50, 98, covered_right ? fg : c.text, 32, TextOpts{true, false, false, LV_TEXT_ALIGN_RIGHT});
     const uint32_t live_fill = fill >= 0 ? uint32_t(fill) : uint32_t(c.fill_a);
     drag_slider(cardo, 0, 0, w, h, clamp_pct(p), [ = ](int v, bool released) {
