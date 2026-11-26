@@ -12,3 +12,6 @@ bool frame_sync_start(lv_display_t *display);
 bool frame_sync_wait_idle(int timeout_ms);
 // The measured refresh period in microseconds (0 until TE has been seen).
 int frame_sync_te_period_us();
+// Time the LVGL task spent waiting to hand a frame to the sender since the last
+// call (the previous frame was still going out).
+int64_t frame_sync_take_wait_us();

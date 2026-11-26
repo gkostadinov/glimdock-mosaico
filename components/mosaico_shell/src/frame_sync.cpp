@@ -51,6 +51,7 @@ struct {
     // TE timing (ISR)
     volatile int64_t last_rise = 0, last_fall = 0, high_us = 0, low_us = 0, scan_start = 0, period_us = 16667;
     volatile uint32_t edges = 0;
+    std::atomic<int64_t> handover_wait_us{0};  // the LVGL task waiting for the sender
 } F;
 
 // TE marks vertical blanking. The shorter of its two phases is the blank; the
@@ -146,12 +147,16 @@ void sender(void *)
             xSemaphoreTake(F.chunk_done, pdMS_TO_TICKS(200));
         }
         F.busy = false;
-        lv_display_flush_ready(F.disp);
         xSemaphoreGive(F.frame_done);
     }
 }
 
 // DIRECT mode: called per changed area; only the last one of a frame sends.
+// The next frame renders while this one is sent: LVGL only reads the buffer
+// on the glass (to sync the other one) and writes the other, which was sent
+// already, so the flush is ready at once. Handing over the next frame waits
+// for the sender instead. (LVGL itself waited for the send before rendering
+// anything: render and send took turns, ~13 fps while scrolling.)
 void flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
 {
     F.dirty_y1 = std::min<int>(F.dirty_y1, area->y1);
@@ -160,11 +165,17 @@ void flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
         lv_display_flush_ready(disp);
         return;
     }
+    const int64_t t0 = esp_timer_get_time();
+    while (F.busy) {
+        xSemaphoreTake(F.frame_done, pdMS_TO_TICKS(50));    // the other buffer is still going out
+    }
+    F.handover_wait_us += esp_timer_get_time() - t0;
     F.src = px;
     F.y1 = F.dirty_y1, F.y2 = F.dirty_y2;
     F.dirty_y1 = H, F.dirty_y2 = -1;
     F.busy = true;
-    xSemaphoreGive(F.job);  // the sender marks the flush ready once it is on the glass
+    xSemaphoreGive(F.job);
+    lv_display_flush_ready(disp);
 }
 
 // LVGL waits here (instead of spinning) before reusing a buffer being sent.
@@ -235,4 +246,9 @@ bool frame_sync_wait_idle(int timeout_ms)
 int frame_sync_te_period_us()
 {
     return F.edges > 2 ? int(F.period_us) : 0;
+}
+
+int64_t frame_sync_take_wait_us()
+{
+    return F.handover_wait_us.exchange(0);
 }

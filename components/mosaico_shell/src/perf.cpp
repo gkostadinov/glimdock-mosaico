@@ -8,6 +8,8 @@
 //              are reset at its start and logged at its end.
 #include "perf.h"
 
+#include "frame_sync.h"
+
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -103,7 +105,11 @@ void on_display(lv_event_t *e)
         if (!P.render_start) {
             break;
         }
-        const int64_t t = now - P.render_start;
+        // Handing the frame to the sender may wait for the previous one
+        // (frame_sync.cpp): flush wait, not render.
+        const int64_t handover = frame_sync_take_wait_us();
+        P.wait_us += handover;
+        const int64_t t = now - P.render_start - handover;
         P.render_us += t;
         if (t > P.worst_us) {
             P.worst_us = t;
