@@ -38,6 +38,9 @@ constexpr int64_t SCROLL_US = 3000000;
 struct {
     std::atomic<uint32_t> frames{0}, slow{0};
     std::atomic<int64_t> render_us{0}, wait_us{0}, worst_us{0}, since{0};
+    // before rendering: layout and syncing the other buffer (REFR_START to RENDER_START)
+    std::atomic<int64_t> refr_start{0}, layout_us{0}, layout_worst_us{0};
+    std::atomic<uint32_t> layouts{0};
     std::atomic<int64_t> render_start{0};
     int64_t wait_start = 0, stall_reported = 0;
     // scripted scroll
@@ -91,6 +94,7 @@ void stall_check(void *)
 void reset()
 {
     P.frames = 0, P.slow = 0, P.render_us = 0, P.wait_us = 0, P.worst_us = 0;
+    P.layouts = 0, P.layout_us = 0, P.layout_worst_us = 0;
     P.since = esp_timer_get_time();
 }
 
@@ -98,9 +102,20 @@ void on_display(lv_event_t *e)
 {
     const int64_t now = esp_timer_get_time();
     switch (lv_event_get_code(e)) {
-    case LV_EVENT_RENDER_START:
-        P.render_start = now;
+    case LV_EVENT_REFR_START:
+        P.refr_start = now;
         break;
+    case LV_EVENT_RENDER_START: {
+        P.render_start = now;
+        const int64_t before = P.refr_start ? now - P.refr_start : 0;
+        P.refr_start = 0;
+        P.layout_us += before;
+        ++P.layouts;
+        if (before > P.layout_worst_us) {
+            P.layout_worst_us = before;
+        }
+        break;
+    }
     case LV_EVENT_RENDER_READY: {
         if (!P.render_start) {
             break;
@@ -140,9 +155,11 @@ int summary(char *out, size_t capacity)
     const uint32_t n = P.frames;
     const double secs = (esp_timer_get_time() - P.since) / 1e6;
     return snprintf(out, capacity,
-                    "frames %u in %.1f s (%.1f fps) | render %.1f ms avg, %.1f worst, %u over 33 ms | flush wait %.1f ms avg",
+                    "frames %u in %.1f s (%.1f fps) | render %.1f ms avg, %.1f worst, %u over 33 ms | flush wait %.1f ms avg"
+                    " | layout %.1f ms avg, %.1f worst",
                     unsigned(n), secs, secs > 0 ? n / secs : 0, n ? P.render_us / 1000.0 / n : 0, P.worst_us / 1000.0,
-                    unsigned(P.slow), n ? P.wait_us / 1000.0 / n : 0);
+                    unsigned(P.slow), n ? P.wait_us / 1000.0 / n : 0, P.layouts ? P.layout_us / 1000.0 / P.layouts : 0,
+                    P.layout_worst_us / 1000.0);
 }
 
 esp_err_t stats_rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capacity, size_t *size, void *)
@@ -453,6 +470,7 @@ void perf_start(lv_display_t *display)
 {
     lv_display_add_event_cb(display, on_display, LV_EVENT_RENDER_START, nullptr);
     lv_display_add_event_cb(display, on_display, LV_EVENT_RENDER_READY, nullptr);
+    lv_display_add_event_cb(display, on_display, LV_EVENT_REFR_START, nullptr);
     lv_display_add_event_cb(display, on_display, LV_EVENT_FLUSH_WAIT_START, nullptr);
     lv_display_add_event_cb(display, on_display, LV_EVENT_FLUSH_WAIT_FINISH, nullptr);
     lv_timer_create([](lv_timer_t *) {

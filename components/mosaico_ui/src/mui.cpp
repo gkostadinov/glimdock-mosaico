@@ -13,6 +13,9 @@
 #include "home_icons.h"
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#else
+#include <mutex>
 #endif
 
 #ifdef ESP_PLATFORM
@@ -79,6 +82,109 @@ const lv_font_t *symbols(int px)
 }  // namespace
 
 // ---- type ------------------------------------------------------------------
+namespace {
+// tiny_ttf looks every glyph up in LVGL's cache (a red-black tree behind a
+// mutex): twice more for the kerning pair, ~24 us a glyph. Measuring a short
+// label's text took ~0.8 ms, and labels are measured again on every layout,
+// so a Glimdock page spent ~30 ms in layout. A wrapper font answers repeats
+// from small direct-mapped tables and asks tiny_ttf only on a miss; drawing
+// still goes to tiny_ttf (the wrapper shares its data).
+struct FastFont {
+    lv_font_t font;  // first: the wrapper LVGL sees
+    const lv_font_t *ttf;
+    struct Glyph {
+        uint32_t letter;
+        bool found;
+        lv_font_glyph_dsc_t dsc;
+    } glyphs[256];
+    struct Pair {
+        uint32_t a, b;
+        uint16_t adv;
+    } pairs[512];
+};
+
+#ifdef ESP_PLATFORM
+portMUX_TYPE fast_lock = portMUX_INITIALIZER_UNLOCKED;  // the draw threads measure text too
+struct Locked {
+    Locked()
+    {
+        portENTER_CRITICAL(&fast_lock);
+    }
+    ~Locked()
+    {
+        portEXIT_CRITICAL(&fast_lock);
+    }
+};
+#else
+std::mutex fast_mutex;
+struct Locked {
+    std::lock_guard<std::mutex> g{fast_mutex};
+};
+#endif
+
+bool fast_glyph_dsc(const lv_font_t *font, lv_font_glyph_dsc_t *out, uint32_t letter, uint32_t next)
+{
+    FastFont *ff = static_cast<FastFont *>(font->user_data);
+    const lv_font_t *ttf = ff->ttf;
+    if (letter < 0x20) {
+        return ttf->get_glyph_dsc(ttf, out, letter, next);
+    }
+    FastFont::Glyph &g = ff->glyphs[letter & 255];
+    bool hit, found;
+    {
+        Locked l;
+        hit = g.letter == letter;
+        if (hit) {
+            found = g.found;
+            *out = g.dsc;
+        }
+    }
+    if (!hit) {
+        lv_font_glyph_dsc_t d = {};
+        found = ttf->get_glyph_dsc(ttf, &d, letter, 0);
+        *out = d;
+        Locked l;
+        g.dsc = d, g.found = found, g.letter = letter;
+    }
+    if (!found || next < 0x20 || font->kerning != LV_FONT_KERNING_NORMAL) {
+        return found;
+    }
+    FastFont::Pair &p = ff->pairs[(letter * 31u + next) & 511];
+    uint16_t adv = 0;
+    {
+        Locked l;
+        hit = p.a == letter && p.b == next;
+        adv = p.adv;
+    }
+    if (!hit) {
+        lv_font_glyph_dsc_t d = {};
+        ttf->get_glyph_dsc(ttf, &d, letter, next);
+        adv = d.adv_w;
+        Locked l;
+        p.adv = adv, p.a = letter, p.b = next;
+    }
+    out->adv_w = adv;
+    return found;
+}
+
+lv_font_t *fast_font(lv_font_t *ttf)
+{
+#ifdef ESP_PLATFORM
+    auto *ff = static_cast<FastFont *>(heap_caps_calloc(1, sizeof(FastFont), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+#else
+    auto *ff = static_cast<FastFont *>(calloc(1, sizeof(FastFont)));
+#endif
+    if (!ff) {
+        return ttf;
+    }
+    ff->ttf = ttf;
+    ff->font = *ttf;  // metrics, the bitmap callbacks and tiny_ttf's data
+    ff->font.get_glyph_dsc = fast_glyph_dsc;
+    ff->font.user_data = ff;
+    return &ff->font;
+}
+}  // namespace
+
 const lv_font_t *font(int px, bool semi)
 {
     static std::map<int, lv_font_t *> cache;
@@ -90,10 +196,11 @@ const lv_font_t *font(int px, bool semi)
     }
     const uint8_t *start = semi ? inter_semibold_ttf_start : inter_regular_ttf_start;
     const uint8_t *end = semi ? inter_semibold_ttf_end : inter_regular_ttf_end;
-    lv_font_t *f = lv_tiny_ttf_create_data_ex(start, size_t(end - start), px, LV_FONT_KERNING_NORMAL, px >= 40 ? 64 : 384);  // glyphs kept rendered: a miss redraws from the outline
-    if (!f) {
+    lv_font_t *ttf = lv_tiny_ttf_create_data_ex(start, size_t(end - start), px, LV_FONT_KERNING_NORMAL, px >= 40 ? 64 : 384);  // glyphs kept rendered: a miss redraws from the outline
+    if (!ttf) {
         return symbols(px);
     }
+    lv_font_t *f = fast_font(ttf);
     f->fallback = symbols(px);
     cache[key] = f;
     return f;
