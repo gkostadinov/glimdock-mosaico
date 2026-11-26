@@ -1096,8 +1096,11 @@ void note_card(const string &text, uint32_t color = TEXT2)
     lv_obj_t *l = label(c, text.c_str(), 20, 14, 420, color, 15);
     lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_height(l, LV_SIZE_CONTENT);
-    lv_obj_update_layout(l);
-    const int h = lv_obj_get_height(l) + 28;
+    // Measured directly: a layout update would lay the whole screen out.
+    lv_point_t size;
+    lv_text_get_size(&size, text.c_str(), lv_obj_get_style_text_font(l, LV_PART_MAIN), lv_obj_get_style_text_letter_space(l, LV_PART_MAIN),
+                     lv_obj_get_style_text_line_space(l, LV_PART_MAIN), 420, LV_TEXT_FLAG_NONE);
+    const int h = size.y + 28;
     lv_obj_set_height(c, h);
     Y += h + GAP;
 }

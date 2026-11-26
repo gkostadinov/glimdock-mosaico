@@ -133,8 +133,10 @@ lv_obj_t *box(lv_obj_t *parent, int x, int y, int w, int h, int radius)
 lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int w, uint32_t color, int px, bool semi,
                 lv_text_align_t align)
 {
+    // The text comes last: a label measures its text again on every style
+    // and size change (six or more times here).
     lv_obj_t *l = lv_label_create(parent);
-    lv_label_set_text(l, text);
+    lv_label_set_text_static(l, "");
     lv_obj_set_pos(l, x, y);
     const lv_font_t *f = font(px, semi);
     lv_obj_set_style_text_font(l, f, 0);
@@ -148,6 +150,7 @@ lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int w, uint32_
         lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
         lv_obj_set_height(l, lv_font_get_line_height(f));
     }
+    lv_label_set_text(l, text);
     return l;
 }
 
@@ -225,8 +228,15 @@ void press_fx(lv_obj_t *o)
         lv_style_set_transform_width(&pressed_big, -8);
         lv_style_set_transform_height(&pressed_big, -5);
     }
-    lv_obj_update_layout(o);
-    const bool big = lv_obj_get_width(o) > 200;
+    // The width as set (buttons and cards have fixed sizes): updating the
+    // layout to measure it laid the whole screen out again for every button,
+    // ~6 ms each on a Glimdock page (most of a 56 ms rebuild).
+    int32_t w = lv_obj_get_style_width(o, LV_PART_MAIN);
+    if (!LV_COORD_IS_PX(w)) {
+        lv_obj_update_layout(o);
+        w = lv_obj_get_width(o);
+    }
+    const bool big = w > 200;
     lv_obj_add_style(o, big ? &normal_big : &normal_small, 0);
     lv_obj_add_style(o, big ? &pressed_big : &pressed_small, LV_STATE_PRESSED);
 }
