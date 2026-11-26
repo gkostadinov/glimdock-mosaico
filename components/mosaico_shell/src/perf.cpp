@@ -307,6 +307,9 @@ esp_err_t cpu_rpc(const esp_iris_rpc_request_t *, uint8_t *out, size_t capacity,
             if (b.xHandle == t.xHandle) {
                 before = b.ulRunTimeCounter;
             }
+        if (t.ulRunTimeCounter < before) {
+            before = 0;  // a new task in an ended one's memory (the speech socket's): not a wrap
+        }
         const double pct = span > 0 ? 100.0 * double(t.ulRunTimeCounter - before) / span : 0;
         if (pct >= 0.5) rows.push_back({t.pcTaskName, pct});
     }

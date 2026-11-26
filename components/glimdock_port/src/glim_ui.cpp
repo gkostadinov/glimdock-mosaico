@@ -773,7 +773,8 @@ void page_health()
             const int y = 12 + 40 * i;
             dot(c, 20, y + 7, 9, !src.enabled ? OFF : src.ok ? OK : RED);
             label(c, src.name, 40, y, 160, TEXT, 15, true);
-            label(c, src.ok || !src.error[0] ? ("updated " + span(src.age) + " ago").c_str() : src.error, 200, y + 1,
+            const string when = isfinite(src.age) && src.age >= 0 ? "updated " + span(src.age) + " ago" : "not updated yet";
+            label(c, src.ok || !src.error[0] ? when.c_str() : src.error, 200, y + 1,
                   240, src.ok ? TEXT3 : RED, 13, false, LV_TEXT_ALIGN_RIGHT);
         }
         Y += 14 + 40 * s.nSources + GAP;

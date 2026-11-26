@@ -1164,7 +1164,7 @@ bool status(char *text, size_t cap)
         return s == 1;
     }
     if (!usb_webcam_active()) {
-        strlcpy(text, "Off", cap);
+        strlcpy(text, "Tap the camera to start", cap);  // "Off" is above it already
         return false;
     }
     if (!usb_webcam_streaming()) {

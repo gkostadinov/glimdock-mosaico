@@ -565,7 +565,8 @@ void set_shadow_opa(lv_obj_t *o, lv_opa_t opa)
 // ---- capsule -------------------------------------------------------------------
 namespace {
 struct CapsuleState {
-    int sel, count, pad, seg;
+    int sel, count, pad;
+    int x[8], w[8];  // each segment, from the capsule's left edge
     const Accent *a;
     lv_obj_t *ind;
     lv_obj_t *labels[8];
@@ -579,7 +580,13 @@ void capsule_clicked(lv_event_t *e)
     lv_indev_get_point(lv_indev_active(), &p);
     lv_area_t a;
     lv_obj_get_coords(c, &a);
-    const int index = std::clamp(int((p.x - a.x1 - s->pad) / std::max(1, s->seg)), 0, s->count - 1);
+    int index = s->count - 1;
+    for (int i = 0; i < s->count - 1; ++i) {
+        if (p.x - a.x1 < s->x[i] + s->w[i]) {
+            index = i;
+            break;
+        }
+    }
     if (index == s->sel) {
         return;
     }
@@ -598,11 +605,28 @@ lv_obj_t *capsule(lv_obj_t *parent, int x, int y, int w, int h, const char *cons
     s->count = count;
     s->sel = selected < 0 ? -1 : std::min(selected, count - 1);  // -1: nothing chosen yet
     s->pad = std::max(4, h / 10);
-    s->seg = (w - 2 * s->pad) / count;
+    // Equal segments, unless a label would not fit its own with some room
+    // around it (six Tools tabs crowded each other): then each segment is its
+    // label's width plus an equal share of what is left.
+    const int inner = w - 2 * s->pad, seg = inner / count, room = std::max(10, px);
+    int widths[8], total = 0;
+    bool fits = true;
+    for (int i = 0; i < count; ++i) {
+        widths[i] = text_width(labels[i], px, true);
+        total += widths[i];
+        fits = fits && widths[i] + room <= seg;
+    }
+    const int share = fits ? 0 : (inner - total) / count;
+    for (int i = 0, at = s->pad; i < count; ++i) {
+        s->x[i] = at;
+        s->w[i] = fits ? seg : i == count - 1 ? s->pad + inner - at : widths[i] + share;
+        at += s->w[i];
+    }
     s->a = &a;
     lv_obj_set_user_data(c, s);
     lv_obj_add_event_cb(c, delete_state<CapsuleState>, LV_EVENT_DELETE, s);
-    s->ind = box(c, s->pad + std::max(0, s->sel) * s->seg, s->pad, s->seg, h - 2 * s->pad, LV_RADIUS_CIRCLE);
+    const int first = std::max(0, s->sel);
+    s->ind = box(c, s->x[first], s->pad, s->w[first], h - 2 * s->pad, LV_RADIUS_CIRCLE);
     style_fill(s->ind, a, true);
     if (s->sel < 0) {
         lv_obj_add_flag(s->ind, LV_OBJ_FLAG_HIDDEN);
@@ -610,7 +634,7 @@ lv_obj_t *capsule(lv_obj_t *parent, int x, int y, int w, int h, const char *cons
     lv_obj_set_style_shadow_width(s->ind, 16, 0);
     const lv_font_t *f = font(px, true);
     for (int i = 0; i < count; ++i) {
-        s->labels[i] = label(c, labels[i], s->pad + i * s->seg, (h - lv_font_get_line_height(f)) / 2, s->seg,
+        s->labels[i] = label(c, labels[i], s->x[i], (h - lv_font_get_line_height(f)) / 2, s->w[i],
                              i == s->sel ? a.ink : s->sel < 0 ? TEXT : TEXT2, px, true, LV_TEXT_ALIGN_CENTER);
     }
     lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
@@ -633,10 +657,12 @@ void capsule_select(lv_obj_t *c, int index, bool anim)
     const bool was_hidden = lv_obj_has_flag(s->ind, LV_OBJ_FLAG_HIDDEN);
     s->sel = index;
     lv_obj_remove_flag(s->ind, LV_OBJ_FLAG_HIDDEN);
-    const int32_t to = s->pad + index * s->seg;
+    const int32_t to = s->x[index], to_w = s->w[index];
     lv_anim_delete(s->ind, anim_x);
+    lv_anim_delete(s->ind, anim_w);
     if (!anim || was_hidden) {
         lv_obj_set_x(s->ind, to);
+        lv_obj_set_width(s->ind, to_w);
         return;
     }
     lv_anim_t an;
@@ -647,6 +673,12 @@ void capsule_select(lv_obj_t *c, int index, bool anim)
     lv_anim_set_duration(&an, 260);
     lv_anim_set_path_cb(&an, lv_anim_path_overshoot);
     lv_anim_start(&an);
+    if (lv_obj_get_style_width(s->ind, LV_PART_MAIN) != to_w) {  // proportional segments: the width follows
+        lv_anim_set_exec_cb(&an, anim_w);
+        lv_anim_set_values(&an, lv_obj_get_style_width(s->ind, LV_PART_MAIN), to_w);
+        lv_anim_set_path_cb(&an, lv_anim_path_ease_out);
+        lv_anim_start(&an);
+    }
 }
 
 // ---- dot and icons ---------------------------------------------------------------
