@@ -42,7 +42,8 @@ struct {
     // compass
     lv_obj_t *rose = nullptr, *heading = nullptr, *cardinal = nullptr, *compass_note = nullptr, *letters[4] = {};
     bool mag = false, mag_tried = false;
-    float mmin[3] = {1e9f, 1e9f, 1e9f}, mmax[3] = {-1e9f, -1e9f, -1e9f}, head = 0;
+    float mmin[3] = {1e9f, 1e9f, 1e9f}, mmax[3] = {-1e9f, -1e9f, -1e9f}, head = 0, shown = 0;
+    bool shown_set = false;  // the heading on the dial
     // webcam
     lv_obj_t *cam_btn = nullptr, *cam_label = nullptr, *cam_note = nullptr, *cam_torch = nullptr;
     int cam_tick = 0;
@@ -57,7 +58,7 @@ struct {
 lv_obj_t *round_button(lv_obj_t *parent, int x, int y, int size, uint32_t bg)
 {
     lv_obj_t *b = box(parent, x, y, size, size, LV_RADIUS_CIRCLE);
-    lv_obj_set_style_bg_color(b, lv_color_hex(bg), 0);
+    set_bg_color(b, lv_color_hex(bg));
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
     lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
     press_fx(b);
@@ -67,12 +68,12 @@ lv_obj_t *round_button(lv_obj_t *parent, int x, int y, int size, uint32_t bg)
 // ---- torch -----------------------------------------------------------------------------
 void torch_look()
 {
-    lv_obj_set_style_bg_color(T.torch_btn, lv_color_hex(T.torch_on ? 0xFFF4D6 : FIELD), 0);
-    lv_obj_set_style_line_color(lv_obj_get_child(T.torch_btn, 0), lv_color_hex(T.torch_on ? 0x3A2A00 : TEXT), 0);
-    lv_label_set_text(T.torch_label, T.torch_on ? "On" : "Off");
+    set_bg_color(T.torch_btn, lv_color_hex(T.torch_on ? 0xFFF4D6 : FIELD));
+    set_line_color(lv_obj_get_child(T.torch_btn, 0), lv_color_hex(T.torch_on ? 0x3A2A00 : TEXT));
+    set_text(T.torch_label, T.torch_on ? "On" : "Off");
     if (T.cam_torch) {  // the webcam page's own torch button
-        lv_obj_set_style_bg_color(T.cam_torch, lv_color_hex(T.torch_on ? 0xFFF4D6 : FIELD), 0);
-        lv_obj_set_style_line_color(lv_obj_get_child(T.cam_torch, 0), lv_color_hex(T.torch_on ? 0x3A2A00 : TEXT), 0);
+        set_bg_color(T.cam_torch, lv_color_hex(T.torch_on ? 0xFFF4D6 : FIELD));
+        set_line_color(lv_obj_get_child(T.cam_torch, 0), lv_color_hex(T.torch_on ? 0x3A2A00 : TEXT));
     }
 }
 
@@ -81,14 +82,14 @@ void torch_cb(lv_event_t *)
     const bool want = !T.torch_on;
     const bool ok = T.hooks.torch && T.hooks.torch(want);
     if (!ok && want) {
-        lv_label_set_text(T.torch_note, "No camera module flash: use the screen light.");
+        set_text(T.torch_note, "No camera module flash: use the screen light.");
         return;
     }
     T.torch_on = want;
     if (T.hooks.haptic) {
         T.hooks.haptic();
     }
-    lv_label_set_text(T.torch_note, "The camera module's flash");
+    set_text(T.torch_note, "The camera module's flash");
     torch_look();
 }
 
@@ -96,7 +97,7 @@ void light_off_cb(lv_event_t *)
 {
     T.screen_light = false;
     if (T.light) {
-        lv_obj_add_flag(T.light, LV_OBJ_FLAG_HIDDEN);
+        set_hidden(T.light, true);
     }
     if (T.hooks.brightness) {
         T.hooks.brightness(-1);
@@ -106,7 +107,7 @@ void light_off_cb(lv_event_t *)
 void light_cb(lv_event_t *)
 {
     T.screen_light = true;
-    lv_obj_remove_flag(T.light, LV_OBJ_FLAG_HIDDEN);
+    set_hidden(T.light, false);
     lv_obj_move_foreground(T.light);
     if (T.hooks.brightness) {
         T.hooks.brightness(100);
@@ -124,7 +125,7 @@ void build_torch(lv_obj_t *p)
     lv_obj_add_event_cb(b, light_cb, LV_EVENT_CLICKED, nullptr);
     // The screen light: white over everything, tap to leave.
     T.light = box(T.screen, 0, 0, PANEL, PANEL);
-    lv_obj_set_style_bg_color(T.light, lv_color_white(), 0);
+    set_bg_color(T.light, lv_color_white());
     lv_obj_set_style_bg_opa(T.light, LV_OPA_COVER, 0);
     lv_obj_add_flag(T.light, lv_obj_flag_t(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN));
     label(T.light, "Tap to turn off", 0, 400, 480, 0x909090, 15, false, LV_TEXT_ALIGN_CENTER);
@@ -139,26 +140,26 @@ void build_level(lv_obj_t *p)
     T.dial = box(p, 240 - DIAL / 2, 6, DIAL, DIAL, LV_RADIUS_CIRCLE);
     lv_obj_set_style_border_width(T.dial, 2, 0);
     lv_obj_set_style_border_color(T.dial, lv_color_hex(EDGE), 0);
-    lv_obj_set_style_bg_color(T.dial, lv_color_hex(CARD), 0);
+    set_bg_color(T.dial, lv_color_hex(CARD));
     lv_obj_set_style_bg_opa(T.dial, LV_OPA_COVER, 0);
     lv_obj_t *ring = box(T.dial, DIAL / 2 - 30, DIAL / 2 - 30, 60, 60, LV_RADIUS_CIRCLE);
     lv_obj_set_style_border_width(ring, 2, 0);
     lv_obj_set_style_border_color(ring, lv_color_hex(0x505050), 0);
     lv_obj_t *h = box(T.dial, 20, DIAL / 2, DIAL - 40, 1);
-    lv_obj_set_style_bg_color(h, lv_color_hex(EDGE), 0);
+    set_bg_color(h, lv_color_hex(EDGE));
     lv_obj_set_style_bg_opa(h, LV_OPA_COVER, 0);
     lv_obj_t *v = box(T.dial, DIAL / 2, 20, 1, DIAL - 40);
-    lv_obj_set_style_bg_color(v, lv_color_hex(EDGE), 0);
+    set_bg_color(v, lv_color_hex(EDGE));
     lv_obj_set_style_bg_opa(v, LV_OPA_COVER, 0);
     T.bubble = box(T.dial, DIAL / 2 - BUBBLE / 2, DIAL / 2 - BUBBLE / 2, BUBBLE, BUBBLE, LV_RADIUS_CIRCLE);
-    lv_obj_set_style_bg_color(T.bubble, lv_color_hex(ACC.glow), 0);
+    set_bg_color(T.bubble, lv_color_hex(ACC.glow));
     lv_obj_set_style_bg_opa(T.bubble, 220, 0);
     // Standing on an edge: a line that stays level with the world.
     T.horizon = lv_line_create(p);
     lv_obj_set_style_line_width(T.horizon, 4, 0);
     lv_obj_set_style_line_rounded(T.horizon, true, 0);
-    lv_obj_set_style_line_color(T.horizon, lv_color_hex(ACC.glow), 0);
-    lv_obj_add_flag(T.horizon, LV_OBJ_FLAG_HIDDEN);
+    set_line_color(T.horizon, lv_color_hex(ACC.glow));
+    set_hidden(T.horizon, true);
     T.level_big = label(p, "--", 0, 252, 480, TEXT, 40, true, LV_TEXT_ALIGN_CENTER);
     T.level_note = label(p, "", 40, 304, 400, TEXT3, 15, false, LV_TEXT_ALIGN_CENTER);
 }
@@ -167,8 +168,8 @@ void update_level()
 {
     float x, y, z;
     if (!T.hooks.gravity || !T.hooks.gravity(&x, &y, &z)) {
-        lv_label_set_text(T.level_big, "--");
-        lv_label_set_text(T.level_note, "No accelerometer");
+        set_text(T.level_big, "--");
+        set_text(T.level_note, "No accelerometer");
         return;
     }
     T.lx += 0.35f * (x - T.lx);
@@ -177,8 +178,8 @@ void update_level()
     char big[24], note[64];
     bool level;
     if (flat < 0.7f) {  // lying down: a bubble, which floats to the high side
-        lv_obj_remove_flag(T.dial, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(T.horizon, LV_OBJ_FLAG_HIDDEN);
+        set_hidden(T.dial, false);
+        set_hidden(T.horizon, true);
         const float ax = asinf(std::clamp(T.lx, -1.0f, 1.0f)) * 180 / float(M_PI);
         const float ay = asinf(std::clamp(T.ly, -1.0f, 1.0f)) * 180 / float(M_PI);
         const float reach = DIAL / 2 - BUBBLE / 2 - 6;
@@ -193,8 +194,8 @@ void update_level()
         snprintf(big, sizeof(big), "%.1f\xC2\xB0", double(tilt));
         snprintf(note, sizeof(note), "Left-right %.1f\xC2\xB0 \xC2\xB7 front-back %.1f\xC2\xB0", double(ax), double(ay));
     } else {  // on an edge: the bottom edge's angle from level
-        lv_obj_add_flag(T.dial, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_flag(T.horizon, LV_OBJ_FLAG_HIDDEN);
+        set_hidden(T.dial, true);
+        set_hidden(T.horizon, false);
         const float a = atan2f(T.lx, T.ly);  // 0 when the bottom edge is level
         const float c = cosf(a), s = sinf(a), r = 170;
         T.horizon_pts[0] = {lv_value_precise_t(240 - r * c), lv_value_precise_t(124 + r * s)};
@@ -205,12 +206,12 @@ void update_level()
         snprintf(big, sizeof(big), "%.1f\xC2\xB0", double(deg));
         strlcpy(note, "The bottom edge against level", sizeof(note));
     }
-    lv_label_set_text(T.level_big, big);
-    lv_label_set_text(T.level_note, note);
+    set_text(T.level_big, big);
+    set_text(T.level_note, note);
     const uint32_t c = level ? OK : TEXT;
-    lv_obj_set_style_text_color(T.level_big, lv_color_hex(c), 0);
-    lv_obj_set_style_bg_color(T.bubble, lv_color_hex(level ? OK : ACC.glow), 0);
-    lv_obj_set_style_line_color(T.horizon, lv_color_hex(level ? OK : ACC.glow), 0);
+    set_text_color(T.level_big, lv_color_hex(c));
+    set_bg_color(T.bubble, lv_color_hex(level ? OK : ACC.glow));
+    set_line_color(T.horizon, lv_color_hex(level ? OK : ACC.glow));
     if (level && !T.was_level && T.hooks.haptic) {
         T.hooks.haptic();
     }
@@ -253,14 +254,14 @@ void build_compass(lv_obj_t *p)
     T.rose = box(p, 240 - ROSE / 2, 6, ROSE, ROSE, LV_RADIUS_CIRCLE);
     lv_obj_set_style_border_width(T.rose, 2, 0);
     lv_obj_set_style_border_color(T.rose, lv_color_hex(EDGE), 0);
-    lv_obj_set_style_bg_color(T.rose, lv_color_hex(CARD), 0);
+    set_bg_color(T.rose, lv_color_hex(CARD));
     lv_obj_set_style_bg_opa(T.rose, LV_OPA_COVER, 0);
     for (int i = 0; i < 4; ++i) {
         T.letters[i] = label(T.rose, POINTS[i * 2], 0, 0, 40, i == 0 ? RED : TEXT2, 22, true, LV_TEXT_ALIGN_CENTER);
     }
     // The board's heading marker at the top of the dial.
     lv_obj_t *tick = box(p, 236, 0, 8, 22, 4);
-    lv_obj_set_style_bg_color(tick, lv_color_hex(ACC.glow), 0);
+    set_bg_color(tick, lv_color_hex(ACC.glow));
     lv_obj_set_style_bg_opa(tick, LV_OPA_COVER, 0);
     T.heading = label(p, "--", 0, 252, 480, TEXT, 40, true, LV_TEXT_ALIGN_CENTER);
     T.compass_note = label(p, "", 40, 304, 400, TEXT3, 15, false, LV_TEXT_ALIGN_CENTER);
@@ -287,8 +288,8 @@ void update_compass()
     }
     struct bmm150_mag_data m = {};
     if (!T.mag || bsp_magnetometer_read(BSP_MAGNETOMETER_0, &m) != ESP_OK) {
-        lv_label_set_text(T.heading, "--");
-        lv_label_set_text(T.compass_note, "No magnetometer");
+        set_text(T.heading, "--");
+        set_text(T.compass_note, "No magnetometer");
         return;
     }
     // Hard-iron offset from the range seen while the board is turned around.
@@ -323,11 +324,23 @@ void update_compass()
         d += 360;
     }
     T.head = fmodf(T.head + 0.3f * d + 360.0f, 360.0f);
+    if (span < 60) {  // not calibrated: the heading is noise (the dial spun at random)
+        set_text(T.heading, "--");
+        set_text(T.compass_note, "Turn the board around slowly, flat, to calibrate.");
+        return;
+    }
+    set_text(T.compass_note, "Hold it flat. Keep it away from magnets and metal.");
+    // The dial moves on a degree's change: the sensor's noise alone kept it
+    // redrawing ~16 times a second on a still board.
+    float moved = fabsf(T.head - T.shown);
+    moved = std::min(moved, 360.0f - moved);
+    if (moved < 1.0f && T.shown_set) {
+        return;
+    }
+    T.shown = T.head, T.shown_set = true;
     char text[16];
     snprintf(text, sizeof(text), "%d\xC2\xB0 %s", int(lroundf(T.head)) % 360, POINTS[int(lroundf(T.head / 45)) % 8]);
-    lv_label_set_text(T.heading, text);
-    lv_label_set_text(T.compass_note, span < 60 ? "Turn the board around slowly, flat, to calibrate."
-                      : "Hold it flat. Keep it away from magnets and metal.");
+    set_text(T.heading, text);
     place_letters(T.head);
 }
 
@@ -336,10 +349,10 @@ void update_webcam()
 {
     char text[96] = "Not available";
     const bool on = T.hooks.webcam_status && T.hooks.webcam_status(text, sizeof(text));
-    lv_obj_set_style_bg_color(T.cam_btn, lv_color_hex(on ? ACC.glow : FIELD), 0);
-    lv_obj_set_style_line_color(lv_obj_get_child(T.cam_btn, 0), lv_color_hex(on ? 0x2A0A04 : TEXT), 0);
-    lv_label_set_text(T.cam_label, on ? "On" : "Off");
-    lv_label_set_text(T.cam_note, text);
+    set_bg_color(T.cam_btn, lv_color_hex(on ? ACC.glow : FIELD));
+    set_line_color(lv_obj_get_child(T.cam_btn, 0), lv_color_hex(on ? 0x2A0A04 : TEXT));
+    set_text(T.cam_label, on ? "On" : "Off");
+    set_text(T.cam_note, text);
 }
 
 void webcam_cb(lv_event_t *)
@@ -403,14 +416,14 @@ std::string show(double v)
 
 void calc_show()
 {
-    lv_label_set_text(T.display, T.entry.c_str());
+    set_text(T.display, T.entry.c_str());
     const int px = T.entry.size() > 12 ? 30 : T.entry.size() > 9 ? 38 : 48;
     lv_obj_set_style_text_font(T.display, font(px, true), 0);
     char e[48] = "";
     if (T.op) {
         snprintf(e, sizeof(e), "%s %c", show(T.acc).c_str(), T.op);
     }
-    lv_label_set_text(T.expr, e);
+    set_text(T.expr, e);
 }
 
 double apply(double a, char op, double b)
@@ -494,7 +507,7 @@ void build_calc(lv_obj_t *p)
             const char *k = KEYS[r][c];
             const bool op = c == 3, top = r == 0 && c < 3;
             lv_obj_t *b = box(p, X0 + c * (KW + GX), Y0 + r * (KH + GY), KW, KH, KH / 2);
-            lv_obj_set_style_bg_color(b, lv_color_hex(op ? ACC.lo : top ? 0x505055 : 0x2A2A2D), 0);
+            set_bg_color(b, lv_color_hex(op ? ACC.lo : top ? 0x505055 : 0x2A2A2D));
             lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
             lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
             press_fx(b);
@@ -510,9 +523,9 @@ void show_tool(int t)
     T.tool = std::clamp(t, 0, TOOLS - 1);
     for (int i = 0; i < TOOLS; ++i) {
         if (i == T.tool) {
-            lv_obj_remove_flag(T.pane[i], LV_OBJ_FLAG_HIDDEN);
+            set_hidden(T.pane[i], false);
         } else {
-            lv_obj_add_flag(T.pane[i], LV_OBJ_FLAG_HIDDEN);
+            set_hidden(T.pane[i], true);
         }
     }
     if (T.tabs && capsule_selected(T.tabs) != T.tool) {
@@ -552,7 +565,7 @@ void build(lv_obj_t *s)
 {
     T.screen = s;
     lv_obj_t *back = box(s, 56, 14, 44, 44, 22);
-    lv_obj_set_style_bg_color(back, lv_color_hex(FIELD), 0);
+    set_bg_color(back, lv_color_hex(FIELD));
     lv_obj_set_style_bg_opa(back, LV_OPA_COVER, 0);
     icon(back, "back", 10, 10, 24, TEXT, 2.0f);
     lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);

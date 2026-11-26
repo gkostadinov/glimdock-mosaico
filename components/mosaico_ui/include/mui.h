@@ -81,6 +81,17 @@ void set_entry_animations(bool on);
 lv_obj_t *bar(lv_obj_t *parent, int x, int y, int w, int h, int pct, const Accent &a, bool grow = true);
 void bar_set(lv_obj_t *b, int pct);
 
+// Setters that leave an object alone when nothing changes. LVGL redraws an
+// object on every set, of the same value too: a 60 ms update timer setting
+// unchanged texts and colours kept a whole pane redrawing at ~16 fps.
+void set_text(lv_obj_t *label, const char *text);
+void set_hidden(lv_obj_t *o, bool hidden);
+void set_bg_color(lv_obj_t *o, lv_color_t c);
+void set_text_color(lv_obj_t *o, lv_color_t c);
+void set_line_color(lv_obj_t *o, lv_color_t c);
+void set_shadow_color(lv_obj_t *o, lv_color_t c);
+void set_shadow_opa(lv_obj_t *o, lv_opa_t opa);
+
 // Segmented capsule with a springing indicator (selected -1: none yet).
 // Sends VALUE_CHANGED.
 lv_obj_t *capsule(lv_obj_t *parent, int x, int y, int w, int h, const char *const *labels, int count, int selected,

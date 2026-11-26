@@ -65,13 +65,6 @@ struct {
     lv_obj_t *calibration = nullptr, *guide = nullptr, *cal_value = nullptr;
 } ui;
 
-void set_text(lv_obj_t *l, const char *text)
-{
-    if (strcmp(lv_label_get_text(l), text)) {
-        lv_label_set_text(l, text);
-    }
-}
-
 void set_color(lv_obj_t *o, uint32_t color)
 {
     if (!lv_color_eq(lv_obj_get_style_text_color(o, LV_PART_MAIN), lv_color_hex(color))) {

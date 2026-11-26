@@ -311,14 +311,14 @@ void remote_cb(lv_event_t *e)
     wanted_until = esp_timer_get_time() + 10 * 1000000LL;
     U.waiting_for = ++ir_asked;
     ir_request = 0x10000u | uint32_t(LG_ADDRESS) << 8 | command;
-    lv_label_set_text(U.remote, "TV remote (LG) \xC2\xB7 sending\xE2\x80\xA6");
+    set_text(U.remote, "TV remote (LG) \xC2\xB7 sending\xE2\x80\xA6");
     U.remote_note_until = esp_timer_get_time() + 3000000;
 }
 
 lv_obj_t *card(lv_obj_t *p, int x, int y, int w, int h)
 {
     lv_obj_t *c = box(p, x, y, w, h, 22);
-    lv_obj_set_style_bg_color(c, lv_color_hex(CARD), 0);
+    set_bg_color(c, lv_color_hex(CARD));
     lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(c, 1, 0);
     lv_obj_set_style_border_color(c, lv_color_hex(EDGE), 0);
@@ -327,9 +327,9 @@ lv_obj_t *card(lv_obj_t *p, int x, int y, int w, int h)
 
 void set_lamp(lv_obj_t *lamp, bool on, uint32_t colour_on)
 {
-    lv_obj_set_style_bg_color(lamp, lv_color_hex(on ? colour_on : OFF), 0);
-    lv_obj_set_style_shadow_color(lamp, lv_color_hex(colour_on), 0);
-    lv_obj_set_style_shadow_opa(lamp, on ? 160 : 0, 0);
+    set_bg_color(lamp, lv_color_hex(on ? colour_on : OFF));
+    set_shadow_color(lamp, lv_color_hex(colour_on));
+    set_shadow_opa(lamp, on ? 160 : 0);
 }
 }  // namespace
 
@@ -401,7 +401,7 @@ void build(lv_obj_t *p, const Accent &a)
     static const Button BUTTONS[4] = {{"power", 0x08}, {"voldown", 0x03}, {"volup", 0x02}, {"speaker", 0x09}};
     for (int i = 0; i < 4; ++i) {
         lv_obj_t *b = box(p, 123 + i * 62, 294, 48, 48, LV_RADIUS_CIRCLE);
-        lv_obj_set_style_bg_color(b, lv_color_hex(i == 0 ? a.lo : FIELD), 0);
+        set_bg_color(b, lv_color_hex(i == 0 ? a.lo : FIELD));
         lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
         lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
         press_fx(b);
@@ -425,20 +425,20 @@ void update()
     } else {
         strlcpy(text, "Plug the Interaction board into either side", sizeof(text));
     }
-    lv_label_set_text(U.status, text);
+    set_text(U.status, text);
     const bool on[3] = {s.present && s.left, s.present && s.motion, s.present && s.right};
     const uint32_t colours[3] = {0xFF5050, 0x60E080, 0x5090FF};
     for (int i = 0; i < 3; ++i) {
         set_lamp(U.lamp[i], on[i], colours[i]);
     }
-    lv_label_set_text(U.note[0], !s.present ? "" : s.left ? "Pressed" : "Touch or press");
-    lv_label_set_text(U.note[2], !s.present ? "" : s.right ? "Pressed" : "Touch or press");
+    set_text(U.note[0], !s.present ? "" : s.left ? "Pressed" : "Touch or press");
+    set_text(U.note[2], !s.present ? "" : s.right ? "Pressed" : "Touch or press");
     if (!s.present) {
-        lv_label_set_text(U.note[1], "");
+        set_text(U.note[1], "");
     } else if (s.motion) {
-        lv_label_set_text(U.note[1], "Now");
+        set_text(U.note[1], "Now");
     } else if (!s.motion_at) {
-        lv_label_set_text(U.note[1], "None yet");
+        set_text(U.note[1], "None yet");
     } else {
         const int ago = int((now - s.motion_at) / 1000000);
         if (ago < 60) {
@@ -448,14 +448,14 @@ void update()
         } else {
             snprintf(text, sizeof(text), "%d h ago", ago / 3600);
         }
-        lv_label_set_text(U.note[1], text);
+        set_text(U.note[1], text);
     }
     if (s.present && s.light >= 0) {
         snprintf(text, sizeof(text), "%d%%%s", s.light, s.light < NIGHT_DARK ? " \xC2\xB7 dark" : "");
-        lv_label_set_text(U.light, text);
+        set_text(U.light, text);
         bar_set(U.light_bar, s.light);
     } else {
-        lv_label_set_text(U.light, "--");
+        set_text(U.light, "--");
         bar_set(U.light_bar, 0);
     }
     if (capsule_selected(U.modes) != mode.load()) {
@@ -463,21 +463,21 @@ void update()
     }
     for (int i = 0; i < LEDS; ++i) {
         const uint32_t c = s.present ? s.leds[i] : 0;
-        lv_obj_set_style_bg_color(U.leds[i], lv_color_hex(c ? c : 0x202020), 0);
-        lv_obj_set_style_shadow_color(U.leds[i], lv_color_hex(c), 0);
-        lv_obj_set_style_shadow_opa(U.leds[i], c ? 140 : 0, 0);
+        set_bg_color(U.leds[i], lv_color_hex(c ? c : 0x202020));
+        set_shadow_color(U.leds[i], lv_color_hex(c));
+        set_shadow_opa(U.leds[i], c ? 140 : 0);
     }
     if (U.waiting_for && ir_answered.load() == U.waiting_for) {
         U.waiting_for = 0;
-        lv_label_set_text(U.remote, ir_result == 1 ? "TV remote (LG) \xC2\xB7 sent" : "TV remote (LG) \xC2\xB7 not sent");
+        set_text(U.remote, ir_result == 1 ? "TV remote (LG) \xC2\xB7 sent" : "TV remote (LG) \xC2\xB7 not sent");
         U.remote_note_until = now + 1500000;
     } else if (U.waiting_for && now > U.remote_note_until) {
         U.waiting_for = 0;
-        lv_label_set_text(U.remote, "TV remote (LG) \xC2\xB7 no board");
+        set_text(U.remote, "TV remote (LG) \xC2\xB7 no board");
         U.remote_note_until = now + 1500000;
     } else if (!U.waiting_for && U.remote_note_until && now > U.remote_note_until) {
         U.remote_note_until = 0;
-        lv_label_set_text(U.remote, "TV remote (LG)");
+        set_text(U.remote, "TV remote (LG)");
     }
 }
 }  // namespace interact

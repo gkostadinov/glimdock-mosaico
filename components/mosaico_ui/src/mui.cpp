@@ -377,6 +377,10 @@ void bar_set(lv_obj_t *b, int pct)
 {
     lv_obj_t *fill = lv_obj_get_child(b, 0);
     const int32_t w = lv_obj_get_width(b), fw = std::max<int32_t>(0, std::min<int32_t>(w, w * pct / 100));
+    const bool hidden = lv_obj_has_flag(fill, LV_OBJ_FLAG_HIDDEN);
+    if (!lv_anim_get(fill, anim_w) && (fw < 1 ? hidden : !hidden && lv_obj_get_style_width(fill, LV_PART_MAIN) == fw)) {
+        return;  // as it is: no redraw
+    }
     lv_anim_delete(fill, anim_w);
     if (fw < 1) {
         lv_obj_add_flag(fill, LV_OBJ_FLAG_HIDDEN);
@@ -384,6 +388,61 @@ void bar_set(lv_obj_t *b, int pct)
     }
     lv_obj_remove_flag(fill, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_width(fill, fw);
+}
+
+void set_text(lv_obj_t *label, const char *text)
+{
+    const char *now = lv_label_get_text(label);
+    if (!now || strcmp(now, text) != 0) {
+        lv_label_set_text(label, text);
+    }
+}
+
+void set_hidden(lv_obj_t *o, bool hidden)
+{
+    if (lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN) == hidden) {
+        return;
+    }
+    if (hidden) {
+        lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void set_bg_color(lv_obj_t *o, lv_color_t c)
+{
+    if (!lv_color_eq(lv_obj_get_style_bg_color(o, LV_PART_MAIN), c)) {
+        lv_obj_set_style_bg_color(o, c, 0);
+    }
+}
+
+void set_text_color(lv_obj_t *o, lv_color_t c)
+{
+    if (!lv_color_eq(lv_obj_get_style_text_color(o, LV_PART_MAIN), c)) {
+        lv_obj_set_style_text_color(o, c, 0);
+    }
+}
+
+void set_line_color(lv_obj_t *o, lv_color_t c)
+{
+    if (!lv_color_eq(lv_obj_get_style_line_color(o, LV_PART_MAIN), c)) {
+        lv_obj_set_style_line_color(o, c, 0);
+    }
+}
+
+void set_shadow_color(lv_obj_t *o, lv_color_t c)
+{
+    if (!lv_color_eq(lv_obj_get_style_shadow_color(o, LV_PART_MAIN), c)) {
+        lv_obj_set_style_shadow_color(o, c, 0);
+    }
+}
+
+void set_shadow_opa(lv_obj_t *o, lv_opa_t opa)
+{
+    if (lv_obj_get_style_shadow_opa(o, LV_PART_MAIN) != opa) {
+        lv_obj_set_style_shadow_opa(o, opa, 0);
+    }
 }
 
 // ---- capsule -------------------------------------------------------------------
