@@ -258,15 +258,30 @@ void key(lv_obj_t *p, const char *text, int x, int y, int w = 180)
     label(p, text, x, y, w, TEXT3, 13, true);
 }
 // A big value with its unit on the baseline.
-void big(lv_obj_t *p, const string &value, const char *unit, int x, int y, int px, uint32_t color = TEXT)
+struct Big {
+    lv_obj_t *value = nullptr, *unit = nullptr;
+    int x = 0, px = 0;
+};
+Big big(lv_obj_t *p, const string &value, const char *unit, int x, int y, int px, uint32_t color = TEXT)
 {
-    lv_obj_t *v = label(p, value.c_str(), x, y, 0, color, px, true);
+    Big b;
+    b.x = x, b.px = px;
+    b.value = label(p, value.c_str(), x, y, 0, color, px, true);
     if (unit && *unit && value != DASH) {
         const int up = std::max(13, px * 2 / 5);
         const int vh = lv_font_get_line_height(font(px, true)), uh = lv_font_get_line_height(font(up, true));
-        label(p, unit, x + text_width(value.c_str(), px) + 3, y + vh - uh - px / 9, 0, TEXT2, up, true);
+        b.unit = label(p, unit, x + text_width(value.c_str(), px) + 3, y + vh - uh - px / 9, 0, TEXT2, up, true);
     }
-    (void)v;
+    return b;
+}
+// A new value for a big one (its unit, if any, moves to follow it).
+void big_set(const Big &b, const string &value, uint32_t color)
+{
+    set_text(b.value, value.c_str());
+    set_text_color(b.value, lv_color_hex(color));
+    if (b.unit) {
+        lv_obj_set_x(b.unit, b.x + text_width(value.c_str(), b.px) + 3);
+    }
 }
 void row_text(lv_obj_t *p, const string &left, const string &right, int y, uint32_t rc = TEXT2)
 {
@@ -398,25 +413,143 @@ void setup_card()
     Y += 244;
 }
 
+// ---- Systems page ----------------------------------------------------------------------
+// What the page shows, worked out once for building it and for updating it.
+// A new snapshot with the same systems (the same shape) updates the values in
+// place: rebuilding took ~50 ms of the UI task (build, layout) and a whole
+// screen redraw every few seconds.
+struct SystemCardView {
+    uint32_t dot;
+    string sub, value, state;  // state: a printer's
+    int bar;                    // memory %, -1: none
+    bool printer;
+};
+SystemCardView system_card_view(const NodeDescriptor &n)
+{
+    SystemCardView v;
+    const uint8_t st = node_state(n);
+    const NodeSummary &s = n.summary;
+    v.dot = state_color(st);
+    v.sub = fmt("%s \xC2\xB7 %s", nodeTypeName(n), st == 2 ? "offline" : st == 1 ? "attention" : "healthy");
+    v.printer = is_printer(n);
+    if (v.printer) {
+        v.value = isfinite(s.progress) ? num(s.progress) : string(DASH);
+        v.state = s.printState[0] ? s.printState : "idle";
+        v.bar = -1;
+    } else {
+        v.value = s.available ? num(s.cpu) : string(DASH);
+        v.bar = s.available && isfinite(s.memory) ? int(s.memory) : -1;
+    }
+    return v;
+}
+struct FleetView {
+    int healthy = 0, n = 0;
+    string cpu, mem;
+};
+FleetView fleet_view(const Snapshot &s)
+{
+    FleetView f;
+    float cpu = 0, mem = 0;
+    int nc = 0, nm = 0;
+    for (int i = 0; i < s.nNodes; ++i) {
+        const NodeSummary &v = s.nodes[i].summary;
+        if (node_state(s.nodes[i]) == 0) {
+            ++f.healthy;
+        }
+        if (v.available && isfinite(v.cpu)) {
+            cpu += v.cpu;
+            ++nc;
+        }
+        if (v.available && isfinite(v.memory)) {
+            mem += v.memory;
+            ++nm;
+        }
+    }
+    f.n = s.nNodes;
+    f.cpu = nc ? num(cpu / nc) : string(DASH);
+    f.mem = nm ? num(mem / nm) : string(DASH);
+    return f;
+}
+// The objects whose values change, from the last build.
+struct SystemCardRefs {
+    lv_obj_t *dot = nullptr, *sub = nullptr, *state = nullptr, *bar = nullptr;
+    Big value;
+};
+struct {
+    bool built = false;
+    string shape;
+    Big healthy, cpu, mem;
+    lv_obj_t *note = nullptr;
+    std::vector<SystemCardRefs> cards;
+} SV;
+// What fixes the page's layout: which systems, their names, which parts show.
+string systems_shape()
+{
+    const Snapshot &s = *G.snap;
+    if ((!G.demo && !G.net.configured) || !s.valid || !s.nNodes) {
+        return "";
+    }
+    const FleetView f = fleet_view(s);
+    string k = fmt("%d%c%c|", s.nNodes, f.cpu == DASH ? '-' : 'c', f.mem == DASH ? '-' : 'm');
+    for (int i = 0; i < s.nNodes; ++i) {
+        const NodeDescriptor &n = s.nodes[i];
+        const SystemCardView v = system_card_view(n);
+        k += n.id;
+        k += '\x1f';
+        k += n.name;
+        k += v.printer ? 'P' : 'S';
+        k += v.value == DASH ? '-' : 'v';
+        k += v.bar < 0 ? '-' : 'b';
+        k += '\x1e';
+    }
+    return k;
+}
+// New values on the page as built; false when it has to be built again.
+bool update_systems()
+{
+    if (!SV.built || G.page != SYSTEMS || systems_shape() != SV.shape) {
+        return false;
+    }
+    const Snapshot &s = *G.snap;
+    const FleetView f = fleet_view(s);
+    big_set(SV.healthy, fmt("%d", f.healthy), f.healthy == f.n ? OK : WARN);
+    set_text(SV.note, f.healthy == f.n ? "all systems healthy" : "systems healthy");
+    big_set(SV.cpu, f.cpu, ACC.glow);
+    big_set(SV.mem, f.mem, VIOLET.glow);
+    for (int i = 0; i < s.nNodes && size_t(i) < SV.cards.size(); ++i) {
+        const SystemCardView v = system_card_view(s.nodes[i]);
+        const SystemCardRefs &r = SV.cards[size_t(i)];
+        set_bg_color(r.dot, lv_color_hex(v.dot));
+        set_text(r.sub, v.sub.c_str());
+        big_set(r.value, v.value, v.printer ? WARN : ACC.glow);
+        if (r.state) {
+            set_text(r.state, v.state.c_str());
+        }
+        if (r.bar && v.bar >= 0) {
+            bar_set(r.bar, v.bar);
+        }
+    }
+    return true;
+}
+
 void system_card(int i, int x)
 {
     const NodeDescriptor &n = G.snap->nodes[i];
+    const SystemCardView v = system_card_view(n);
+    SystemCardRefs &r = SV.cards[size_t(i)];
     lv_obj_t *c = card(124, x, HALF);
     press_fx(c);
     on(c, node_cb, reinterpret_cast<void *>(intptr_t(i)));
-    const uint8_t st = node_state(n);
-    dot(c, 18, 22, 10, state_color(st));
+    r.dot = dot(c, 18, 22, 10, v.dot);
     label(c, n.name[0] ? n.name : n.id, 36, 15, 172, TEXT, 17, true);
-    label(c, fmt("%s \xC2\xB7 %s", nodeTypeName(n), st == 2 ? "offline" : st == 1 ? "attention" : "healthy").c_str(),
-          18, 42, 190, TEXT3, 13);
-    const NodeSummary &s = n.summary;
-    if (is_printer(n)) {
-        big(c, isfinite(s.progress) ? num(s.progress) : string(DASH), "%", 18, 64, 32, WARN);
-        label(c, s.printState[0] ? s.printState : "idle", 110, 82, 96, TEXT2, 14, false, LV_TEXT_ALIGN_RIGHT);
+    r.sub = label(c, v.sub.c_str(), 18, 42, 190, TEXT3, 13);
+    if (v.printer) {
+        r.value = big(c, v.value, "%", 18, 64, 32, WARN);
+        r.state = label(c, v.state.c_str(), 110, 82, 96, TEXT2, 14, false, LV_TEXT_ALIGN_RIGHT);
     } else {
-        big(c, s.available ? num(s.cpu) : string(DASH), "% cpu", 18, 64, 32, ACC.glow);
-        if (s.available && isfinite(s.memory)) {
-            bar(c, 18, 108, 188, 6, int(s.memory), VIOLET, false);
+        r.value = big(c, v.value, "% cpu", 18, 64, 32, ACC.glow);
+        if (v.bar >= 0) {
+            r.bar = bar(c, 18, 108, 188, 6, v.bar, VIOLET, false);
         }
     }
 }
@@ -438,31 +571,16 @@ void page_systems()
         redirect = true;
         return;
     }
-    int healthy = 0;
-    float cpu = 0, mem = 0;
-    int nc = 0, nm = 0;
-    for (int i = 0; i < s.nNodes; ++i) {
-        const NodeSummary &v = s.nodes[i].summary;
-        if (node_state(s.nodes[i]) == 0) {
-            ++healthy;
-        }
-        if (v.available && isfinite(v.cpu)) {
-            cpu += v.cpu;
-            ++nc;
-        }
-        if (v.available && isfinite(v.memory)) {
-            mem += v.memory;
-            ++nm;
-        }
-    }
+    const FleetView f = fleet_view(s);
     lv_obj_t *sum = card(104);
-    big(sum, fmt("%d", healthy), fmt("/ %d", s.nNodes).c_str(), 22, 14, 46, healthy == s.nNodes ? OK : WARN);
-    label(sum, healthy == s.nNodes ? "all systems healthy" : "systems healthy", 22, 72, 190, TEXT2, 14);
+    SV.healthy = big(sum, fmt("%d", f.healthy), fmt("/ %d", f.n).c_str(), 22, 14, 46, f.healthy == f.n ? OK : WARN);
+    SV.note = label(sum, f.healthy == f.n ? "all systems healthy" : "systems healthy", 22, 72, 190, TEXT2, 14);
     key(sum, "FLEET CPU", 220, 18, 110);
-    big(sum, nc ? num(cpu / nc) : string(DASH), "%", 220, 36, 32, ACC.glow);
+    SV.cpu = big(sum, f.cpu, "%", 220, 36, 32, ACC.glow);
     key(sum, "MEMORY", 340, 18, 110);
-    big(sum, nm ? num(mem / nm) : string(DASH), "%", 340, 36, 32, VIOLET.glow);
+    SV.mem = big(sum, f.mem, "%", 340, 36, 32, VIOLET.glow);
     Y += 104 + GAP;
+    SV.cards.assign(size_t(s.nNodes), SystemCardRefs{});
     for (int i = 0; i < s.nNodes; i += 2) {
         system_card(i, 0);
         if (i + 1 < s.nNodes) {
@@ -470,6 +588,8 @@ void page_systems()
         }
         Y += 124 + GAP;
     }
+    SV.shape = systems_shape();
+    SV.built = true;
 }
 
 void page_clock()
@@ -2279,6 +2399,11 @@ void rebuild()
 {
     G.dirty = false;
     const bool same = has_rendered && rendered_page == G.page && rendered_fleet == G.fleet;
+    if (same && update_systems()) {
+        update_header();
+        return;
+    }
+    SV.built = false;
     const int32_t scroll = same ? lv_obj_get_scroll_y(G.content) : 0;
     lv_obj_clean(G.content);
     C = G.content;
