@@ -17,7 +17,11 @@ their settings alone.
 | :---: | :---: | :---: | :---: | :---: | :---: |
 | ![The launcher, Settings and Web settings](docs/media/launcher.gif) | ![A tour of Glimdock's pages](docs/media/glimdock.gif) | ![Swifty listening, thinking and answering](docs/media/swifty.gif) | ![Home's rooms, lights and music](docs/media/home.gif) | ![The spirit level](docs/media/level.gif) | ![The six games: Ember Crypt, Starbore, Skyglide, Jellystorm, Lunar Flip and Ridge Rally](docs/media/games.gif) |
 
-A 40-second tour: [docs/media/glimdock-tour.mp4](docs/media/glimdock-tour.mp4).
+| Home screen and shortcuts | Wi-Fi and VPN |
+| :---: | :---: |
+| ![Editing the home screen, and a shortcut tile](store/covers/07-home-screen.png) | ![Settings > Wi-Fi and the VPN](store/covers/08-network.png) |
+
+A one-minute tour: [docs/media/glimdock-tour.mp4](docs/media/glimdock-tour.mp4).
 All of these are rendered from the desktop preview's demo data (`host/media.py`).
 
 ## Apps
@@ -39,6 +43,16 @@ All of these are rendered from the desktop preview's demo data (`host/media.py`)
 
 Every app works from the board's own settings; nothing points at a particular
 server until you configure it.
+
+### Games
+
+| Ember Crypt | Starbore | Skyglide |
+| :---: | :---: | :---: |
+| ![Ember Crypt: a lantern-lit crawl through crypts](docs/media/games/crypt.gif) | ![Starbore: a neon tunnel flyer](docs/media/games/starbore.gif) | ![Skyglide: a glider over hills and lakes](docs/media/games/skyglide.gif) |
+| Gather the shards before the ember's oil runs out | Thread the gates of a twisting neon bore | Ride the thermals through the golden hoops |
+| **Jellystorm** | **Lunar Flip** | **Ridge Rally** |
+| ![Jellystorm: a wave shooter against space jellies](docs/media/games/jellystorm.gif) | ![Lunar Flip: moonbase pinball](docs/media/games/pinball.gif) | ![Ridge Rally: a gravel stage against the clock](docs/media/games/rally.gif) |
+| Hold back the glowing swarm, wave after wave | Light the lanes and drop the targets | Gravel, pines and hairpins against the clock |
 
 ### Home screen
 

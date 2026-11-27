@@ -449,8 +449,28 @@ void render_launcher(int radius)
     if (recording) {
         launcher_ui_entered(ShellApp::Launcher);
         record("launcher", 60, 33);
+        // A swipe to the second page and back.
+        const auto swipe = [](int from, int step) {
+            return [from, step](int i) {
+                finger.down = i < 10;
+                finger.at = {int32_t(from + step * std::min(i, 9)), 300};
+            };
+        };
+        record("launcher", 30, 33, swipe(400, -32));
+        record("launcher", 20, 33);
+        record("launcher", 30, 33, swipe(80, 32));
         launcher_ui_show_page(6);
         record("launcher", 24, 33);
+        // Settings > Wi-Fi: the scan, the networks, a password.
+        wifi_settings_open();
+        record("launcher", 54, 33);
+        record("launcher", 4, 33, [](int i) {
+            finger.down = i < 2;
+            finger.at = {240, 430};  // Neighbour 5G
+        });
+        record("launcher", 36, 33);
+        wifi_settings_close();
+        record("launcher", 10, 33);
         record("launcher", 40, 33, scroll_to(520, 30));  // down to Web settings
         status.web_on = true, status.web_url = "http://192.0.2.42", status.web_code = "482913";
         launcher_ui_update(status, glim, home, camera, swifty, files);

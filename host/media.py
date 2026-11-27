@@ -10,8 +10,9 @@ Needs Pillow, ffmpeg and (for the web settings page) Google Chrome or Chromium.
 Everything shown comes from the preview's demo data, never from a real board:
 a board's screens would show your own hosts, rooms and photos.
 
-Writes store/covers/*.png (1920 x 1080, the Ideas store's covers),
-docs/media/*.gif (the README's animations) and docs/media/glimdock-tour.mp4.
+Writes store/covers/*.png (1920 x 1080, the Ideas store's covers, at most 9),
+docs/media/*.gif (the README's animations), docs/media/games/*.gif (one per
+game) and docs/media/glimdock-tour.mp4.
 """
 
 import argparse
@@ -33,6 +34,16 @@ PANEL, RADIUS = 480, 80  # the panel and its corner radius, in its own pixels
 FPS = 30  # the preview records a frame every 33 ms
 
 CYAN, VIOLET, AMBER, GREEN, CORAL, BLUE = "#54D9F2", "#7A5BF5", "#F0B858", "#7AD6A0", "#FF8A70", "#5AB8FF"
+
+# The games: the preview's recording names (games-KEY) and their titles.
+GAMES = [
+    ("crypt", "Ember Crypt"),
+    ("starbore", "Starbore"),
+    ("skyglide", "Skyglide"),
+    ("jellystorm", "Jellystorm"),
+    ("pinball", "Lunar Flip"),
+    ("rally", "Ridge Rally"),
+]
 
 # The web settings page as it looks with demo settings (no board needed).
 DEMO_STATUS = """{"swifty":{"llm_url":"http://model-server:8080/v1","llm_model":"","llm_key":true,
@@ -246,7 +257,7 @@ def covers(raw, out_dir, page_png):
             "01-launcher",
             "Glimdock for ESP-Mosaico",
             "Your desk, at a glance",
-            "Homelab dashboard, smart home, a voice assistant, camera, files and tools in one launcher.",
+            "Homelab dashboard, smart home, a voice assistant, camera, VPN, games and tools in one launcher.",
             CYAN,
             [raw / "launcher-home-screen.png"],
         ),
@@ -283,16 +294,25 @@ def covers(raw, out_dir, page_png):
             [swifty_frame],
         ),
         (
-            "06-tools",
-            "Tools",
-            "Handy tools",
-            "Torch, spirit level, compass, calculator and a USB webcam mode.",
-            CORAL,
-            [raw / "tools-level.png", raw / "tools-calc.png"],
+            "07-home-screen",
+            "Home screen",
+            "Arrange it like a phone",
+            "Swipe between pages, drag and hide icons, and add one-tap shortcuts such as All lights off.",
+            AMBER,
+            [raw / "launcher-edit.png", raw / "launcher-shortcut.png"],
+        ),
+        (
+            "08-network",
+            "Wi-Fi and VPN",
+            "Any network, your tunnel",
+            "Pick a Wi-Fi network on the board, then send all of its traffic through your WireGuard server.",
+            VIOLET,
+            [raw / "launcher-wifi.png", raw / "vpn-connected.png"],
         ),
     ]
     for name, eyebrow, title, subtitle, accent, shots in c:
         cover(out_dir / f"{name}.png", eyebrow, title, subtitle, accent, shots)
+    games_cover(out_dir / "06-games.png", raw)
     # Web settings: the board's card and the page in a browser.
     canvas = background(GREEN, (1330, 560))
     draw_text(
@@ -313,8 +333,33 @@ def covers(raw, out_dir, page_png):
         canvas.paste((0, 0, 0), (0, 0), shadow.filter(ImageFilter.GaussianBlur(40)))
         canvas.paste(win, (x, y), win)
     draw_device(canvas, (800, 590), 430, screen(raw / "launcher-settings-web.png"))
-    canvas.save(out_dir / "07-web-settings.png", optimize=True)
-    print("cover 07-web-settings.png")
+    canvas.save(out_dir / "09-web-settings.png", optimize=True)
+    print("cover 09-web-settings.png")
+
+
+def games_cover(out, raw):
+    """The six games in play, three by two, each with its name."""
+    canvas = background(CORAL, (1330, H // 2))
+    draw_text(
+        canvas,
+        "Games",
+        "Six retro 3D games",
+        "A crypt crawl, a neon tunnel, a glider, a wave shooter, pinball and a rally. Play by touch or tilt the board.",
+        CORAL,
+        x=110,
+        width=560,
+        title_px=72,
+    )
+    size, gap_x, row_h = 290, 66, 290 + 112
+    x0, y0 = W - 110 - (3 * size + 2 * gap_x), (H - (2 * row_h - 50)) // 2
+    d = ImageDraw.Draw(canvas)
+    for i, (key, name) in enumerate(GAMES):
+        x, y = x0 + (i % 3) * (size + gap_x), y0 + (i // 3) * row_h
+        draw_device(canvas, (x, y), size, screen(raw / f"games-play-{key}.png"))
+        d = ImageDraw.Draw(canvas)
+        d.text((x + size // 2, y + size + 44), name, font=font(28), fill=(220, 220, 225), anchor="mm")
+    canvas.save(out, optimize=True)
+    print("cover", out.name)
 
 
 # ---- GIFs and the video ---------------------------------------------------------------------
@@ -341,16 +386,40 @@ CLIPS = [  # folder, eyebrow, title, subtitle, accent
         BLUE,
     ),
     ("home", "Home", "Your home on the wall", "Rooms, lights and music from a Swifty Home hub.", VIOLET),
+    (
+        "games",
+        "Games",
+        "Six retro 3D games",
+        "Ember Crypt, Starbore, Skyglide, Jellystorm, Lunar Flip and Ridge Rally, by touch or by tilt.",
+        CORAL,
+    ),
     ("level", "Tools", "A spirit level, and more", "Torch, compass, calculator and a USB webcam mode.", CORAL),
 ]
+# Busy 3D scenes change all over every frame: smaller, slower, fewer colours
+# and an ordered dither keep their GIFs to a couple of MB.
+GAME_GIF = {"colors": 128, "dither": "bayer:bayer_scale=4"}
+GIF_OPTIONS = {"games": {"size": 280, "fps": 10, **GAME_GIF}}
+
+
+def games_clip(raw, seconds=2.5):
+    """raw/games: the first seconds of each game's recording, one after another."""
+    out = raw / "games"
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir()
+    n = 0
+    for key, _ in GAMES:
+        for frame in sorted((raw / f"games-{key}").glob("*.ppm"))[: round(seconds * FPS)]:
+            (out / f"{n:04d}.ppm").symlink_to(frame.resolve())
+            n += 1
 
 
 def ffmpeg(*args):
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", *map(str, args)], check=True)
 
 
-def gif(frames, out, size=360, fps=20):
-    """A README animation: the panel with its rounded corners, on black."""
+def gif(frames, out, size=360, fps=20, seconds=None, colors=192, dither="sierra2_4a"):
+    """A README animation: the panel with its rounded corners, on black
+    (the first seconds of the frames, or all of them)."""
     with tempfile.TemporaryDirectory() as tmp:
         corners = Path(tmp) / "corners.png"
         mask = rounded_mask((size, size), RADIUS * size / PANEL)
@@ -360,13 +429,14 @@ def gif(frames, out, size=360, fps=20):
         ffmpeg(
             "-framerate",
             FPS,
+            *(["-t", seconds] if seconds else []),
             "-i",
             frames / "%04d.ppm",
             "-i",
             corners,
             "-filter_complex",
             f"[0]fps={fps},scale={size}:{size}:flags=lanczos[s];[s][1]overlay,split[a][b];"
-            "[a]palettegen=max_colors=192:stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle",
+            f"[a]palettegen=max_colors={colors}:stats_mode=diff[p];[b][p]paletteuse=dither={dither}:diff_mode=rectangle",
             out,
         )
     print("gif", out.name, f"{out.stat().st_size / 1e6:.1f} MB")
@@ -411,7 +481,7 @@ def segment(tmp, index, frames, eyebrow, title, subtitle, accent):
         "-preset",
         "slow",
         "-crf",
-        20,
+        23,
         "-r",
         FPS,
         out,
@@ -443,7 +513,7 @@ def title_card(tmp, index, still, eyebrow, title, subtitle, accent, seconds=3.0)
         "-preset",
         "slow",
         "-crf",
-        20,
+        23,
         "-r",
         FPS,
         out,
@@ -501,8 +571,12 @@ def main():
         if not web_page_shot(page_png):
             print("no Chrome: the web settings cover goes without the page", file=sys.stderr)
         covers(args.raw, args.covers, page_png)
+    games_clip(args.raw)
     for folder, *_ in CLIPS:
-        gif(args.raw / folder, args.media / f"{folder}.gif")
+        gif(args.raw / folder, args.media / f"{folder}.gif", **GIF_OPTIONS.get(folder, {}))
+    (args.media / "games").mkdir(exist_ok=True)
+    for key, _ in GAMES:
+        gif(args.raw / f"games-{key}", args.media / "games" / f"{key}.gif", 260, 12, seconds=4, **GAME_GIF)
     if not args.skip_video:
         video(args.raw, args.media / "glimdock-tour.mp4")
 

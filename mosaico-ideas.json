@@ -24,8 +24,10 @@
       "store/covers/03-printers-agents.png",
       "store/covers/04-home.png",
       "store/covers/05-swifty.png",
-      "store/covers/06-tools.png",
-      "store/covers/07-web-settings.png"
+      "store/covers/06-games.png",
+      "store/covers/07-home-screen.png",
+      "store/covers/08-network.png",
+      "store/covers/09-web-settings.png"
     ],
     "attachments": ["docs/media/glimdock-tour.mp4"]
   },
