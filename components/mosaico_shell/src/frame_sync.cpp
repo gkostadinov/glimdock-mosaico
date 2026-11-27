@@ -7,6 +7,13 @@
 // through two small internal DMA buffers, starting just behind the panel's
 // scan (its TE pin marks each refresh).
 //
+// The panel always scans its own memory top to bottom, but the UI turns with
+// the board through MADCTL, so in UI terms the scan runs down the rows only at
+// rotation 0: up the rows at 180, and along the columns at 90 and 270 (right
+// to left, left to right). The sender follows the scan along that axis, as
+// rows or as column strips; sending rows against a column-wise scan put the
+// old/new frame seam on a diagonal while scrolling.
+//
 // Why that is tear-free at 40 MHz: a full frame takes ~23 ms to send against
 // a ~16.7 ms refresh. Started right behind the scan, the write is overtaken
 // by the scan (which then shows the old frame, whole) and finishes before the
@@ -45,9 +52,9 @@ struct {
     std::atomic<bool> busy{false};
     // the frame being sent
     const uint8_t *src = nullptr;
-    int y1 = 0, y2 = 0;
-    // rows changed in the frame being rendered
-    int dirty_y1 = H, dirty_y2 = -1;
+    int x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    // the area changed in the frame being rendered
+    int dirty_x1 = W, dirty_x2 = -1, dirty_y1 = H, dirty_y2 = -1;
     // TE timing (ISR)
     volatile int64_t last_rise = 0, last_fall = 0, high_us = 0, low_us = 0, scan_start = 0, period_us = 16667;
     volatile uint32_t edges = 0;
@@ -105,15 +112,16 @@ void copy_swapped(uint8_t *dst, const uint8_t *src, size_t bytes)
     }
 }
 
-// Waits until the scan has passed row y (plus a margin), so the write follows it.
-void follow_scan(int y)
+// Waits until the scan has passed the panel's own row p (plus a margin), so
+// the write follows it.
+void follow_scan(int p)
 {
     xSemaphoreTake(F.scan, 0);  // drop a stale edge
     if (xSemaphoreTake(F.scan, pdMS_TO_TICKS(40)) != pdTRUE) {
         return;    // no TE: send now
     }
     const int64_t period = std::clamp<int64_t>(int64_t(F.period_us), 8000, 40000);
-    const int64_t target = F.scan_start + int64_t(y) * period / H + 400;
+    const int64_t target = F.scan_start + int64_t(p) * period / H + 400;
     int64_t left = target - esp_timer_get_time();
     if (left > 2000) {
         vTaskDelay(pdMS_TO_TICKS(left / 1000 - 1));
@@ -124,21 +132,63 @@ void follow_scan(int y)
     }
 }
 
+// One piece of the frame: rows [y, y + n) across the width, or the strip of
+// columns [x, x + n) over rows [y1, y2].
+struct Piece {
+    int at, n;
+};
+
 void sender(void *)
 {
+    Piece pieces[W / 4 + 1];
     for (;;) {
         xSemaphoreTake(F.job, portMAX_DELAY);
-        const int y1 = std::max(0, F.y1 & ~1), y2 = std::min(H - 1, F.y2 | 1);
-        follow_scan(y1);
+        // Which way the panel's scan runs through the UI's frame (see the top).
+        const bsp_display_rotation_t rotation = bsp_display_get_rotation();
+        const bool columns = rotation == BSP_DISPLAY_ROTATE_90 || rotation == BSP_DISPLAY_ROTATE_270;
+        const bool reverse = rotation == BSP_DISPLAY_ROTATE_90 || rotation == BSP_DISPLAY_ROTATE_180;
+        int count = 0, y1, y2, x1 = 0, x2 = W - 1;
+        if (!columns) {
+            y1 = std::max(0, F.y1 & ~1), y2 = std::min(H - 1, F.y2 | 1);
+            for (int y = y1; y <= y2; y += CHUNK) {
+                pieces[count++] = {y, std::min(CHUNK, y2 - y + 1)};
+            }
+        } else {
+            // Strips as tall as the change, as wide as a DMA buffer holds,
+            // on 4-pixel bounds both ways (the panel's QSPI window rule).
+            y1 = std::max(0, F.y1 & ~3), y2 = std::min(H - 1, F.y2 | 3);
+            x1 = std::max(0, F.x1 & ~3), x2 = std::min(W - 1, F.x2 | 3);
+            const int width = std::max(4, int(CHUNK_BYTES / (size_t(y2 - y1 + 1) * 2)) & ~3);
+            for (int x = x1; x <= x2; x += width) {
+                pieces[count++] = {x, std::min(width, x2 - x + 1)};
+            }
+        }
+        if (count == 0) {
+            F.busy = false;
+            xSemaphoreGive(F.frame_done);
+            continue;
+        }
+        // Start right behind the scan at the first panel row this frame writes.
+        const int first = reverse ? (columns ? W - 1 - x2 : H - 1 - y2) : (columns ? x1 : y1);
+        follow_scan(first);
         int inflight = 0, b = 0;
-        for (int y = y1; y <= y2; y += CHUNK) {
-            const int n = std::min(CHUNK, y2 - y + 1);
+        for (int i = 0; i < count; ++i) {
+            const Piece &p = pieces[reverse ? count - 1 - i : i];
             if (inflight == 2) {
                 xSemaphoreTake(F.chunk_done, portMAX_DELAY);  // the older transfer used this buffer
                 --inflight;
             }
-            copy_swapped(F.dma[b], F.src + size_t(y) * W * 2, size_t(n) * W * 2);
-            if (esp_lcd_panel_draw_bitmap(F.panel, 0, y, W, y + n, F.dma[b]) == ESP_OK) {
+            esp_err_t sent;
+            if (!columns) {
+                copy_swapped(F.dma[b], F.src + size_t(p.at) * W * 2, size_t(p.n) * W * 2);
+                sent = esp_lcd_panel_draw_bitmap(F.panel, 0, p.at, W, p.at + p.n, F.dma[b]);
+            } else {
+                for (int y = y1; y <= y2; ++y) {
+                    copy_swapped(F.dma[b] + size_t(y - y1) * p.n * 2, F.src + (size_t(y) * W + p.at) * 2, size_t(p.n) * 2);
+                }
+                sent = esp_lcd_panel_draw_bitmap(F.panel, p.at, y1, p.at + p.n, y2 + 1, F.dma[b]);
+            }
+            if (sent == ESP_OK) {
                 ++inflight;
             }
             b ^= 1;
@@ -159,6 +209,8 @@ void sender(void *)
 // anything: render and send took turns, ~13 fps while scrolling.)
 void flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
 {
+    F.dirty_x1 = std::min<int>(F.dirty_x1, area->x1);
+    F.dirty_x2 = std::max<int>(F.dirty_x2, area->x2);
     F.dirty_y1 = std::min<int>(F.dirty_y1, area->y1);
     F.dirty_y2 = std::max<int>(F.dirty_y2, area->y2);
     if (!lv_display_flush_is_last(disp)) {
@@ -171,7 +223,9 @@ void flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
     }
     F.handover_wait_us += esp_timer_get_time() - t0;
     F.src = px;
+    F.x1 = F.dirty_x1, F.x2 = F.dirty_x2;
     F.y1 = F.dirty_y1, F.y2 = F.dirty_y2;
+    F.dirty_x1 = W, F.dirty_x2 = -1;
     F.dirty_y1 = H, F.dirty_y2 = -1;
     F.busy = true;
     xSemaphoreGive(F.job);
