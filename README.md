@@ -9,6 +9,15 @@ It runs as an ordinary ESP-Mosaico Idea: it installs into the application slot
 next to Vibe Mode, keeps Vibe Mode's Wi-Fi and storage, and leaves the
 bootloader, Vibe Mode and their settings alone.
 
+![Glimdock on the ESP-Mosaico: the launcher](store/covers/01-launcher.png)
+
+| Launcher | Glimdock | Swifty | Home | Tools |
+| :---: | :---: | :---: | :---: | :---: |
+| ![The launcher, Settings and Web settings](docs/media/launcher.gif) | ![A tour of Glimdock's pages](docs/media/glimdock.gif) | ![Swifty listening, thinking and answering](docs/media/swifty.gif) | ![Home's rooms, lights and music](docs/media/home.gif) | ![The spirit level](docs/media/level.gif) |
+
+A 40-second tour: [docs/media/glimdock-tour.mp4](docs/media/glimdock-tour.mp4).
+All of these are rendered from the desktop preview's demo data (`host/media.py`).
+
 ## Apps
 
 | App | What it does |
@@ -19,7 +28,7 @@ bootloader, Vibe Mode and their settings alone.
 | **Camera** | Viewfinder, filters and photos for the camera module; finds front or rear by itself, gallery (tap for the photo alone, double-tap or pinch to zoom), NAS sync. |
 | **Files** | The board's NAND storage and SMB shares, with image and text previews. |
 | **Tools** | Torch, spirit level, compass, calculator, the Interaction module (buttons, PIR, light sensor, LEDs, IR remote) and a USB webcam (UVC, MJPEG 1280 × 720 or 640 × 480). |
-| **Settings** | Brightness, haptics, auto-rotate, the panel's corner radius, time zone and camera options. |
+| **Settings** | Brightness, haptics, auto-rotate, the panel's corner radius, time zone, camera options and Web settings (servers and keys from a browser). |
 
 Every app works from the board's own settings; nothing points at a particular
 server until you configure it.
@@ -100,6 +109,9 @@ sends video only while a computer has it open.
   to PNGs through LVGL's software renderer. Build the device project once first,
   and set `GLIMDOCK_DIR` to a Glimdock checkout (for its preview shims and demo
   snapshot).
+- **Screenshots, GIFs and video:** `host/media.py` turns a recorded preview run
+  (`MOSAICO_PREVIEW_RECORD=1`) into the store covers, the GIFs above and the
+  tour video. It needs Pillow, ffmpeg and Chrome (for the web settings page).
 - **Diagnostics over ESP-Iris** (service `0x4744`): see [CONTRIBUTING.md](CONTRIBUTING.md).
 - **Partitions:** `partitions.csv` is the table Vibe Mode 0.4.1 installs; the
   firmware writes only the application slot. `partitions.factory-0.2-layout.csv`

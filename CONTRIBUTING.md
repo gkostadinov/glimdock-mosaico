@@ -108,7 +108,9 @@ your distribution's `libraqm0`) and a Python environment holding
 `submodule/esp-mosaico-utils/ESP-Iris/components/esp_iris/tools/requirements.txt`:
 
 ```sh
-# 1. Bump project(glimdock VERSION ...) in CMakeLists.txt, then build the bundle
+# 1. Bump the version in CMakeLists.txt (project(glimdock VERSION ...)) and in
+#    sdkconfig.defaults (CONFIG_APP_PROJECT_VER, which the build uses; an
+#    existing build/sdkconfig keeps its own copy), then build the bundle
 idf.py -C projects/glimdock -D ESP_IRIS_PYTHON="$(which python)" system-update-bundle
 # 2. Package and check it (offline)
 python mosaico.py project package --project projects/glimdock --output projects/glimdock/dist/glimdock-VERSION.zip
@@ -118,8 +120,18 @@ python mosaico.py account login
 python mosaico.py project upload projects/glimdock/dist/glimdock-VERSION.zip --create --yes --json
 ```
 
-Covers come from the desktop preview's demo data (`host/render.py`), never
-from a real board: those would show your own hosts and rooms. If the Chinese
+Covers, GIFs and the tour video come from the desktop preview's demo data,
+never from a real board: those would show your own hosts, rooms and photos.
+Regenerate them after UI changes (Pillow, ffmpeg and Chrome needed):
+
+```sh
+MOSAICO_PREVIEW_RECORD=1 GLIMDOCK_DIR=... python3 projects/glimdock/host/render.py \
+    --output projects/glimdock/build-host/media-raw --home-fixtures projects/glimdock/host/fixtures/swifty-demo
+python3 projects/glimdock/host/media.py projects/glimdock/build-host/media-raw
+```
+
+The store takes still covers only (no animated GIFs); the video goes in as an
+attachment. If the Chinese
 description changes, regenerate `store/fonts/NotoSansSC-Regular-subset.ttf`
 with `pyftsubset` for its characters (the font is OFL; keep
 `store/fonts/NotoSansSC-OFL.txt`).

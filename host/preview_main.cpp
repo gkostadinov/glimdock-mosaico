@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Host preview: 480x480 RGB565 captures of the launcher, Glimdock (the Mosaico
 // UI over the firmware's demo data) and Swifty Home. Writes PPM files; render.py
-// converts them and overlays the panel's rounded corners.
+// converts them and overlays the panel's rounded corners. With
+// MOSAICO_PREVIEW_RECORD=1 it also records animations frame by frame (into a
+// folder per clip) for host/media.py's GIFs and video.
 #include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <ctime>
+#include <functional>
+#include <map>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -129,6 +136,18 @@ void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
     lv_display_flush_ready(display);
 }
 
+void write_ppm(const std::filesystem::path &path)
+{
+    std::ofstream out(path, std::ios::binary);
+    out << "P6\n" << SIZE << " " << SIZE << "\n255\n";
+    for (uint16_t v : framebuffer) {
+        const uint8_t px[3] = {uint8_t(((v >> 11) & 31) * 255 / 31), uint8_t(((v >> 5) & 63) * 255 / 63),
+                               uint8_t((v & 31) * 255 / 31)
+                              };
+        out.write(reinterpret_cast<const char *>(px), 3);
+    }
+}
+
 void save(const std::string &name, lv_display_t *display)
 {
     for (int i = 0; i < 80; ++i) {  // let entrances and springs settle
@@ -137,15 +156,69 @@ void save(const std::string &name, lv_display_t *display)
     }
     lv_obj_invalidate(lv_display_get_screen_active(display));
     lv_refr_now(display);
-    std::ofstream out(output / (name + ".ppm"), std::ios::binary);
-    out << "P6\n" << SIZE << " " << SIZE << "\n255\n";
-    for (uint16_t v : framebuffer) {
-        const uint8_t px[3] = {uint8_t(((v >> 11) & 31) * 255 / 31), uint8_t(((v >> 5) & 63) * 255 / 63),
-                               uint8_t((v & 31) * 255 / 31)
-                              };
-        out.write(reinterpret_cast<const char *>(px), 3);
-    }
+    write_ppm(output / (name + ".ppm"));
     std::cout << name << ".ppm\n";
+}
+
+// Animations, recorded only when asked (MOSAICO_PREVIEW_RECORD=1): frames
+// every step_ms of UI time into output/NAME/0000.ppm on, appended across
+// calls; each(i) runs before frame i.
+bool recording = false;
+void record(const std::string &name, int frames, int step_ms, const std::function<void(int)> &each = nullptr)
+{
+    if (!recording) {
+        return;
+    }
+    static std::map<std::string, int> next;
+    std::filesystem::create_directories(output / name);
+    lv_display_t *display = lv_display_get_default();
+    lv_obj_invalidate(lv_display_get_screen_active(display));
+    for (int i = 0; i < frames; ++i) {
+        if (each) {
+            each(i);
+        }
+        nativeClock += uint32_t(step_ms);
+        (lv_timer_handler)();
+        lv_refr_now(display);
+        char file[16];
+        snprintf(file, sizeof(file), "%04d.ppm", next[name]++);
+        write_ppm(output / name / file);
+    }
+    std::cout << name << ": " << next[name] << " frames\n";
+}
+
+// The scrollable object with the most to scroll on the active screen.
+lv_obj_t *scroller(lv_obj_t *o, lv_obj_t *best = nullptr)
+{
+    const auto range = [](lv_obj_t *x) {
+        return x ? lv_obj_get_scroll_top(x) + lv_obj_get_scroll_bottom(x) : -1;
+    };
+    if (!lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) {
+        if (lv_obj_has_flag(o, LV_OBJ_FLAG_SCROLLABLE) && range(o) > range(best)) {
+            best = o;
+        }
+        for (uint32_t i = 0; i < lv_obj_get_child_count(o); ++i) {
+            best = scroller(lv_obj_get_child(o, int32_t(i)), best);
+        }
+    }
+    return best;
+}
+
+// Eases a scroll to y over the frames of a recording.
+std::function<void(int)> scroll_to(int y, int frames)
+{
+    return [y, frames](int i) {
+        lv_obj_t *s = scroller(lv_display_get_screen_active(lv_display_get_default()));
+        if (!s || i >= frames) {
+            return;
+        }
+        static int from = 0;
+        if (i == 0) {
+            from = lv_obj_get_scroll_y(s);
+        }
+        const float t = float(i + 1) / frames, k = t < 0.5f ? 2 * t * t : 1 - powf(-2 * t + 2, 2) / 2;
+        lv_obj_scroll_to_y(s, int32_t(lroundf(from + (y - from) * k)), LV_ANIM_OFF);
+    };
 }
 
 lv_obj_t *frame_screen(lv_obj_t **frame, int x, int y, int w, int h)
@@ -218,7 +291,8 @@ void render_launcher(int radius)
     home.plugs[0].on = home.plugs[0].known = true;
     strcpy(home.plugs[1].name, "Heater");
     home.plugs[1].known = true;
-    LauncherStatus status{"20:41", "Sun 23 Nov", true, true, "HomeWiFi", "192.0.2.42", "Firmware 1.0.0", 84, true};
+    LauncherStatus status{"20:41", "Sun 23 Nov", true, true, "HomeWiFi", "192.0.2.42", "Firmware 1.1.0", 84, true};
+    status.camera_auto = true;  // the board's default
     camera_summary_t camera{};
     swifty_summary_t swifty{};
     swifty.configured = true;
@@ -236,7 +310,22 @@ void render_launcher(int radius)
     launcher_ui_show_page(6);
     save("launcher-settings", display);
     launcher_ui_show_page(0);
-    LauncherStatus offline{"--:--", "", false, false, "", "", "Firmware 1.0.0", -1, false};
+    if (recording) {
+        launcher_ui_entered(ShellApp::Launcher);
+        record("launcher", 60, 33);
+        launcher_ui_show_page(6);
+        record("launcher", 24, 33);
+        record("launcher", 40, 33, scroll_to(400, 30));
+        status.web_on = true, status.web_url = "http://192.0.2.42", status.web_code = "482913";
+        launcher_ui_update(status, glim, home, camera, swifty, files);
+        record("launcher", 50, 33);
+        save("launcher-settings-web", display);
+        status.web_on = false;
+        launcher_ui_update(status, glim, home, camera, swifty, files);
+        scroll_to(0, 1)(0);
+        launcher_ui_show_page(0);
+    }
+    LauncherStatus offline{"--:--", "", false, false, "", "", "Firmware 1.1.0", -1, false};
     glimdock_summary_t none{};
     none.cpu = none.memory = NAN;
     strcpy(none.status, "Homelab monitor");
@@ -265,6 +354,7 @@ int main(int argc, char **argv)
     output = argv[1];
     std::filesystem::create_directories(output);
     const int radius = argc > 2 ? atoi(argv[2]) : 80;
+    recording = getenv("MOSAICO_PREVIEW_RECORD") != nullptr;
     lv_init();
     lv_tick_set_cb(millis);
     lv_display_t *display = lv_display_create(SIZE, SIZE);
@@ -280,7 +370,11 @@ int main(int argc, char **argv)
     {
         tools_hooks_t th = {};
         th.gravity = [](float * x, float * y, float * z) {
-            *x = 0.06f, *y = -0.03f, *z = 0.99f;
+            // Still for the captures; a slow tilt around while recording.
+            const float a = recording ? float(nativeClock % 4000) / 4000.0f * 6.2832f : 0.0f;
+            const float r = recording ? 0.22f : 0.067f;
+            *x = recording ? r * cosf(a) : 0.06f, *y = recording ? r * sinf(a) : -0.03f;
+            *z = sqrtf(1 - *x * *x - *y * *y);
             return true;
         };
         tools_app_init(&th);
@@ -298,6 +392,9 @@ int main(int argc, char **argv)
                 (lv_timer_handler)();
             }
             save(tool_names[i], lv_display_get_default());
+            if (i == 1) {
+                record("level", 120, 33);
+            }
         }
         tools_app_set_active(false);
     }
@@ -349,6 +446,81 @@ int main(int argc, char **argv)
     glim_ui_preview(0, -1, true);
     glim_ui_preview_overlay(4);
     save("glim-popup", display);
+    if (recording) {
+        // 0 systems, 3 overview of the host, 9 the printer's temperatures, 1 clock, 10 agents.
+        const int tour[][2] = {{0, -1}, {3, 0}, {9, 1}, {1, -1}, {10, -1}};
+        for (const auto &stop : tour) {
+            glim_ui_preview(stop[0], stop[1], true);
+            record("glimdock", 50, 33);
+        }
+    }
+    if (recording) {
+        constexpr int BIRD = 340;
+        static std::vector<uint8_t> px(size_t(BIRD) * BIRD * 4);
+        static lv_image_dsc_t dsc{};
+        dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+        dsc.header.cf = LV_COLOR_FORMAT_ARGB8888;
+        dsc.header.w = dsc.header.h = BIRD;
+        dsc.header.stride = BIRD * 4;
+        dsc.data = px.data();
+        dsc.data_size = uint32_t(px.size());
+        lv_obj_t *screen = lv_obj_create(nullptr);
+        lv_obj_remove_style_all(screen);
+        lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+        lv_obj_t *img = lv_image_create(screen);
+        lv_obj_set_pos(img, (SIZE - BIRD) / 2, 40);
+        lv_obj_t *caption = mui::label(screen, "", 40, 392, 400, mui::TEXT2, 20, true, LV_TEXT_ALIGN_CENTER);
+        lv_screen_load(screen);
+        swifty::Figure fig(BIRD, 2);
+        const struct {
+            int frames;
+            const char *text;
+            std::function<void(int)> start;
+        } acts[] = {
+            {
+                70, "Hello!", [&](int)
+                {
+                    fig.shoot(swifty::Shot::Hello);
+                }
+            },
+            {
+                75, "Listening\xE2\x80\xA6", [&](int)
+                {
+                    fig.set_mood(swifty::Mood::Listen);
+                }
+            },
+            {
+                55, "Thinking\xE2\x80\xA6", [&](int)
+                {
+                    fig.set_mood(swifty::Mood::Think);
+                }
+            },
+            {
+                90, "Lights are at 68%. Dim them?", [&](int)
+                {
+                    fig.react(swifty::Shot::Pleased, false, 160);
+                }
+            },
+            {
+                50, "", [&](int)
+                {
+                    fig.set_mood(swifty::Mood::Idle);
+                }
+            },
+        };
+        for (const auto &act : acts) {
+            act.start(0);
+            lv_label_set_text(caption, act.text);
+            record("swifty", act.frames, 33, [&](int i) {
+                fig.set_level(0.35f + 0.3f * sinf(float(i) * 0.7f) * sinf(float(i) * 0.23f));
+                fig.step(0.033f);
+                fig.render(px.data());
+                lv_image_set_src(img, nullptr);
+                lv_image_set_src(img, &dsc);
+            });
+        }
+    }
     // Swifty Home in the inscribed square.
     if (argc > 3) {
         home_fixture_dir = argv[3];
@@ -369,6 +541,12 @@ int main(int argc, char **argv)
         for (auto &page : pages) {
             home::home_preview_open(page.first);
             save(page.second, display);
+        }
+        for (int page : {
+                    2, 3, 4
+                }) {
+            home::home_preview_open(page);
+            record("home", 55, 33);
         }
         home::home_preview_theme(0);
         home::home_preview_open(2);
