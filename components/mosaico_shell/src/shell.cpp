@@ -6,6 +6,8 @@
 
 #include <math.h>
 #include <atomic>
+#include <memory>
+#include <string>
 #include <string.h>
 #include <time.h>
 
@@ -34,6 +36,7 @@
 #include "haptics.h"
 #include "home_app.h"
 #include "iot_button.h"
+#include "launcher_apps.h"
 #include "launcher_ui.h"
 #include "mbedtls/platform_util.h"
 #include "mui.h"
@@ -455,15 +458,20 @@ esp_err_t open_rpc(const esp_iris_rpc_request_t *request, uint8_t *, size_t, siz
     if (!bsp_display_lock(1000)) {
         return ESP_ERR_TIMEOUT;
     }
-    // Tools may name its tab too (a second byte: 0 torch ... 4 the Interaction
-    // board), and Glimdock its page (0 Systems, 1 Clock, ... 10 Agents).
-    if (request->payload_size >= 2 && request->payload[0] == uint8_t(ShellApp::Tools)) {
-        tools_app_select(request->payload[1]);
+    // Tools may name its tab too (a second byte: 0 torch, 1 level, 2 compass;
+    // the old 3 calculator, 4 Interaction and 5 webcam tabs open those apps),
+    // and Glimdock its page (0 Systems, 1 Clock, ... 10 Agents).
+    ShellApp app = ShellApp(request->payload[0]);
+    if (request->payload_size >= 2 && app == ShellApp::Tools) {
+        const uint8_t tab = request->payload[1];
+        tools_app_select(tab);
+        app = tab == TOOLS_CALCULATOR ? ShellApp::Calculator : tab == TOOLS_INTERACTION ? ShellApp::Interaction
+              : tab == TOOLS_WEBCAM ? ShellApp::Webcam : app;
     }
-    if (request->payload_size >= 2 && request->payload[0] == uint8_t(ShellApp::Glimdock)) {
+    if (request->payload_size >= 2 && app == ShellApp::Glimdock) {
         glimdock_app_select(request->payload[1]);
     }
-    lv_async_call(open_async, reinterpret_cast<void *>(uintptr_t(request->payload[0])));
+    lv_async_call(open_async, reinterpret_cast<void *>(uintptr_t(app)));
     bsp_display_unlock();
     return ESP_OK;
 }
@@ -666,6 +674,12 @@ void start_ai_key()
 }
 }  // namespace
 
+const char *shell_app_name(ShellApp app)
+{
+    const char *key = app == ShellApp::Launcher ? "launcher" : launcher_app_key(app);
+    return key ? key : "?";
+}
+
 // The camera apps and webcam mode: no speech connection kept meanwhile.
 static bool camera_screen()
 {
@@ -708,6 +722,13 @@ void shell_show(ShellApp app)
         lv_screen_load(shell.tools_screen);
         tools_app_open(shell.tools_screen);
         break;
+    case ShellApp::Webcam:
+    case ShellApp::Interaction:
+    case ShellApp::Calculator:  // Tools' screen without its tabs
+        lv_screen_load(shell.tools_screen);
+        tools_app_open_tool(shell.tools_screen, app == ShellApp::Webcam ? TOOLS_WEBCAM
+                            : app == ShellApp::Interaction ? TOOLS_INTERACTION : TOOLS_CALCULATOR);
+        break;
     case ShellApp::Gallery:
         camera_app_start(shell.camera_screen);  // its photos: memory and the NAS list
         lv_screen_load(shell.gallery_screen);
@@ -724,8 +745,7 @@ void shell_show(ShellApp app)
         launcher_ui_entered(previous);
         break;
     }
-    static const char *const NAMES[SHELL_APPS] = {"launcher", "Glimdock", "Home", "Camera", "Swifty", "Files", "Tools", "Gallery"};
-    ESP_LOGI(TAG, "showing %s (saving it %lld ms, opening %lld ms)", NAMES[int(app) % SHELL_APPS], (long long)((t1 - t0) / 1000),
+    ESP_LOGI(TAG, "showing %s (saving it %lld ms, opening %lld ms)", shell_app_name(app), (long long)((t1 - t0) / 1000),
              (long long)((esp_timer_get_time() - t1) / 1000));
     swifty_app_prewarm(!camera_screen());  // at once: a press right after leaving the camera finds it ready sooner
     always_on_wake();  // opened while the always-on clock was up (a tool, an RPC): shown at full light
@@ -761,28 +781,42 @@ JsonDocument args(const char *json)
     return d;
 }
 
-const char *const APP_NAMES[SHELL_APPS] = {"launcher", "glimdock", "home", "camera", "swifty", "files", "tools", "gallery"};
+// The apps by name: "launcher" and the home screen's keys (launcher_apps.cpp).
+std::string app_list()
+{
+    std::string names = "\"launcher\"";
+    for (int i = 1; i < SHELL_APPS; ++i) {
+        names += ",\"" + std::string(shell_app_name(ShellApp(i))) + "\"";
+    }
+    return names;
+}
 
 void open_app(const char *a, char *out, size_t cap)
 {
     const JsonDocument d = args(a);
-    const std::string name = d["app"] | "", tool = d["tool"] | "";
-    static const char *const TOOLS[] = {"torch", "level", "compass", "calculator", "interact"};
+    std::string name = d["app"] | "";
+    const std::string tool = d["tool"] | "";
+    // Tools' tabs; the calculator and the Interaction board were tabs once and
+    // are apps of their own now.
+    static const char *const TOOLS[] = {"torch", "level", "compass"};
     int tool_index = -1;
-    for (int t = 0; t < 5; ++t)
+    for (int t = 0; t < 3; ++t)
         if (tool == TOOLS[t]) {
             tool_index = t;
         }
+    if (name == "tools" && (tool == "calculator" || tool == "interact" || tool == "webcam")) {
+        name = tool == "interact" ? "interaction" : tool;
+    }
     for (int i = 0; i < SHELL_APPS; ++i)
-        if (name == APP_NAMES[i]) {
+        if (name == shell_app_name(ShellApp(i))) {
             on_ui([i, tool_index] {
                 if (i == int(ShellApp::Tools) && tool_index >= 0) tools_app_select(tool_index);
                 lv_async_call(open_async, reinterpret_cast<void *>(uintptr_t(i)));
             });
-            snprintf(out, cap, "Opened %s.", APP_NAMES[i]);
+            snprintf(out, cap, "Opened %s.", name.c_str());
             return;
         }
-    snprintf(out, cap, "No app \"%s\". Apps: launcher, glimdock, home, camera, swifty, files, tools, gallery.", name.c_str());
+    snprintf(out, cap, "No app \"%s\". Apps: %s.", name.c_str(), app_list().c_str());
 }
 
 void device_status(const char *, char *out, size_t cap)
@@ -807,7 +841,7 @@ void device_status(const char *, char *out, size_t cap)
              battery.pct < 0 ? "unknown" : (std::to_string(battery.pct) + "%").c_str(), battery.charging ? ", charging" : "",
              wifi ? WiFi.SSID().c_str() : "not connected", wifi ? ", " : "", wifi ? WiFi.localIP().toString().c_str() : "",
              wifi ? int(WiFi.RSSI()) : 0, shell.brightness, haptics_enabled() ? "on" : "off",
-             orientation_enabled() ? "on" : "off", clock_mode, zone, APP_NAMES[int(shell.current)], cam.photos,
+             orientation_enabled() ? "on" : "off", clock_mode, zone, shell_app_name(shell.current), cam.photos,
              cam.present ? "" : ", no camera seen yet", unsigned(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
              unsigned(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024), int(up / 3600), int(up / 60 % 60));
 }
@@ -954,9 +988,9 @@ void tv_remote(const char *a, char *out, size_t cap)
 
 void register_all()
 {
-    swifty_app_add_tool("open_app", "Show one of the board's apps on the screen.",
-                        R"({"type":"object","properties":{"app":{"type":"string","enum":["launcher","glimdock","home","camera","swifty","files","tools","gallery"]},"tool":{"type":"string","enum":["torch","level","compass","calculator","interact"],"description":"for tools: which tool; interact is the Interaction board"}},"required":["app"]})",
-                        open_app);
+    const std::string open_schema = R"({"type":"object","properties":{"app":{"type":"string","enum":[)" + app_list() +
+                                    R"(],"description":"launcher is the home screen; interaction is the Interaction board"},"tool":{"type":"string","enum":["torch","level","compass"],"description":"for tools: which tool"}},"required":["app"]})";
+    swifty_app_add_tool("open_app", "Show one of the board's apps on the screen.", open_schema.c_str(), open_app);
     swifty_app_add_tool("device_status",
                         "The board itself: battery and charging, Wi-Fi, brightness, time zone, the app shown, photos, memory, uptime.",
                         R"({"type":"object","properties":{},"required":[]})", device_status);
@@ -1182,7 +1216,7 @@ extern "C" void __wrap_esp_crt_bundle_detach(mbedtls_ssl_config *conf)
 #endif
 }
 
-// USB webcam mode (Tools > Webcam): ESP-Iris steps aside and the USB port is
+// USB webcam mode (the Webcam app): ESP-Iris steps aside and the USB port is
 // a camera until it is switched off (a restart also ends it).
 namespace webcam_mode {
 std::atomic<int> switching{-1};  // -1 idle; else the switch under way (1 on, 0 off)
@@ -1551,11 +1585,15 @@ extern "C" esp_err_t mosaico_shell_start(void)
     shell.home_screen =
         app_screen(&shell.home_frame, home_x, home_y, PANEL - 2 * home_x, PANEL - 2 * home_y, 0x000000);
     int widgets[2] = {-1, -1};
+    char layout[512] = "";  // the home screen's pages (launcher_layout.h's text)
     {
         Preferences p;
         if (p.begin(PREFS, true)) {
             widgets[0] = p.getUChar("w0", 255) == 255 ? -1 : p.getUChar("w0", 0);
             widgets[1] = p.getUChar("w1", 255) == 255 ? -1 : p.getUChar("w1", 0);
+            if (!p.getString("layout", layout, sizeof(layout))) {
+                layout[0] = 0;
+            }
             p.end();
         }
     }
@@ -1584,9 +1622,21 @@ extern "C" esp_err_t mosaico_shell_start(void)
         }
         refresh_launcher(nullptr);  // the address and code, or why not, at once
     },
-    always_on_set_timeout},
+    always_on_set_timeout,
+    [](const char *text)
+    {
+        // On the LVGL task: a drop, a hide, a reset.
+        Preferences p;
+        if (p.begin(PREFS, false)) {
+            p.putString("layout", text);
+            p.end();
+        }
+        ESP_LOGI(TAG, "home screen: %s", text);
+    },
+    [] { haptics_pulse(HapticPulse::Tap); },
+    nullptr},  // shortcuts: the shortcut editor, once there is one
     shell.radius, shell.brightness, haptics_enabled(), orientation_enabled(),
-         swifty_app_portrait(168), widgets[0], widgets[1]);
+         swifty_app_portrait(168), widgets[0], widgets[1], layout);
     home_app_set_exit_handler([] { shell_show(ShellApp::Launcher); });
     web_settings_set_restart(restart_board);  // a save that applies after a restart
     always_on_start({aod::busy, aod::pause, aod::light, aod::brightness, aod::info, aod::no_clock});
@@ -1632,7 +1682,8 @@ extern "C" esp_err_t mosaico_shell_start(void)
     // Never the camera: a fault while it starts would then repeat on every
     // boot (a camera crash became a reboot loop).
     static ShellApp resume;
-    resume = shell.current == ShellApp::Camera || shell.current == ShellApp::Tools ? ShellApp::Launcher : shell.current;
+    resume = shell.current == ShellApp::Camera || shell.current == ShellApp::Tools || shell.current == ShellApp::Webcam ||
+             shell.current == ShellApp::Interaction ? ShellApp::Launcher : shell.current;
     shell_show(ShellApp::Launcher);
     lv_timer_t *later = lv_timer_create([](lv_timer_t *t) {
         lv_timer_delete(t);
@@ -1713,6 +1764,36 @@ extern "C" esp_err_t mosaico_shell_start(void)
         always_on_report(reinterpret_cast<char *>(out), cap);
         bsp_display_unlock();
         *size = strnlen(reinterpret_cast<char *>(out), cap);
+        return ESP_OK;
+    }, nullptr);
+    // 53: the home screen: its page, editing and layout. Payload 00 resets the
+    // layout, 01 then text sets it (launcher_layout.h's form), 02 / 03 start /
+    // end editing, 04 shows the hidden apps. Changes run on the LVGL task (it
+    // saves the layout): the reply is from before them.
+    esp_iris_rpc_register(0x4744, 53, [](const esp_iris_rpc_request_t *request, uint8_t *out, size_t cap, size_t *size, void *) {
+        *size = 0;
+        if (!bsp_display_lock(1000)) {
+            return ESP_ERR_TIMEOUT;
+        }
+        if (request->payload_size >= 1) {
+            const uint8_t op = request->payload[0];
+            auto *text = new std::string(op == 1 ? std::string(reinterpret_cast<const char *>(request->payload) + 1,
+                                         request->payload_size - 1) : std::string());
+            text->insert(0, 1, char(op));
+            lv_async_call([](void *arg) {
+                std::unique_ptr<std::string> t(static_cast<std::string *>(arg));
+                switch ((*t)[0]) {
+                case 0: launcher_ui_set_layout(""); break;
+                case 1: launcher_ui_set_layout(t->c_str() + 1); break;
+                case 2: launcher_ui_edit(true); break;
+                case 3: launcher_ui_edit(false); break;
+                case 4: launcher_ui_hidden_apps(true); break;
+                default: break;
+                }
+            }, text);
+        }
+        *size = cap ? std::min(cap - 1, launcher_ui_layout(reinterpret_cast<char *>(out), cap)) : 0;
+        bsp_display_unlock();
         return ESP_OK;
     }, nullptr);
     // 45: the LVGL loop and CPU per task during the last webcam session.

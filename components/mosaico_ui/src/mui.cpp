@@ -760,7 +760,18 @@ constexpr float trash_3[] = {10, 11, 10, 16}, trash_4[] = {14, 11, 14, 16};
 constexpr home_icons::Path trash_paths[] = {{trash_0, 2}, {trash_1, 4}, {trash_2, 4}, {trash_3, 2}, {trash_4, 2}};
 constexpr float photos_0[] = {3, 6, 17, 6, 17, 18, 3, 18, 3, 6}, photos_1[] = {7, 3, 21, 3, 21, 15}, photos_2[] = {3, 16, 8, 11, 11, 14, 13, 12, 17, 16};
 constexpr home_icons::Path photos_paths[] = {{photos_0, 5}, {photos_1, 3}, {photos_2, 5}};
-constexpr home_icons::Icon extra[] = {{"house", house_paths, 2}, {"sliders", slider_paths, 6}, {"folder", folder_paths, 1}, {"file", file_paths, 2}, {"image", image_paths, 3}, {"compass", compass_paths, 2}, {"level", level_paths, 4}, {"calc", calc_paths, 8}, {"torch", torch_paths, 3}, {"share", share_paths, 3}, {"trash", trash_paths, 5}, {"photos", photos_paths, 3}};
+// A webcam on its stand; the Interaction board as a remote (a big button, two
+// small ones and its infrared window at the top).
+constexpr float webcam_0[] = {19, 10, 18.76f, 11.81f, 18.06f, 13.5f, 16.95f, 14.95f, 15.5f, 16.06f, 13.81f, 16.76f, 12, 17, 10.19f, 16.76f, 8.5f, 16.06f, 7.05f, 14.95f, 5.94f, 13.5f, 5.24f, 11.81f, 5, 10, 5.24f, 8.19f, 5.94f, 6.5f, 7.05f, 5.05f, 8.5f, 3.94f, 10.19f, 3.24f, 12, 3, 13.81f, 3.24f, 15.5f, 3.94f, 16.95f, 5.05f, 18.06f, 6.5f, 18.76f, 8.19f, 19, 10};
+constexpr float webcam_1[] = {14.5f, 10, 14.17f, 11.25f, 13.25f, 12.17f, 12, 12.5f, 10.75f, 12.17f, 9.83f, 11.25f, 9.5f, 10, 9.83f, 8.75f, 10.75f, 7.83f, 12, 7.5f, 13.25f, 7.83f, 14.17f, 8.75f, 14.5f, 10};
+constexpr float webcam_2[] = {12, 17, 12, 21}, webcam_3[] = {7, 21, 17, 21};
+constexpr home_icons::Path webcam_paths[] = {{webcam_0, 25}, {webcam_1, 13}, {webcam_2, 2}, {webcam_3, 2}};
+constexpr float remote_0[] = {9, 2, 15, 2, 17, 4, 17, 20, 15, 22, 9, 22, 7, 20, 7, 4, 9, 2};
+constexpr float remote_1[] = {14.5f, 10, 14.17f, 11.25f, 13.25f, 12.17f, 12, 12.5f, 10.75f, 12.17f, 9.83f, 11.25f, 9.5f, 10, 9.83f, 8.75f, 10.75f, 7.83f, 12, 7.5f, 13.25f, 7.83f, 14.17f, 8.75f, 14.5f, 10};
+constexpr float remote_2[] = {10, 5, 14, 5}, remote_3[] = {9.5f, 16, 10.5f, 16}, remote_4[] = {13.5f, 16, 14.5f, 16};
+constexpr float remote_5[] = {9.5f, 19, 10.5f, 19}, remote_6[] = {13.5f, 19, 14.5f, 19};
+constexpr home_icons::Path remote_paths[] = {{remote_0, 9}, {remote_1, 13}, {remote_2, 2}, {remote_3, 2}, {remote_4, 2}, {remote_5, 2}, {remote_6, 2}};
+constexpr home_icons::Icon extra[] = {{"house", house_paths, 2}, {"sliders", slider_paths, 6}, {"folder", folder_paths, 1}, {"file", file_paths, 2}, {"image", image_paths, 3}, {"compass", compass_paths, 2}, {"level", level_paths, 4}, {"calc", calc_paths, 8}, {"torch", torch_paths, 3}, {"share", share_paths, 3}, {"trash", trash_paths, 5}, {"photos", photos_paths, 3}, {"webcam", webcam_paths, 4}, {"remote", remote_paths, 7}};
 
 void draw_icon(lv_event_t *e)
 {

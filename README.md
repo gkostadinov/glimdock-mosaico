@@ -1,9 +1,9 @@
 # Glimdock for ESP-Mosaico
 
 A full-screen shell for the [ESP-Mosaico](https://github.com/esp-mosaico) board
-(ESP32-S31, 480 × 480 AMOLED): a launcher with a homelab dashboard, a smart-home
-wall display, an AI assistant, a camera, a file browser and a set of tools, all
-native ESP-IDF and LVGL.
+(ESP32-S31, 480 × 480 AMOLED): a home screen like a phone's, with a homelab
+dashboard, a smart-home wall display, an AI assistant, a camera, a file browser,
+a USB webcam and a set of tools, all native ESP-IDF and LVGL.
 
 It runs as an ordinary ESP-Mosaico Idea: it installs into the application slot
 next to Vibe Mode, keeps Vibe Mode's Wi-Fi and storage, and leaves the
@@ -27,11 +27,37 @@ All of these are rendered from the desktop preview's demo data (`host/media.py`)
 | **Swifty** | Voice and text assistant: any OpenAI-compatible model, push-to-talk speech recognition over WebSocket, optional Tavily web search, and tools to open apps and drive the board (lights, IR TV remote, Interaction board). It keeps notes, lists and schedules in its own folder on the NAS (the only place it may write), and sets reminders that come up over any app with a chime and a buzz, once or every day, weekday or week. |
 | **Camera** | Viewfinder, filters and photos for the camera module; finds front or rear by itself, gallery (tap for the photo alone, double-tap or pinch to zoom), NAS sync. |
 | **Files** | The board's NAND storage and SMB shares, with image and text previews. |
-| **Tools** | Torch, spirit level, compass, calculator, the Interaction module (buttons, PIR, light sensor, LEDs, IR remote) and a USB webcam with its microphone (UVC MJPEG 1280 × 720 or 640 × 480, and a UAC2 48 kHz mic; on a Mac, [MosaicoCam](https://github.com/gkostadinov/mosaico-cam) adds filters, upscaling and voice clean-up). |
-| **Settings** | Brightness, the always-on display, haptics, auto-rotate, the panel's corner radius, time zone, camera options and Web settings (servers and keys from a browser). |
+| **Tools** | Torch, spirit level and compass. |
+| **Webcam** | The board as a USB webcam with its microphone (UVC MJPEG 1280 × 720 or 640 × 480, and a UAC2 48 kHz mic; on a Mac, [MosaicoCam](https://github.com/gkostadinov/mosaico-cam) adds filters, upscaling and voice clean-up). |
+| **Interaction** | The Interaction module: its buttons, PIR motion, light sensor, six LEDs and an IR remote for the TV. |
+| **Calculator** | A four-function calculator. |
+| **Settings** | Brightness, the home screen's hidden apps, the always-on display, haptics, auto-rotate, the panel's corner radius, time zone, camera options and Web settings (servers and keys from a browser). |
 
 Every app works from the board's own settings; nothing points at a particular
 server until you configure it.
+
+### Home screen
+
+The icons sit on pages, as on a phone: swipe left and right between them, with
+dots at the bottom for the page you are on. The first page has two widgets
+(hold one to choose what it shows) above two rows of icons; the others hold
+three rows of four.
+
+Hold an icon, or an empty spot, to edit the home screen. The icons jiggle, and:
+
+- **Move** an icon by dragging it. The others make room. Hold it at the left or
+  right edge to turn the page; an empty page waits at the end for a new one.
+  Dropping on a full page moves that page's last icon on to the next.
+- **Hide** an icon with the − at its corner. Settings can't be hidden: it is
+  the way back. The **+** at the top left (or Settings, Home screen) lists the
+  hidden apps; tap one to put it back. **Reset home screen** there restores the
+  original arrangement.
+- **Done**, or a tap on an empty spot, ends editing.
+
+The arrangement is saved in the board's NVS after every change and survives
+restarts and updates. A new app in a later firmware lands at the end of the
+last page. Shortcut tiles (one-tap actions) live on the same pages and move
+and hide like apps.
 
 ### Always-on display
 
@@ -141,7 +167,7 @@ sends video, and reads its microphone, only while a computer has that stream ope
 | Path | Contents |
 | --- | --- |
 | `main/` | Entry point: ESP-Iris boot probe, NVS, Recovery, then the shell. |
-| `components/mosaico_shell` | Display, touch and LVGL, Wi-Fi, the launcher and Settings, app switching, auto-rotate, haptics, tear-free frame sync, time zone, ESP-Iris services. |
+| `components/mosaico_shell` | Display, touch and LVGL, Wi-Fi, the home screen (`launcher_apps.cpp` lists its apps, `launcher_layout.cpp` keeps their pages) and Settings, app switching, auto-rotate, haptics, tear-free frame sync, time zone, ESP-Iris services. |
 | `components/mosaico_ui` | The shared AMOLED UI kit: Inter fonts, controls, keyboard, icons. |
 | `components/glimdock_port` | The Glimdock app on Glimdock's data layer. |
 | `components/arduino_compat` | The small Arduino API subset Glimdock's `network.cpp` uses, on ESP-IDF. |
@@ -149,7 +175,7 @@ sends video, and reads its microphone, only while a computer has that stream ope
 | `components/swifty_app` | The Swifty assistant: 3D bird, chat, speech, tools. |
 | `components/camera_app` | Camera, filters, photos and gallery. |
 | `components/files_app` | NAND and SMB file browser. |
-| `components/tools_app` | Torch, level, compass, calculator, Interaction module, webcam page. |
+| `components/tools_app` | Tools (torch, level, compass) and the Calculator, Interaction and Webcam apps on the same screen. |
 | `components/usb_webcam` | USB webcam mode (UVC camera and UAC2 microphone), taking USB over from ESP-Iris while it runs. |
 | `components/board_mic` | Who has the board's one microphone: Swifty's speech or the webcam's USB microphone. |
 | `components/mosaico_storage` | Mounts Vibe Mode's NAND volume read-write without ever formatting it. |

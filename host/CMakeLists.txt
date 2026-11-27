@@ -55,6 +55,8 @@ add_executable(mosaico-preview
     "${IDEA}/components/glimdock_port/src/glim_ui.cpp"
     "${CMAKE_BINARY_DIR}/demo_snapshot.cpp"
     "${IDEA}/components/mosaico_shell/src/launcher_ui.cpp"
+    "${IDEA}/components/mosaico_shell/src/launcher_apps.cpp"
+    "${IDEA}/components/mosaico_shell/src/launcher_layout.cpp"
     "${IDEA}/components/mosaico_ui/src/mui.cpp"
     "${IDEA}/components/mosaico_ui/src/keyboard.cpp"
     "${IDEA}/components/glimdock_port/src/glimdock_summary.cpp"

@@ -20,13 +20,20 @@ wall companion for your homelab and home.
   camera module, which detects whether it faces front or rear. In the gallery,
   tap a photo to hide the controls, and double-tap or pinch to zoom.
 - **Files**: the board's storage and SMB shares, with image and text previews.
-- **Tools**: torch, spirit level, compass, calculator, the Interaction module and
-  a **USB webcam** mode (1280 × 720 or 640 × 480 MJPEG, upright whichever way the
-  board is held, with the flash as a light, plus its microphone). On a Mac,
-  [MosaicoCam](https://github.com/gkostadinov/mosaico-cam) adds live filters and
-  4K upscaling and passes it on to FaceTime, Zoom and the like.
+- **Webcam**: the board as a **USB webcam** (1280 × 720 or 640 × 480 MJPEG,
+  upright whichever way the board is held, with the flash as a light, plus its
+  microphone). On a Mac, [MosaicoCam](https://github.com/gkostadinov/mosaico-cam)
+  adds live filters and 4K upscaling and passes it on to FaceTime, Zoom and the
+  like.
+- **Interaction**: the Interaction module's buttons, motion and light sensors,
+  LEDs and IR TV remote.
+- **Tools** and **Calculator**: torch, spirit level and compass; a calculator.
 - **Settings**: brightness, haptics, auto-rotate, the panel's corner radius, time
   zone, camera options and **Web settings**.
+
+The apps sit on home screen pages you swipe between. Hold an icon to rearrange
+them like on a phone: drag icons around and across pages, hide the ones you
+don't use, and bring them back from Settings.
 
 ## Setting up
 

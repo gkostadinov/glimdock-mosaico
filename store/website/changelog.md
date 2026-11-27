@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Home screen pages**: the icons now sit on pages you swipe between, with
+  dots for the page you are on. Webcam, Interaction and Calculator are apps of
+  their own on the second page (Tools keeps the torch, level and compass).
+- **Edit the home screen**: hold an icon to make the icons jiggle, then drag
+  them where you like, onto other pages too (hold at the edge to turn the
+  page). The − hides an app; the + (or Settings, Home screen) brings hidden
+  apps back. The arrangement is kept across restarts and updates.
+
 - **Webcam microphone**: in webcam mode the board is also a USB microphone
   ("ESP-Mosaico Microphone", 48 kHz), so calls get its voice along with its
   picture. The computer's input level and mute work; Swifty waits while the

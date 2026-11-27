@@ -237,6 +237,61 @@ lv_obj_t *frame_screen(lv_obj_t **frame, int x, int y, int w, int h)
     return screen;
 }
 
+// A finger for the launcher's gestures: LVGL reads it like the touch panel.
+struct {
+    bool down = false;
+    lv_point_t at{};
+} finger;
+
+void finger_read(lv_indev_t *, lv_indev_data_t *data)
+{
+    data->point = finger.at;
+    data->state = finger.down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+}
+
+// Runs the UI for ms, 10 ms at a time.
+void run_for(int ms)
+{
+    for (int t = 0; t < ms; t += 10) {
+        nativeClock += 10;
+        (lv_timer_handler)();
+    }
+}
+
+// Down at a, along to b over ms (holding first for hold_ms), then up.
+void gesture(lv_point_t a, lv_point_t b, int hold_ms, int ms, bool lift = true)
+{
+    finger.at = a;
+    finger.down = true;
+    run_for(hold_ms);
+    const int steps = std::max(1, ms / 10);
+    for (int i = 1; i <= steps; ++i) {
+        finger.at = {a.x + (b.x - a.x) * i / steps, a.y + (b.y - a.y) * i / steps};
+        run_for(10);
+    }
+    if (lift) {
+        finger.down = false;
+        run_for(400);
+    }
+}
+
+void tap(lv_point_t at)
+{
+    gesture(at, at, 60, 0);
+}
+
+void print_layout(const char *when)
+{
+    char text[600];
+    launcher_ui_layout(text, sizeof(text));
+    std::cout << when << ": " << text << "\n";
+}
+
+void movie_scene(const char *key, void *)
+{
+    launcher_shortcut_feedback(key, 1);
+}
+
 // Swifty's still for the launcher, as the board renders it (swifty_app_portrait).
 const lv_image_dsc_t *swifty_portrait(int size)
 {
@@ -308,9 +363,59 @@ void render_launcher(int radius)
     lv_screen_load(launcher);
     launcher_ui_show_page(0);
     save("launcher-home-screen", display);
+    print_layout("start");
     launcher_ui_show_page(6);
     save("launcher-settings", display);
     launcher_ui_show_page(0);
+
+    // The pages: a swipe to the second, with Webcam, Interaction and Calculator.
+    gesture({400, 300}, {80, 300}, 20, 200);
+    run_for(600);
+    save("launcher-page-2", display);
+    print_layout("swiped");
+    // Hold Calculator: editing, and it follows the finger to the first slot.
+    gesture({290, 100}, {90, 110}, 600, 300, false);
+    save("launcher-drag", display);
+    finger.down = false;
+    run_for(400);
+    save("launcher-edit", display);
+    print_layout("calculator first");
+    // Webcam (now second) to the left edge: the page turns, and it drops on
+    // the first page's second row.
+    gesture({190, 100}, {12, 330}, 60, 300, false);
+    run_for(1200);
+    finger.at = {150, 330};
+    run_for(300);
+    save("launcher-drag-across", display);
+    finger.down = false;
+    run_for(500);
+    print_layout("webcam across");
+    // − on Gallery hides it; + shows the hidden apps.
+    tap({59, 303});
+    run_for(300);
+    save("launcher-edit-hidden", display);
+    print_layout("gallery hidden");
+    tap({74, 25});
+    save("launcher-hidden-apps", display);
+    tap({90, 148});
+    print_layout("gallery back");
+    tap({78, 36});  // back
+    // Done.
+    tap({384, 25});
+    run_for(400);
+    print_layout("done");
+    save("launcher-after-edit", display);
+    // A shortcut tile, the way the shortcut engine adds one, and its badge.
+    static const mui::Accent warm = {0xFFD9A0, 0xB07A1E, 0xF3B56A, 0x2A1A05, 0x3C2C14, 0x140E06};
+    launcher_shortcut_set({"sc:movie", "Movie", "tv", &warm, movie_scene, nullptr});
+    launcher_ui_show_page(1);
+    run_for(300);
+    print_layout("shortcut");
+    save("launcher-shortcut", display);
+    launcher_ui_set_layout("");
+    launcher_shortcut_remove("sc:movie");
+    launcher_ui_show_page(0);
+    print_layout("reset");
     if (recording) {
         launcher_ui_entered(ShellApp::Launcher);
         record("launcher", 60, 33);
@@ -362,6 +467,9 @@ int main(int argc, char **argv)
     lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
     lv_display_set_flush_cb(display, flush);
     lv_display_set_buffers(display, draw_buffer, nullptr, sizeof(draw_buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
+    lv_indev_t *touch = lv_indev_create();
+    lv_indev_set_type(touch, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(touch, finger_read);
 
     // Glimdock over the whole panel, from the firmware's demo data.
     static Snapshot data;
@@ -384,10 +492,9 @@ int main(int argc, char **argv)
         lv_obj_set_style_bg_color(tools, lv_color_black(), 0);
         lv_obj_set_style_bg_opa(tools, LV_OPA_COVER, 0);
         lv_screen_load(tools);
-        static const char *const tool_names[] = {"tools-torch", "tools-level", "tools-compass", "tools-calc"};
-        for (int i = 0; i < 4; ++i) {
-            tools_app_select(i);
-            tools_app_open(tools);
+        static const char *const tool_names[] = {"tools-torch", "tools-level", "tools-compass", "calculator", "interaction", "webcam"};
+        for (int i = 0; i < 6; ++i) {
+            tools_app_open_tool(tools, i);
             for (int k = 0; k < 20; ++k) {
                 nativeClock += 60;
                 (lv_timer_handler)();

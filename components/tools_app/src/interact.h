@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Tools > Interact: the Interaction sub-board. A worker task owns the board;
+// The Interaction app: the Interaction sub-board. A worker task owns the board;
 // the pane (LVGL task) and Swifty (its own task) go through it.
 #pragma once
 

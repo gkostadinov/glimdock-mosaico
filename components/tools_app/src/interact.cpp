@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Tools > Interact: the Interaction sub-board, in either slot: two buttons
+// The Interaction app: the Interaction sub-board, in either slot: two buttons
 // (touch pads, or keys to ground), PIR motion, a light sensor, six RGB LEDs and
 // an infrared LED (here a remote for the LG TV, or any NEC code for Swifty).
 // Like the stock Mosaico-Claw app, plus light modes of its own: buttons and

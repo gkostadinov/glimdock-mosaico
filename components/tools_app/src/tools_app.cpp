@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Tools: torch, level, compass, calculator and the Interaction board, on one
-// screen with a tab capsule.
+// Tools: torch, level and compass on one screen with a tab capsule; the
+// calculator, the Interaction board and the USB webcam are apps of their own
+// on the home screen, drawn on the same screen without the tabs.
 #include "tools_app.h"
 
 #include <math.h>
@@ -23,12 +24,18 @@ const char *TAG = "tools";
 const Accent CORAL = {0xFFB199, 0xE0533D, 0xFF8A70, 0x2A0A04, 0x3A1610, 0x1A0906};
 const Accent &ACC = CORAL;
 enum Tool { TORCH, LEVEL, COMPASS, CALC, BOARD, WEBCAM, TOOLS };
-const char *const NAMES[TOOLS] = {"Torch", "Level", "Compass", "Calc", "Interact", "Webcam"};
+constexpr int TABS = 3;  // Tools' own: torch, level, compass
+const char *const NAMES[TABS] = {"Torch", "Level", "Compass"};
+const char *const TITLES[TOOLS] = {"Tools", "Tools", "Tools", "Calculator", "Interaction", "Webcam"};
+// Where the panes start: under the tabs, or higher without them.
+constexpr int PANE_Y = 124, SOLO_Y = 84;
 
 struct {
     tools_hooks_t hooks{};
-    lv_obj_t *screen = nullptr, *tabs = nullptr, *pane[TOOLS] = {};
+    lv_obj_t *screen = nullptr, *tabs = nullptr, *title = nullptr, *pane[TOOLS] = {};
     int tool = TORCH;
+    int tab = TORCH;  // Tools' last tab (kept in NVS)
+    bool solo = false;  // one of the apps of their own, not Tools
     bool built = false, active = false;
     lv_timer_t *timer = nullptr;
     // torch
@@ -521,6 +528,9 @@ void build_calc(lv_obj_t *p)
 void show_tool(int t)
 {
     T.tool = std::clamp(t, 0, TOOLS - 1);
+    T.solo = T.tool >= TABS;
+    set_hidden(T.tabs, T.solo);
+    set_text(T.title, TITLES[T.tool]);
     for (int i = 0; i < TOOLS; ++i) {
         if (i == T.tool) {
             set_hidden(T.pane[i], false);
@@ -528,15 +538,24 @@ void show_tool(int t)
             set_hidden(T.pane[i], true);
         }
     }
+    if (T.pane[T.tool] && lv_obj_get_style_y(T.pane[T.tool], LV_PART_MAIN) != (T.solo ? SOLO_Y : PANE_Y)) {
+        lv_obj_set_y(T.pane[T.tool], T.solo ? SOLO_Y : PANE_Y);
+    }
+    interact::set_visible(T.active && T.tool == BOARD);
+    if (T.solo) {
+        return;
+    }
     if (T.tabs && capsule_selected(T.tabs) != T.tool) {
         capsule_select(T.tabs, T.tool, true);
     }
-    interact::set_visible(T.active && T.tool == BOARD);
-    nvs_handle_t h;
-    if (nvs_open("tools", NVS_READWRITE, &h) == ESP_OK) {
-        nvs_set_u8(h, "tool", uint8_t(T.tool));
-        nvs_commit(h);
-        nvs_close(h);
+    if (T.tab != T.tool) {
+        T.tab = T.tool;
+        nvs_handle_t h;
+        if (nvs_open("tools", NVS_READWRITE, &h) == ESP_OK) {
+            nvs_set_u8(h, "tool", uint8_t(T.tool));
+            nvs_commit(h);
+            nvs_close(h);
+        }
     }
 }
 
@@ -575,11 +594,11 @@ void build(lv_obj_t *s)
             T.hooks.exit();
         }
     }, LV_EVENT_CLICKED, nullptr);
-    label(s, "Tools", 112, 20, 200, TEXT, 26, true);
-    T.tabs = capsule(s, 30, 66, 420, 44, NAMES, TOOLS, T.tool, ACC, 14);
+    T.title = label(s, "Tools", 112, 20, 300, TEXT, 26, true);
+    T.tabs = capsule(s, 50, 66, 380, 44, NAMES, TABS, T.tab, ACC, 15);
     lv_obj_add_event_cb(T.tabs, tab_cb, LV_EVENT_VALUE_CHANGED, nullptr);
     for (int i = 0; i < TOOLS; ++i) {
-        T.pane[i] = box(s, 0, 124, PANEL, 356);
+        T.pane[i] = box(s, 0, i < TABS ? PANE_Y : SOLO_Y, PANEL, PANEL - PANE_Y);
     }
     build_torch(T.pane[TORCH]);
     build_level(T.pane[LEVEL]);
@@ -601,8 +620,8 @@ extern "C" void tools_app_init(const tools_hooks_t *hooks)
     nvs_handle_t h;
     if (nvs_open("tools", NVS_READONLY, &h) == ESP_OK) {
         uint8_t v;
-        if (nvs_get_u8(h, "tool", &v) == ESP_OK && v < TOOLS) {
-            T.tool = v;
+        if (nvs_get_u8(h, "tool", &v) == ESP_OK && v < TABS) {
+            T.tool = T.tab = v;
         }
         nvs_close(h);
     }
@@ -611,8 +630,18 @@ extern "C" void tools_app_init(const tools_hooks_t *hooks)
 
 extern "C" void tools_app_open(lv_obj_t *screen)
 {
+    tools_app_open_tool(screen, -1);
+}
+
+extern "C" void tools_app_open_tool(lv_obj_t *screen, int tool)
+{
+    // Tools opens on its last tab; the others on themselves.
+    const int t = tool >= TABS && tool < TOOLS ? tool : tool >= 0 && tool < TABS ? tool : T.tab;
     if (!T.built) {
+        T.tool = t;
         build(screen);
+    } else {
+        show_tool(t);
     }
     tools_app_set_active(true);
 }
@@ -633,9 +662,15 @@ extern "C" void tools_app_set_active(bool active)
 
 extern "C" void tools_app_select(int tool)
 {
-    if (T.built) {
+    if (tool < 0 || tool >= TABS) {
+        return;  // the others open as apps of their own (tools_app_open_tool)
+    }
+    if (T.built && !T.solo) {
         show_tool(tool);
     } else {
-        T.tool = std::clamp(tool, 0, TOOLS - 1);
+        T.tab = tool;  // shown when Tools opens
+        if (!T.built) {
+            T.tool = tool;
+        }
     }
 }
