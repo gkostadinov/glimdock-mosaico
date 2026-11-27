@@ -75,6 +75,14 @@ The file holds keys and passwords: keep it private (mode 0600) and out of versio
 control. Glimdock's private chat reader is set up with
 `tools/private-reader-mosaico.py` (it needs a Glimdock checkout in `GLIMDOCK_DIR`).
 
+Or from a browser: switch on **Web settings** in Settings and open the address it
+shows on a computer or phone on the same network, with the six-digit code shown
+under it. The page edits the same settings (Swifty, Glimdock, Home pairing, Files
+shares). Saved keys never leave the board; the page shows only whether each is
+set. It is plain HTTP on your network, so switch it on only while you use it: it
+turns itself off after 10 minutes unused, after 5 wrong codes and at every
+restart.
+
 ## Privacy
 
 The board only talks to the servers you configure: your Glimdock collector,

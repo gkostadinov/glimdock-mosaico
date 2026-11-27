@@ -60,7 +60,7 @@ struct {
     // Settings sheet
     lv_obj_t *s_bright = nullptr, *s_bright_bar = nullptr, *s_radius = nullptr, *s_wifi_dot = nullptr,
               *s_ssid = nullptr, *s_detail = nullptr, *s_wifi_state = nullptr, *s_versions = nullptr, *s_zone = nullptr,
-               *s_cam_auto = nullptr;
+               *s_cam_auto = nullptr, *s_web = nullptr, *s_web_hint = nullptr, *s_web_url = nullptr, *s_web_code = nullptr;
     // Corner calibration
     lv_obj_t *calibration = nullptr, *guide = nullptr, *cal_value = nullptr;
 } ui;
@@ -584,7 +584,19 @@ void build_settings(int brightness, bool haptics, bool auto_rotate)
             ui.hooks.camera_auto(toggle_on(lv_event_get_current_target_obj(e)));
         }
     }, LV_EVENT_VALUE_CHANGED, nullptr);
-    box(c, 0, 660, 1, 60);  // room to scroll the last card clear of the rounded bottom
+    // Web settings: URLs and keys from a browser, only while switched on.
+    lv_obj_t *web = glass(c, 10, 672, 460, 132, 28, GREEN);
+    label(web, "Web settings", 24, 16, 260, TEXT, 18, true);
+    ui.s_web_hint = label(web, "", 24, 44, 320, TEXT3, 14);
+    ui.s_web_url = label(web, "", 24, 68, 412, TEXT, 18, true);
+    ui.s_web_code = label(web, "", 24, 96, 412, TEXT2, 16, true);
+    ui.s_web = toggle(web, 360, 22, false, GREEN);
+    lv_obj_add_event_cb(ui.s_web, [](lv_event_t *e) {
+        if (ui.hooks.web_settings) {
+            ui.hooks.web_settings(toggle_on(lv_event_get_current_target_obj(e)));
+        }
+    }, LV_EVENT_VALUE_CHANGED, nullptr);
+    box(c, 0, 804, 1, 60);  // room to scroll the last card clear of the rounded bottom
     lv_obj_add_flag(c, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(c, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(c, LV_SCROLLBAR_MODE_OFF);
@@ -603,6 +615,20 @@ void update_settings(const LauncherStatus &s)
     set_text(ui.s_zone, s.zone ? s.zone : "UTC");
     if (ui.s_cam_auto && toggle_on(ui.s_cam_auto) != s.camera_auto) {
         toggle_set(ui.s_cam_auto, s.camera_auto, false);
+    }
+    if (ui.s_web) {
+        if (toggle_on(ui.s_web) != s.web_on) {
+            toggle_set(ui.s_web, s.web_on, true);
+        }
+        char code[24] = "";
+        if (s.web_on && s.web_code && strlen(s.web_code) == 6) {
+            snprintf(code, sizeof(code), "Code  %.3s %.3s", s.web_code, s.web_code + 3);
+        }
+        const bool noted = !s.web_on && s.web_note && *s.web_note;
+        set_text(ui.s_web_hint, s.web_on ? "Open in a browser on this network" : "Edit URLs and keys from a browser");
+        set_text(ui.s_web_url, s.web_on ? s.web_url : noted ? s.web_note : "Off");
+        set_text_color(ui.s_web_url, lv_color_hex(s.web_on ? TEXT : noted ? WARN : TEXT3));
+        set_text(ui.s_web_code, code);
     }
 }
 

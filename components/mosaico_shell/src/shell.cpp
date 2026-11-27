@@ -43,6 +43,7 @@
 #include "sdkconfig.h"
 #include "shell_internal.h"
 #include "time_zone.h"
+#include "web_settings.h"
 #include "tusb.h"
 
 namespace {
@@ -122,6 +123,15 @@ void save_app(ShellApp app)
     }
 }
 
+// ESP-Iris's restart also resets the S31's digital peripherals (a plain
+// esp_restart leaves the USB engine running into the next boot: no USB after it).
+void restart_board()
+{
+    esp_iris_mark_planned_restart();
+    esp_iris_restart_now();
+    esp_restart();  // only if Iris's restart was already taken
+}
+
 void save_radius(int radius)
 {
     Preferences p;
@@ -129,12 +139,7 @@ void save_radius(int radius)
         p.putUChar("radius", uint8_t(std::clamp(radius, 0, MAX_RADIUS)));
         p.end();
     }
-    // Every application lays out from the radius at start-up. ESP-Iris's
-    // restart also resets the S31's digital peripherals (a plain esp_restart
-    // leaves the USB engine running into the next boot: no USB after it).
-    esp_iris_mark_planned_restart();
-    esp_iris_restart_now();
-    esp_restart();  // only if Iris's restart was already taken
+    restart_board();  // every application lays out from the radius at start-up
 }
 
 void set_brightness(int percent, bool save)
@@ -405,8 +410,11 @@ void refresh_launcher(lv_timer_t *)
     read_battery();
     char zone_text[64];
     time_zone_text(zone_text, sizeof(zone_text));
-    launcher_ui_update({clock, date, connected, configured, ssid, ip, versions, battery.pct, battery.charging, zone_text, camera_app_auto_facing()}, glim, home,
-                       camera, swifty, files);
+    WebSettingsInfo web;
+    web_settings_info(&web);
+    launcher_ui_update({clock, date, connected, configured, ssid, ip, versions, battery.pct, battery.charging, zone_text, camera_app_auto_facing(),
+                        web.running, web.url, web.code, web.note},
+                       glim, home, camera, swifty, files);
 }
 
 void go_launcher_async(void *)
@@ -1427,10 +1435,20 @@ extern "C" esp_err_t mosaico_shell_start(void)
         time_zone_step(step);
         refresh_launcher(nullptr);  // the new choice and clock at once
     },
-    camera_app_set_auto_facing},
+    camera_app_set_auto_facing,
+    [](bool on)
+    {
+        if (on) {
+            web_settings_start();
+        } else {
+            web_settings_stop("");
+        }
+        refresh_launcher(nullptr);  // the address and code, or why not, at once
+    }},
     shell.radius, shell.brightness, haptics_enabled(), orientation_enabled(),
          swifty_app_portrait(168), widgets[0], widgets[1]);
     home_app_set_exit_handler([] { shell_show(ShellApp::Launcher); });
+    web_settings_set_restart(restart_board);  // a save that applies after a restart
     lv_indev_t *touch = bsp_display_get_input_dev();
     if (touch) {
         shell.touch_read = lv_indev_get_read_cb(touch);

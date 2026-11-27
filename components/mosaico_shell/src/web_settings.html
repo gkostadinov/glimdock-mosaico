@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Mosaico settings</title>
+<style>
+:root {
+  --bg: #000; --card: #141414; --field: #222; --edge: #2c2c2c;
+  --text: #f4f4f5; --text2: #a6a6ad; --text3: #75757c;
+  --accent: #7ad6a0; --accent-dim: #163626; --red: #ff6b5e; --warn: #f0b858;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); color: var(--text); color-scheme: dark; }
+body { margin: 0 auto; max-width: 720px; padding: 24px 16px 64px;
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Inter, sans-serif; }
+header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+h1 { font-size: 28px; margin: 0; letter-spacing: -0.01em; }
+header .sub { color: var(--text3); flex: 1; }
+h2 { font-size: 19px; margin: 0; }
+section { background: var(--card); border: 1px solid var(--edge); border-radius: 20px;
+  padding: 18px 18px 16px; margin: 0 0 16px; }
+.head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.note { color: var(--text3); font-size: 13px; }
+label { display: block; margin-top: 14px; color: var(--text2); font-size: 13px; font-weight: 600; }
+label .state { font-weight: 400; color: var(--text3); }
+input, textarea, select { width: 100%; margin-top: 6px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--edge); background: var(--field); color: var(--text); font: inherit; }
+textarea { min-height: 84px; font: 12px/1.4 ui-monospace, Menlo, monospace; resize: vertical; }
+input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row > input, .row > textarea { flex: 1; }
+.row > button { margin-top: 6px; }
+.row.top { align-items: flex-start; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+button { font: inherit; font-weight: 600; border: 0; border-radius: 12px; padding: 10px 16px;
+  cursor: pointer; background: var(--field); color: var(--text); }
+button.primary { background: var(--accent); color: #06200f; }
+button.small { padding: 6px 10px; font-size: 13px; margin-top: 6px; }
+.row > button.small { padding: 10px 12px; }
+button:disabled { opacity: 0.4; cursor: default; }
+.actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+.msg { font-size: 14px; color: var(--text2); }
+.msg.ok { color: var(--accent); }
+.msg.err { color: var(--red); }
+.share { border: 1px solid var(--edge); border-radius: 16px; padding: 4px 14px 14px; margin-top: 14px; }
+.share .row { justify-content: space-between; margin-top: 10px; }
+#login { max-width: 360px; margin: 12vh auto 0; text-align: center; }
+#login input { text-align: center; font-size: 28px; letter-spacing: 0.3em; }
+#login p { color: var(--text2); }
+.hidden { display: none !important; }
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 12px); opacity: 0;
+  background: var(--accent); color: #06200f; font-weight: 600; padding: 10px 18px; border-radius: 999px;
+  transition: opacity 0.2s, transform 0.2s; pointer-events: none; }
+#toast.on { opacity: 1; transform: translate(-50%, 0); }
+</style>
+</head>
+<body>
+<div id="login" class="hidden">
+  <h1>Mosaico</h1>
+  <p>Enter the code shown on the board under Settings, Web settings.</p>
+  <form id="login-form">
+    <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required autofocus>
+    <div class="actions" style="justify-content:center"><button class="primary" type="submit">Sign in</button></div>
+    <p id="login-msg" class="msg err"></p>
+  </form>
+</div>
+
+<div id="main" class="hidden">
+  <header>
+    <h1>Mosaico</h1>
+    <span class="sub">Settings</span>
+    <button id="off" type="button">Turn off</button>
+  </header>
+  <div id="sections"></div>
+  <p class="note">Saved keys never leave the board: a key field shows only whether it is set. Type to replace it.
+  This page works while Web settings is on (it turns itself off after 10 minutes unused).</p>
+</div>
+
+<div id="toast" role="status"></div>
+<div id="gone" class="hidden">
+  <h1>Mosaico</h1>
+  <p id="gone-msg" class="msg"></p>
+</div>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const show = id => ["login", "main", "gone"].forEach(x => $("#" + x).classList.toggle("hidden", x !== id));
+let status = {};
+
+async function api(path, body) {
+  const init = { credentials: "same-origin", cache: "no-store" };
+  if (body !== undefined) {
+    init.method = "POST";
+    init.headers = { "X-Mosaico": "1", "Content-Type": typeof body === "string" ? "text/plain" : "application/json" };
+    init.body = typeof body === "string" ? body : JSON.stringify(body);
+  }
+  let r;
+  try { r = await fetch(path, init); } catch (e) { offline(); throw e; }
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 401) { show("login"); throw new Error("sign in"); }
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+function offline(text) {
+  $("#gone-msg").textContent = text ||
+    "The board does not answer. Web settings may be off (Settings on the board) or the board restarting.";
+  show("gone");
+}
+
+let toastTimer;
+function toast(text) {
+  const t = $("#toast");
+  t.textContent = text;
+  t.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("on"), 2500);
+}
+
+function el(tag, props = {}, ...kids) {
+  const e = document.createElement(tag);
+  Object.assign(e, props);
+  for (const k of kids) e.append(k);
+  return e;
+}
+
+// A field. kind: text, url, secret (shows only whether it is set), pem (the same, multi-line).
+function field(kind, title, value, hint = "") {
+  const secret = kind === "secret" || kind === "pem";
+  const input = kind === "pem" ? el("textarea", { spellcheck: false }) :
+    el("input", { type: kind === "secret" ? "password" : kind === "url" ? "url" : "text",
+                  autocomplete: kind === "secret" ? "new-password" : "off", spellcheck: false });
+  const state = el("span", { className: "state" });
+  const wrap = el("div", { className: kind === "pem" ? "row top" : "row" }, input);
+  const box = el("label", {}, title + " ", state, wrap);
+  const f = { box, input, cleared: false };
+  if (secret) {
+    const set = value === true;
+    state.textContent = set ? "· set" : "· not set";
+    input.placeholder = set ? "Saved. Type to replace" : (hint || "Not set");
+    if (set) {
+      const clear = el("button", { type: "button", className: "small", textContent: "Clear" });
+      clear.onclick = () => {
+        f.cleared = !f.cleared;
+        input.value = "";
+        input.disabled = f.cleared;
+        input.placeholder = f.cleared ? "Cleared when you save" : "Saved. Type to replace";
+        clear.textContent = f.cleared ? "Keep" : "Clear";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      wrap.append(clear);
+    }
+    f.changed = () => f.cleared || input.value !== "";
+    f.value = () => f.cleared ? "" : input.value;
+  } else {
+    input.value = value || "";
+    input.placeholder = hint;
+    f.changed = () => input.value.trim() !== (value || "");
+    f.value = () => input.value.trim();
+  }
+  return f;
+}
+
+function sectionBox(title, note) {
+  const s = el("section");
+  s.append(el("div", { className: "head" }, el("h2", { textContent: title }), el("span", { className: "note", textContent: note })));
+  return s;
+}
+
+function actions(section, label, onSave) {
+  const button = el("button", { className: "primary", type: "button", textContent: label, disabled: true });
+  const msg = el("span", { className: "msg" });
+  section.append(el("div", { className: "actions" }, button, msg));
+  const say = (text, kind = "") => { msg.textContent = text; msg.className = "msg " + kind; };
+  button.onclick = async () => {
+    button.disabled = true;
+    say("Saving…");
+    try { await onSave(say); } catch (e) { say(e.message, "err"); button.disabled = false; }
+  };
+  return { button, say };
+}
+
+async function saveSection(name, change, say) {
+  const { reply } = await api("/api/save", { [name]: change });
+  if (reply === "ok restart") {
+    offline("Saved. The board is restarting to apply it. Web settings are off after a restart: switch them on again in Settings to change more.");
+    return false;
+  }
+  if (reply !== "ok") throw new Error(reply);
+  toast("Saved");  // the section is drawn again from the board's answer
+  return true;
+}
+
+// Swifty and Glimdock: plain key/value sections.
+const SIMPLE = [
+  { name: "swifty", title: "Swifty", note: "Applies at once", fields: [
+    ["llm_url", "Model server URL", "url", "http://model-server:8080/v1"],
+    ["llm_model", "Model", "text", "The server's default"],
+    ["llm_key", "Model key", "secret"],
+    ["search_key", "Web search key (Tavily)", "secret", "Not set: no web search"],
+    ["asr_url", "Speech URL", "url", "wss://speech-server/v1/asr/realtime"],
+    ["asr_model", "Speech model", "text"],
+    ["asr_key", "Speech key", "secret"],
+    ["asr_ca", "Speech server certificate (PEM)", "pem", "Only for a privately signed speech server"],
+  ] },
+  { name: "glimdock", title: "Glimdock", note: "Saving restarts the board", fields: [
+    ["endpoint", "Collector URL", "url", "https://collector/api/v1/snapshot"],
+    ["token", "Display token", "secret"],
+    ["ssid", "Wi-Fi network", "text", "Empty: Vibe Mode's network"],
+    ["password", "Wi-Fi password", "secret"],
+    ["setup_token", "Setup token", "secret"],
+    ["ca", "Collector certificate (PEM)", "pem", "Needed for an https:// collector"],
+  ] },
+];
+
+function renderSimple(spec) {
+  const values = status[spec.name] || {};
+  const s = sectionBox(spec.title, spec.note);
+  const grid = el("div", { className: "grid" });
+  s.append(grid);
+  const fields = spec.fields.map(([key, title, kind, hint]) => {
+    const f = field(kind, title, values[key], hint);
+    (kind === "pem" ? s : grid).append(f.box);
+    return [key, f];
+  });
+  const { button } = actions(s, "Save", async say => {
+    const change = {};
+    for (const [key, f] of fields) if (f.changed()) change[key] = f.value();
+    if (await saveSection(spec.name, change, say)) await reload();
+  });
+  s.addEventListener("input", () => { button.disabled = !fields.some(([, f]) => f.changed()); });
+  return s;
+}
+
+function renderHome() {
+  const h = status.home || {};
+  const s = sectionBox("Home", h.paired ? "Paired with " + (h.name || h.hub) : "Not paired");
+  s.append(el("p", { className: "note", textContent: "Make a code in Swifty Home: Displays, Pair a display." }));
+  const grid = el("div", { className: "grid" });
+  const hub = field("url", "Swifty Home hub", h.hub, "http://hub:8080");
+  const code = field("text", "Pairing code", "", "From Swifty Home");
+  grid.append(hub.box, code.box);
+  s.append(grid);
+  const { button } = actions(s, "Pair", async say => {
+    const { reply } = await api("/api/save", { home: { hub: hub.value(), pairing_code: code.value() } });
+    if (reply !== "ok") throw new Error(reply);
+    say("Pairing…");
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 1500));
+      const note = ((await api("/api/status")).home || {}).pairing || "";
+      if (note && note !== "pairing") {
+        if (note.startsWith("paired")) { toast("Paired"); await reload(); }
+        else { say(note.replace(/^failed: /, ""), "err"); button.disabled = false; }
+        return;
+      }
+    }
+    say("No answer from the hub", "err");
+    button.disabled = false;
+  });
+  s.addEventListener("input", () => { button.disabled = !(hub.value() && code.value()); });
+  return s;
+}
+
+function renderFiles() {
+  const fs = status.files || { shares: [], photos: {} };
+  const s = sectionBox("Files", "Network shares for Files and the camera's photos");
+  const list = el("div");
+  s.append(list);
+  const shares = [];
+  const changed = () => button.disabled = false;
+  function addShare(v = {}) {
+    const box = el("div", { className: "share" });
+    const grid = el("div", { className: "grid" });
+    const f = {
+      name: field("text", "Name", v.name, "Shown in Files"),
+      host: field("text", "Host", v.host, "An address or a name the board resolves"),
+      share: field("text", "Share", v.share),
+      path: field("text", "Start folder", v.path, "Optional"),
+      user: field("text", "User", v.user),
+      password: field("secret", "Password", v.password === undefined ? false : v.password),
+    };
+    Object.values(f).forEach(x => grid.append(x.box));
+    const remove = el("button", { type: "button", className: "small", textContent: "Remove this share" });
+    const entry = { f, box, isNew: !v.host };
+    remove.onclick = () => { shares.splice(shares.indexOf(entry), 1); box.remove(); changed(); refreshPhotos(); };
+    box.append(grid, el("div", { className: "row" }, el("span"), remove));
+    list.append(box);
+    shares.push(entry);
+  }
+  (fs.shares || []).forEach(v => addShare(v));
+  const add = el("button", { type: "button", className: "small", textContent: "Add a share" });
+  add.onclick = () => { addShare(); changed(); };
+  s.append(add);
+  const photosShare = el("select");
+  const photosPath = field("text", "Photos folder", (fs.photos || {}).path, "Mosaico Photos");
+  const pick = el("label", {}, "Camera photos go to", photosShare);
+  function refreshPhotos() {
+    const keep = photosShare.value || (fs.photos || {}).share || "";
+    photosShare.replaceChildren(el("option", { value: "", textContent: "The first share" }),
+      ...shares.map(x => x.f.name.value()).filter(Boolean).map(n => el("option", { value: n, textContent: n })));
+    photosShare.value = [...photosShare.options].some(o => o.value === keep) ? keep : "";
+  }
+  refreshPhotos();
+  s.append(el("div", { className: "grid" }, pick, photosPath.box));
+  const { button } = actions(s, "Save", async say => {
+    const out = shares.map(({ f }) => {
+      const o = {};
+      for (const k of ["name", "host", "share", "user", "path"]) o[k] = f[k].value();
+      if (f.password.changed()) o.password = f.password.value();
+      return o;
+    });
+    const change = { shares: out, photos: { share: photosShare.value, path: photosPath.value() } };
+    if (await saveSection("files", change, say)) await reload();
+  });
+  s.addEventListener("input", () => { changed(); refreshPhotos(); });
+  s.addEventListener("change", changed);
+  return s;
+}
+
+function render() {
+  $("#sections").replaceChildren(...SIMPLE.map(renderSimple), renderHome(), renderFiles());
+}
+
+async function reload() {
+  status = await api("/api/status");
+  render();
+  show("main");
+}
+
+$("#login-form").onsubmit = async e => {
+  e.preventDefault();
+  $("#login-msg").textContent = "";
+  try {
+    await api("/api/login", $("#code").value.trim());
+    $("#code").value = "";
+    await reload();
+  } catch (err) {
+    if (err.message !== "sign in") $("#login-msg").textContent = err.message;
+  }
+};
+
+$("#off").onclick = async () => {
+  try { await api("/api/stop", {}); } catch (e) { /* off either way */ }
+  offline("Web settings are off. Switch them on again in Settings on the board.");
+};
+
+reload().catch(e => { if (e.message !== "sign in") offline(); });
+</script>
+</body>
+</html>

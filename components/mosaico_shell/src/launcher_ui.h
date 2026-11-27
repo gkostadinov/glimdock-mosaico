@@ -20,6 +20,10 @@ struct LauncherStatus {
     bool charging;
     const char *zone;  // the time zone as Settings shows it, e.g. "Automatic · London"
     bool camera_auto;  // the camera finds front/rear by itself
+    // Web settings (web_settings.h): on, where, the code to enter there, and
+    // why it is off (empty: no reason to give).
+    bool web_on = false;
+    const char *web_url = "", *web_code = "", *web_note = "";
 };
 
 struct LauncherHooks {
@@ -31,6 +35,7 @@ struct LauncherHooks {
     void (*save_widgets)(int left, int right);  // the home screen's two widget kinds
     void (*time_zone)(int step);                // Settings: the next (+1) or previous (-1) time zone choice
     void (*camera_auto)(bool enabled);          // Settings: the camera's automatic front/rear
+    void (*web_settings)(bool on);              // Settings: the web settings server
 };
 
 // portrait: a still of Swifty for its page (may be null).
