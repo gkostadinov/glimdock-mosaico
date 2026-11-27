@@ -83,8 +83,21 @@ int zone_for(const char *name)
     return -1;
 }
 
+// The C library's local time (localtime_r, mktime) follows the clock's zone,
+// with the same rules: Swifty's sense of the time, reminders and file times.
+void apply_zone(int z)
+{
+    static const char *const POSIX[] = {"UTC0", "EET-2EEST,M3.5.0/3,M10.5.0/4", "GMT0BST,M3.5.0/1,M10.5.0",
+                                        "CET-1CEST,M3.5.0,M10.5.0/3", "EST5EDT,M3.2.0,M11.1.0", "PST8PDT,M3.2.0,M11.1.0", "JST-9"
+                                       };
+    static_assert(sizeof(POSIX) / sizeof(POSIX[0]) == DISPLAY_CLOCK_ZONE_COUNT, "a POSIX rule for each clock zone");
+    setenv("TZ", POSIX[z >= 0 && z < DISPLAY_CLOCK_ZONE_COUNT ? z : 0], 1);
+    tzset();
+}
+
 void save_zone(int z)
 {
+    apply_zone(z);
     Preferences p;
     if (p.begin("display", false)) {  // Glimdock's and Home's clocks read it too
         p.putUChar("clockZone", uint8_t(z));
@@ -170,6 +183,7 @@ void time_zone_start()
         zone = p.getUChar("clockZone", 0) % DISPLAY_CLOCK_ZONE_COUNT;
         p.end();
     }
+    apply_zone(zone);
     if (p.begin(SHELL_PREFS, true)) {
         automatic = p.getUChar("tzauto", 1) != 0;
         p.end();
