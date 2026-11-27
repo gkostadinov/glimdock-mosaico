@@ -8,7 +8,10 @@
     "tags": ["homelab", "dashboard", "smart home", "voice assistant", "camera", "webcam", "launcher", "LVGL"],
     "external_links": [
       {"label": "Source code", "url": "https://github.com/gkostadinov/glimdock-mosaico", "platform": "github"},
-      {"label": "Glimdock homelab collector", "url": "https://github.com/gkostadinov/glimdock", "platform": "github"}
+      {"label": "Report a problem", "url": "https://github.com/gkostadinov/glimdock-mosaico/issues", "platform": "github"},
+      {"label": "Glimdock homelab collector", "url": "https://github.com/gkostadinov/glimdock", "platform": "github"},
+      {"label": "Swifty Home hub (for the Home app)", "url": "https://github.com/gkostadinov/swifty-home", "platform": "github"},
+      {"label": "MosaicoCam: macOS app for the USB webcam", "url": "https://github.com/gkostadinov/mosaico-cam", "platform": "github"}
     ]
   },
   "firmware": "build/glimdock-system-update.irisfw",

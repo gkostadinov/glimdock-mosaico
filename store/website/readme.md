@@ -8,7 +8,8 @@ wall companion for your homelab and home.
 - **Glimdock**: a homelab dashboard for a [Glimdock](https://github.com/gkostadinov/glimdock)
   collector: hosts, services, storage, sensors, printers, alerts and the Kordlet
   agent chat.
-- **Home**: a wall display for a self-hosted Swifty Home hub: rooms, lights,
+- **Home**: a wall display for a self-hosted
+  [Swifty Home](https://github.com/gkostadinov/swifty-home) hub: rooms, lights,
   music, TV and plugs, paired with a one-time display code.
 - **Swifty**: a voice and text assistant for any OpenAI-compatible model, with
   push-to-talk speech, optional web search, and tools to open apps and control
@@ -19,7 +20,9 @@ wall companion for your homelab and home.
 - **Files**: the board's storage and SMB shares, with image and text previews.
 - **Tools**: torch, spirit level, compass, calculator, the Interaction module and
   a **USB webcam** mode (1280 × 720 or 640 × 480 MJPEG, upright whichever way the
-  board is held, with the flash as a light).
+  board is held, with the flash as a light). On a Mac,
+  [MosaicoCam](https://github.com/gkostadinov/mosaico-cam) adds live filters and
+  4K upscaling and passes it on to FaceTime, Zoom and the like.
 - **Settings**: brightness, haptics, auto-rotate, the panel's corner radius, time
   zone, camera options and **Web settings**.
 
@@ -48,7 +51,12 @@ you switch it on. With the time zone on
 Automatic, it looks up its time zone from its public IP address at `ipapi.co`;
 choose a time zone in Settings to turn that off.
 
-## Source
+## Source and links
 
 Open source under the Apache License 2.0:
 [github.com/gkostadinov/glimdock-mosaico](https://github.com/gkostadinov/glimdock-mosaico).
+
+- Found a problem or have an idea? [Open an issue](https://github.com/gkostadinov/glimdock-mosaico/issues).
+- [Glimdock](https://github.com/gkostadinov/glimdock): the homelab collector the Glimdock app reads.
+- [Swifty Home](https://github.com/gkostadinov/swifty-home): the self-hosted smart-home hub the Home app shows.
+- [MosaicoCam](https://github.com/gkostadinov/mosaico-cam): a macOS app for the board's USB webcam.
