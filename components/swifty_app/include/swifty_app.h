@@ -50,6 +50,14 @@ void swifty_app_summary(swifty_summary_t *out);
 typedef const char *(*swifty_section_apply_t)(const char *json, size_t length);
 typedef void (*swifty_section_status_t)(char *json, size_t capacity);
 void swifty_app_config_section(const char *name, swifty_section_apply_t apply, swifty_section_status_t status);
+// The whole board configuration as JSON, as tools/mosaico-config.py --status
+// shows it (addresses, and whether each key is set; never a key). Allocated:
+// free() it. NULL when out of memory.
+char *swifty_app_config_status(void);
+// A change in the JSON tools/mosaico-config.py sends ({"swifty": {...},
+// "glimdock": {...}, ...}). reply gets "ok", "ok restart" (saved; applies
+// after a restart) or the first error. json is wiped.
+void swifty_app_config_apply(char *json, size_t length, char *reply, size_t capacity);
 
 // Tools other apps give Swifty. parameters_json is a JSON-schema object
 // (e.g. {"type":"object","properties":{...}}). fn runs on Swifty's agent task

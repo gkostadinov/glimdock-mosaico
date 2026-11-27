@@ -1140,6 +1140,22 @@ extern "C" void swifty_app_config_section(const char *name, swifty_section_apply
     config_section(name, apply, status);
 }
 
+extern "C" char *swifty_app_config_status(void)
+{
+    const std::string json = config_status_json();
+    return strdup(json.c_str());
+}
+
+extern "C" void swifty_app_config_apply(char *json, size_t length, char *reply, size_t capacity)
+{
+    std::string text(json, length);
+    for (size_t i = 0; i < length; ++i) {
+        reinterpret_cast<volatile char *>(json)[i] = 0;
+    }
+    const std::string r = config_apply_json(text);
+    strlcpy(reply, r.c_str(), capacity);
+}
+
 extern "C" void swifty_app_attach_photo(int index)
 {
     if (!U.built) {

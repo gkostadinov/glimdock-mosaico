@@ -38,4 +38,11 @@ using SectionApply = const char *(*)(const char *json, size_t length);
 using SectionStatus = void (*)(char *json, size_t capacity);
 void config_section(const char *name, SectionApply apply, SectionStatus status);
 
+// The whole board configuration as the status call reports it (addresses,
+// and whether each key is set; never a key), and a change to it in the same
+// JSON tools/mosaico-config.py sends. The reply is "ok", "ok restart" (saved;
+// the board must restart to apply it) or the first error. json is wiped.
+std::string config_status_json();
+std::string config_apply_json(std::string &json);
+
 }  // namespace swifty

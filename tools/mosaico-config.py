@@ -27,7 +27,9 @@ Swifty) an empty string clears it.
   "files":    shares: a list of SMB shares for the Files app, each with
               name, host (an IP address or a name the board can resolve),
               share, user, password and an optional start path. The list
-              replaces the board's; an empty list removes them all.
+              replaces the board's; an empty list removes them all. A
+              share without "password" keeps the one saved for it (same
+              name, or else the same host and share).
               photos: where the camera keeps its photos, {"share": a
               share's name, "path": a folder in it} (default: the first
               share, "Mosaico Photos").

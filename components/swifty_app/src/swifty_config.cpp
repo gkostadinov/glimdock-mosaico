@@ -31,6 +31,7 @@ struct Section {
     SectionStatus status;
 };
 std::vector<Section> sections;
+std::mutex apply_lock;  // one change at a time (ESP-Iris and the web settings)
 // The frame being received: begin (total size), chunks, commit.
 std::string frame;
 size_t expected = 0;
@@ -131,10 +132,10 @@ bool is_swifty_key(const char *k)
 // The committed frame: {"swifty": {...}, "glimdock": {...}, "home": {...}}
 // (or Swifty's keys at the top level). Sets reply to "ok", "ok restart" or
 // the first error.
-void commit(std::string &reply)
+void commit(const std::string &text, std::string &reply)
 {
     JsonDocument doc;
-    if (deserializeJson(doc, frame) || !doc.is<JsonObject>()) {
+    if (deserializeJson(doc, text) || !doc.is<JsonObject>()) {
         reply = "invalid JSON";
         return;
     }
@@ -189,6 +190,38 @@ void commit(std::string &reply)
     reply = restart ? "ok restart" : "ok";
 }
 
+// The board's configuration as JSON: addresses, and only whether each key is set.
+std::string status_json()
+{
+    const Config c = config();
+    JsonDocument doc;
+    JsonObject sw = doc["swifty"].to<JsonObject>();
+    sw["llm_url"] = c.llm_url;
+    sw["llm_model"] = c.llm_model;
+    sw["llm_key"] = !c.llm_key.empty();
+    sw["asr_url"] = c.asr_url;
+    sw["asr_model"] = c.asr_model;
+    sw["asr_key"] = !c.asr_key.empty();
+    sw["asr_ca"] = !c.asr_ca.empty();
+    sw["search_key"] = !c.search_key.empty();
+    std::vector<Section> secs;
+    {
+        std::lock_guard<std::mutex> g(lock);
+        secs = sections;
+    }
+    for (const Section &sec : secs) {
+        std::string text(2048, '\0');  // on the heap: the callers' tasks have small stacks
+        sec.status(text.data(), text.size());
+        JsonDocument part;
+        if (deserializeJson(part, text.c_str()) == DeserializationError::Ok) {
+            doc[sec.name] = part;
+        }
+    }
+    std::string reply;
+    serializeJson(doc, reply);
+    return reply;
+}
+
 // Payload: op byte. 0 status; 1 begin (u32 size); 2 chunk; 3 commit; 4 abort.
 // Replies are short words, never configuration values except the URLs.
 esp_err_t rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capacity, size_t *size, void *)
@@ -201,27 +234,7 @@ esp_err_t rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capaci
     const size_t n = request->payload_size - 1;
     std::string reply = "ok";
     if (op == 0) {
-        const Config c = config();
-        JsonDocument doc;
-        JsonObject sw = doc["swifty"].to<JsonObject>();
-        sw["llm_url"] = c.llm_url;
-        sw["llm_model"] = c.llm_model;
-        sw["llm_key"] = !c.llm_key.empty();
-        sw["asr_url"] = c.asr_url;
-        sw["asr_model"] = c.asr_model;
-        sw["asr_key"] = !c.asr_key.empty();
-        sw["asr_ca"] = !c.asr_ca.empty();
-        sw["search_key"] = !c.search_key.empty();
-        for (const Section &sec : sections) {
-            std::string text(1024, '\0');  // on the heap: the ESP-Iris task has a small stack
-            sec.status(text.data(), text.size());
-            JsonDocument part;
-            if (deserializeJson(part, text.c_str()) == DeserializationError::Ok) {
-                doc[sec.name] = part;
-            }
-        }
-        reply.clear();
-        serializeJson(doc, reply);
+        reply = status_json();
     } else if (op == 1 && n >= 4) {
         uint32_t total;
         memcpy(&total, data, 4);
@@ -239,7 +252,8 @@ esp_err_t rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capaci
         }
     } else if (op == 3) {
         if (frame.size() == expected) {
-            commit(reply);
+            std::lock_guard<std::mutex> g(apply_lock);
+            commit(frame, reply);
         } else {
             reply = "incomplete";
         }
@@ -273,6 +287,22 @@ void config_section(const char *name, SectionApply apply, SectionStatus status)
 {
     std::lock_guard<std::mutex> g(lock);
     sections.push_back({name, apply, status});
+}
+
+std::string config_status_json()
+{
+    return status_json();
+}
+
+std::string config_apply_json(std::string &json)
+{
+    std::string reply;
+    {
+        std::lock_guard<std::mutex> g(apply_lock);
+        commit(json, reply);
+    }
+    wipe(json);
+    return reply;
 }
 
 void config_start()

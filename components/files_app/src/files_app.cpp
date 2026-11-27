@@ -1219,6 +1219,24 @@ extern "C" const char *files_app_config_apply(const char *json, size_t length)
         for (const char *k : KEYS) {
             o[k] = s[k] | "";
         }
+        if (s["password"].isNull()) {
+            // No password given: the one saved for this share (same name, or
+            // else the same host and share), as the web settings send it.
+            std::lock_guard<std::mutex> g(cfg_lock);
+            const Share *same = nullptr;
+            for (const Share &old : shares) {
+                if (old.name == (s["name"] | "") && *(s["name"] | "")) {
+                    same = &old;
+                    break;
+                }
+                if (!same && old.host == (s["host"] | "") && old.share == (s["share"] | "")) {
+                    same = &old;
+                }
+            }
+            if (same) {
+                o["password"] = same->password;
+            }
+        }
     }
     std::string text;
     serializeJson(clean, text);
