@@ -24,7 +24,7 @@ idf_build_set_property(COMPILE_OPTIONS "-fmacro-prefix-map=${MOSAICO_UTILS_ROOT}
 idf_build_set_property(INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/config" APPEND)
 # The CO5300 panel link stays at the BSP's 40 MHz (80 MHz drew stray lines on
 # the glass, 60 MHz while scrolling).
-project(glimdock VERSION 1.1.0)
+project(glimdock VERSION 1.2.0)
 # The board keeps its retained bootloader; like the toolkit's game apps, keep the
 # (never installed) template bootloader out of the default build.
 if(TARGET bootloader)

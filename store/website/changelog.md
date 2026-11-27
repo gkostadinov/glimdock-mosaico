@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0
 
 - **Wi-Fi in Settings**: tap the Wi-Fi card to see the networks around you and
   join one, typing its password on the board (or Other network... for a hidden
@@ -69,6 +69,10 @@
   reminder brings the app back as it was. In webcam mode the screen only dims.
 - **Keyboard**: the magnified key of the top row is no longer hidden behind
   the field above the keyboard.
+- **Scrolling**: no more tear line (diagonal or upright) across the screen
+  while scrolling with the board turned sideways.
+- **Swifty after the camera**: speech no longer stops working after the camera
+  or webcam was used; the camera gives back its memory when it closes.
 
 ## 1.1.0
 
