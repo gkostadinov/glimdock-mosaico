@@ -437,8 +437,14 @@ void refresh_launcher(lv_timer_t *)
     time_zone_text(zone_text, sizeof(zone_text));
     WebSettingsInfo web;
     web_settings_info(&web);
+    vpn_summary_t vpn;
+    vpn_app_summary(&vpn);
+    const LauncherVpn vpn_badge = !vpn.on                      ? LauncherVpn::Off
+                                  : vpn.state == VPN_CONNECTED ? LauncherVpn::Connected
+                                  : vpn.state == VPN_CONNECTING || vpn.state == VPN_WAITING ? LauncherVpn::Connecting
+                                                                                            : LauncherVpn::Trouble;
     launcher_ui_update({clock, date, connected, configured, ssid, ip, versions, battery.pct, battery.charging, zone_text, camera_app_auto_facing(),
-                        web.running, web.url, web.code, web.note, always_on_timeout()},
+                        web.running, web.url, web.code, web.note, always_on_timeout(), vpn_badge},
                        glim, home, camera, swifty, files);
 }
 

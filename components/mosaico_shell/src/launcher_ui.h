@@ -15,6 +15,9 @@
 #include "swifty_app.h"
 #include "shell_internal.h"
 
+// The VPN's badge in the status bar: none while off.
+enum class LauncherVpn : uint8_t { Off, Connected, Connecting, Trouble };
+
 struct LauncherStatus {
     const char *clock;  // "HH:MM" or "--:--"
     const char *date;   // "Sun 23 Nov"
@@ -31,6 +34,8 @@ struct LauncherStatus {
     // The always-on display's timeout in seconds (one of ALWAYS_ON_CHOICES, 0
     // off); -1 unknown.
     int always_on = -1;
+    // The VPN, as a badge after the Wi-Fi icon.
+    LauncherVpn vpn = LauncherVpn::Off;
 };
 
 struct LauncherHooks {

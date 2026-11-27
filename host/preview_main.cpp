@@ -369,6 +369,14 @@ void render_launcher(int radius)
     lv_screen_load(launcher);
     launcher_ui_show_page(0);
     save("launcher-home-screen", display);
+    // The VPN's badge after the Wi-Fi icon: connected, then connecting.
+    for (const auto &[state, name] : {std::pair{LauncherVpn::Connected, "launcher-vpn"}, std::pair{LauncherVpn::Connecting, "launcher-vpn-connecting"}}) {
+        status.vpn = state;
+        launcher_ui_update(status, glim, home, camera, swifty, files);
+        save(name, display);
+    }
+    status.vpn = LauncherVpn::Off;
+    launcher_ui_update(status, glim, home, camera, swifty, files);
     print_layout("start");
     launcher_ui_show_page(6);
     save("launcher-settings", display);

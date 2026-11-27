@@ -63,6 +63,7 @@ struct {
     int radius = 80, draft = 80;
     lv_obj_t *screen = nullptr, *pager = nullptr, *status = nullptr, *dots = nullptr, *editbar = nullptr,
               *settings = nullptr, *hidden_sheet = nullptr;
+    lv_obj_t *vpn = nullptr, *vpn_text = nullptr;  // the VPN's badge after the Wi-Fi icon
     lv_obj_t *clock = nullptr, *wifi = nullptr, *date = nullptr, *badge = nullptr, *badge_text = nullptr, *swifty_dot = nullptr;
     lv_obj_t *batt = nullptr, *batt_fill = nullptr, *batt_nub = nullptr, *batt_bolt = nullptr, *picker = nullptr;
     // The pages and their icons
@@ -1129,6 +1130,12 @@ void build_status_bar()
     const int edge = std::max(20, corner_inset(14) + 10);
     ui.clock = label(ui.status, "--:--", edge, 12, 60, TEXT, 15, true);
     ui.wifi = label(ui.status, LV_SYMBOL_WIFI, edge + 50, 12, 24, TEXT, 15, true);
+    // The VPN: "VPN" in a rounded outline, as phones show it, while it is on.
+    ui.vpn = box(ui.status, edge + 76, 13, 32, 17, 5);
+    lv_obj_set_style_border_width(ui.vpn, 1, 0);
+    lv_obj_set_style_border_color(ui.vpn, lv_color_hex(TEXT), 0);
+    ui.vpn_text = label(ui.vpn, "VPN", 0, 0, 30, TEXT, 11, true, LV_TEXT_ALIGN_CENTER);
+    lv_obj_add_flag(ui.vpn, LV_OBJ_FLAG_HIDDEN);
     ui.date = label(ui.status, "", 150, 12, 180, TEXT2, 15, true, LV_TEXT_ALIGN_CENTER);
     // The battery: an outline with a fill coloured by charge, and a bolt while charging.
     const int bx = PANEL - edge - 33;
@@ -1484,6 +1491,15 @@ void launcher_ui_update(const LauncherStatus &status, const glimdock_summary_t &
     ui.swifty = swifty;
     ui.have_data = true;
     set_color(ui.wifi, status.wifi_connected ? TEXT : status.wifi_configured ? WARN : RED);
+    // White while connected, amber while connecting, red when it cannot.
+    set_hidden(ui.vpn, status.vpn == LauncherVpn::Off);
+    if (status.vpn != LauncherVpn::Off) {
+        const uint32_t c = status.vpn == LauncherVpn::Connected ? TEXT : status.vpn == LauncherVpn::Connecting ? WARN : RED;
+        set_color(ui.vpn_text, c);
+        if (!lv_color_eq(lv_obj_get_style_border_color(ui.vpn, LV_PART_MAIN), lv_color_hex(c))) {
+            lv_obj_set_style_border_color(ui.vpn, lv_color_hex(c), 0);
+        }
+    }
     update_status_bar();
     for (int i = 0; i < 2; ++i) {
         update_widget(i);
