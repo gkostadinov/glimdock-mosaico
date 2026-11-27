@@ -5,6 +5,8 @@
 
 #include <string.h>
 
+#include <algorithm>
+
 #include "bsp/esp_mosaico.h"
 #include "esp_iris.h"
 #include "esp_heap_caps.h"
@@ -25,6 +27,41 @@ SemaphoreHandle_t rendered = nullptr;
 lv_draw_buf_t shot;
 uint8_t *shot_data = nullptr;
 
+// What is over the app (the top layer: a reminder card, a pop-up), blended
+// onto the screen's snapshot, as the panel shows it.
+void blend_top_layer(uint32_t w, uint32_t h, uint32_t stride)
+{
+    lv_obj_t *top = lv_layer_top();
+    bool shown = false;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(top); ++i) {
+        shown |= !lv_obj_has_flag(lv_obj_get_child(top, int32_t(i)), LV_OBJ_FLAG_HIDDEN);
+    }
+    if (!shown) {
+        return;
+    }
+    lv_draw_buf_t *layer = lv_snapshot_take(top, LV_COLOR_FORMAT_ARGB8888);
+    if (!layer) {
+        return;
+    }
+    const uint32_t lw = std::min<uint32_t>(w, layer->header.w), lh = std::min<uint32_t>(h, layer->header.h);
+    for (uint32_t y = 0; y < lh; ++y) {
+        const uint8_t *src = layer->data + y * layer->header.stride;
+        uint16_t *dst = reinterpret_cast<uint16_t *>(shot_data + y * stride);
+        for (uint32_t x = 0; x < lw; ++x, src += 4) {
+            const uint32_t a = src[3];
+            if (!a) {
+                continue;
+            }
+            const uint16_t d = dst[x];
+            const uint32_t r = ((src[2] * a) + (((d >> 11) & 31) * 255 / 31) * (255 - a)) / 255;
+            const uint32_t g = ((src[1] * a) + (((d >> 5) & 63) * 255 / 63) * (255 - a)) / 255;
+            const uint32_t b = ((src[0] * a) + ((d & 31) * 255 / 31) * (255 - a)) / 255;
+            dst[x] = uint16_t((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3));
+        }
+    }
+    lv_draw_buf_destroy(layer);
+}
+
 void render_snapshot(void *)
 {
     lv_obj_t *screen = lv_screen_active();
@@ -36,6 +73,7 @@ void render_snapshot(void *)
     if (shot_data && lv_draw_buf_init(&shot, w, h, LV_COLOR_FORMAT_RGB565, stride, shot_data, stride * h) == LV_RESULT_OK &&
             lv_snapshot_take_to_draw_buf(screen, LV_COLOR_FORMAT_RGB565, &shot) == LV_RESULT_OK) {
         capture = &shot;
+        blend_top_layer(w, h, stride);
     }
     xSemaphoreGive(rendered);
 }
