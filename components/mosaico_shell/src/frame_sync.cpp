@@ -9,10 +9,13 @@
 //
 // The panel always scans its own memory top to bottom, but the UI turns with
 // the board through MADCTL, so in UI terms the scan runs down the rows only at
-// rotation 0: up the rows at 180, and along the columns at 90 and 270 (right
-// to left, left to right). The sender follows the scan along that axis, as
-// rows or as column strips; sending rows against a column-wise scan put the
-// old/new frame seam on a diagonal while scrolling.
+// rotation 0: up the rows at 180, and along the columns at 90 and 270. MADCTL
+// swaps rows and columns first and its mirror bits then reverse the panel's own
+// addresses, so the scan runs left to right at 90 (MV MX) and right to left at
+// 270 (MV MY). The sender follows the scan along that axis and direction, as
+// rows or as column strips: rows against a column-wise scan put the old/new
+// frame seam on a diagonal, and strips against the scan's direction on a
+// vertical line.
 //
 // Why that is tear-free at 40 MHz: a full frame takes ~23 ms to send against
 // a ~16.7 ms refresh. Started right behind the scan, the write is overtaken
@@ -146,7 +149,7 @@ void sender(void *)
         // Which way the panel's scan runs through the UI's frame (see the top).
         const bsp_display_rotation_t rotation = bsp_display_get_rotation();
         const bool columns = rotation == BSP_DISPLAY_ROTATE_90 || rotation == BSP_DISPLAY_ROTATE_270;
-        const bool reverse = rotation == BSP_DISPLAY_ROTATE_90 || rotation == BSP_DISPLAY_ROTATE_180;
+        const bool reverse = rotation == BSP_DISPLAY_ROTATE_270 || rotation == BSP_DISPLAY_ROTATE_180;
         int count = 0, y1, y2, x1 = 0, x2 = W - 1;
         if (!columns) {
             y1 = std::max(0, F.y1 & ~1), y2 = std::min(H - 1, F.y2 | 1);
