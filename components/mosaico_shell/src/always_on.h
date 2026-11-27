@@ -19,10 +19,10 @@ struct AlwaysOnInfo {
 };
 
 struct AlwaysOnHooks {
-    // Something on screen must stay up: webcam mode, the viewfinder, Swifty
-    // listening or answering, a reminder, the screen light. Asked every
-    // second; the wait starts again once it ends (and the clock gives way
-    // when it starts).
+    // Something on screen must stay up: the viewfinder, Swifty listening or
+    // answering, a reminder, the screen light, the webcam switching. Asked
+    // every second; the wait starts again once it ends (and the clock gives
+    // way when it starts).
     bool (*busy)();
     // The app shown stops its work (true) while the clock is up, and resumes it (false).
     void (*pause)(bool paused);
@@ -31,6 +31,9 @@ struct AlwaysOnHooks {
     // The person's brightness setting, a percent.
     int (*brightness)();
     void (*info)(AlwaysOnInfo *out);
+    // The screen may dim but the clock must not come up (webcam mode: what is
+    // shown stays, at the clock's light once the wait is over).
+    bool (*no_clock)();
 };
 
 // Builds the clock's screen, loads the setting and starts the check (LVGL

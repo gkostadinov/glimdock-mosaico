@@ -53,6 +53,7 @@ struct {
     std::atomic<Stage> stage{Stage::Awake};
     bool swallow = false;  // the touch that woke it, until it is lifted
     uint32_t dimmed_idle = 0;  // the time without use when it dimmed (less now: used again)
+    bool deep = false;         // dimmed to the clock's light, where the clock may not come up
     // The fade under way: the panel's light from one level to another.
     lv_timer_t *fader = nullptr;
     int fade_from = 0, fade_to = 0, fade_step = 0, light = -1;
@@ -63,7 +64,7 @@ struct {
     int shift = 0;
     // For the report (RPC 49).
     int64_t since = 0, shown_us = 0;
-    int entries = 0, redraws = 0;
+    int entries = 0, redraws = 0, dims = 0, deep_dims = 0;
 } A;
 
 int snap(int seconds)
@@ -302,8 +303,10 @@ void dim()
         return;
     }
     A.stage = Stage::Dimmed;
+    A.deep = false;
     A.dimmed_idle = lv_display_get_inactive_time(nullptr);
     fade_to(dim_level());
+    ++A.dims;
     ESP_LOGI(TAG, "dimmed");
 }
 
@@ -347,8 +350,9 @@ void tick(lv_timer_t *)
         save(timeout);
     }
     const bool busy = A.hooks.busy && A.hooks.busy();
+    const bool no_clock = A.hooks.no_clock && A.hooks.no_clock();
     const Stage stage = A.stage;
-    if (stage != Stage::Awake && (busy || timeout <= 0)) {
+    if (stage != Stage::Awake && (busy || timeout <= 0 || (stage == Stage::Clock && no_clock))) {
         if (busy) {
             ESP_LOGI(TAG, "the screen is needed");
         }
@@ -368,8 +372,13 @@ void tick(lv_timer_t *)
     if (stage == Stage::Dimmed) {
         if (idle < A.dimmed_idle) {
             wake();  // used again (not by a touch, which undims at once)
-        } else if (idle >= clock_at) {
+        } else if (idle >= clock_at && !no_clock) {
             enter();
+        } else if (idle >= clock_at && !A.deep) {
+            A.deep = true;  // no clock here: as dark as it would be
+            fade_to(clock_level());
+            ++A.deep_dims;
+            ESP_LOGI(TAG, "dimmed to the clock's light (no clock here)");
         }
     } else if (idle >= dim_at) {
         dim();
@@ -472,8 +481,11 @@ void always_on_report(char *out, size_t capacity)
     const int64_t now = esp_timer_get_time();
     const Stage stage = A.stage;
     const int64_t shown = A.shown_us + (stage == Stage::Clock ? now - A.since : 0);
-    snprintf(out, capacity, "always-on: %s; timeout %d s; idle %u s; shown %d times, %lld s in all; %d clock draws",
-             stage == Stage::Clock ? "showing" : stage == Stage::Dimmed ? "dimmed" : "off", A.timeout.load(),
+    snprintf(out, capacity,
+             "always-on: %s; timeout %d s; idle %u s; shown %d times, %lld s in all; %d clock draws; dimmed %d times, "
+             "%d of them to the clock's light (no clock)",
+             stage == Stage::Clock ? "showing" : stage != Stage::Dimmed ? "off" : A.deep ? "dimmed (no clock)" : "dimmed",
+             A.timeout.load(),
              unsigned(lv_display_get_inactive_time(nullptr) / 1000),
-             A.entries, (long long)(shown / 1000000), A.redraws);
+             A.entries, (long long)(shown / 1000000), A.redraws, A.dims, A.deep_dims);
 }

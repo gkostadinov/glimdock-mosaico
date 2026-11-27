@@ -11,7 +11,7 @@
   for a few seconds, then the screen becomes a dim clock on black with the date,
   the next reminder and the battery. The clock is drawn once a minute, a few
   pixels away each time, while the app under it rests. A touch, the AI key or a
-  reminder brings the app back as it was.
+  reminder brings the app back as it was. In webcam mode the screen only dims.
 - **Keyboard**: the magnified key of the top row is no longer hidden behind
   the field above the keyboard.
 

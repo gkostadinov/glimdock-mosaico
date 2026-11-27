@@ -1361,8 +1361,8 @@ void usb_kick(void *)
 namespace aod {
 bool busy()
 {
-    if (usb_webcam_owns_usb() || webcam_mode::switching != -1 || shell.current == ShellApp::Camera || shell.lit ||
-            ai_holding || reminders_showing()) {
+    if (webcam_mode::switching != -1 || shell.current == ShellApp::Camera || shell.lit || ai_holding ||
+            reminders_showing()) {
         return true;
     }
     swifty_summary_t s;
@@ -1411,6 +1411,13 @@ void light(int percent)
 int brightness()
 {
     return shell.brightness;
+}
+
+// Webcam mode: nobody looks at the screen, so it dims, but the webcam's
+// page stays (the clock would hide that it is on).
+bool no_clock()
+{
+    return usb_webcam_owns_usb();
 }
 
 void info(AlwaysOnInfo *out)
@@ -1582,7 +1589,7 @@ extern "C" esp_err_t mosaico_shell_start(void)
          swifty_app_portrait(168), widgets[0], widgets[1]);
     home_app_set_exit_handler([] { shell_show(ShellApp::Launcher); });
     web_settings_set_restart(restart_board);  // a save that applies after a restart
-    always_on_start({aod::busy, aod::pause, aod::light, aod::brightness, aod::info});
+    always_on_start({aod::busy, aod::pause, aod::light, aod::brightness, aod::info, aod::no_clock});
     lv_indev_t *touch = bsp_display_get_input_dev();
     if (touch) {
         shell.touch_read = lv_indev_get_read_cb(touch);

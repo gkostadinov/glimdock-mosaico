@@ -95,7 +95,7 @@ The shell registers RPCs on service `0x4744` (18244), callable with
 | 46 | 32-bit offset (little-endian) | The last webcam JPEG, 960 bytes at a time. |
 | 47 | `01` held / `00` released / `02` a real press (down, then held 300 ms later) / `03` a touch / `04` a click (down, the click 250 ms later) | As the AI key: opens Swifty when needed and talks. The log times each step (Swifty shown, microphone open, connection, recognition). `03` and `04` wake the always-on display as a touch and the key do. |
 | 48 | keyframes of 11 bytes, little-endian: ms from the start (u16), fingers down (0–2), then x, y of each finger (i16) | A scripted touch, for testing gestures such as a pinch without a finger on the glass. Points move in a straight line between keyframes with the same fingers; the panel is ignored until the last keyframe. |
-| 49 | none / `01` / `02` / `00` | The always-on display: its state (off, dimmed or showing), timeout, seconds without use, times shown and clock draws; `01` shows the clock now, `02` dims, `00` wakes the board. |
+| 49 | none / `01` / `02` / `00` | The always-on display: its state (off, dimmed or showing), timeout, seconds without use, times shown, clock draws and times dimmed (nothing is logged during webcam mode, where it only dims); `01` shows the clock now, `02` dims, `00` wakes the board. |
 
 While the USB webcam is on, ESP-Iris is stopped: read 44–46 after it ends.
 

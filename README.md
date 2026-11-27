@@ -46,10 +46,11 @@ polling meanwhile (Glimdock's pages, Home's hub, Swifty's bird). A touch, the AI
 key or a due reminder brings back the app as it was, at full light; that touch
 or key press does nothing else.
 
-It stays off in USB webcam mode, in the camera's viewfinder, while Swifty
-listens or answers, and while a reminder or the screen light is up. Wi-Fi stays
-connected (no modem sleep), so Glimdock keeps its data current and the AI key
-starts listening at once.
+It stays off in the camera's viewfinder, while Swifty listens or answers, and
+while a reminder or the screen light is up. In USB webcam mode the screen dims
+the same way, down to the clock's light, but the clock stays away: the
+webcam's page stays on screen. Wi-Fi stays connected (no modem sleep), so
+Glimdock keeps its data current and the AI key starts listening at once.
 
 ## Hardware
 
