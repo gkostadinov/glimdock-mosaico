@@ -12,6 +12,8 @@
   the next reminder and the battery. The clock is drawn once a minute, a few
   pixels away each time, while the app under it rests. A touch, the AI key or a
   reminder brings the app back as it was.
+- **Keyboard**: the magnified key of the top row is no longer hidden behind
+  the field above the keyboard.
 
 ## 1.1.0
 

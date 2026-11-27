@@ -195,12 +195,10 @@ void auto_caps(State *s)
 void show_bubble(State *s, lv_obj_t *k, const char *text)
 {
     lv_area_t a;
-    lv_obj_get_coords(k, &a);
-    lv_area_t p;
-    lv_obj_get_coords(s->kb, &p);
+    lv_obj_get_coords(k, &a);  // on the screen, as the top layer's are
     const int w = lv_area_get_width(&a) + 16, h = lv_area_get_height(&a) + 30;
     lv_obj_set_size(s->bubble, w, h);
-    lv_obj_set_pos(s->bubble, a.x1 - p.x1 - 8, a.y1 - p.y1 - h + lv_area_get_height(&a) - 4 - 30);
+    lv_obj_set_pos(s->bubble, a.x1 - 8, a.y1 - h + lv_area_get_height(&a) - 4 - 30);
     lv_label_set_text(s->bubble_label, text);
     lv_obj_remove_flag(s->bubble, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s->bubble);
@@ -361,7 +359,11 @@ lv_obj_t *make_key(State *s, int x, int y, int w, int h, uint32_t bg, const char
 
 void free_state(lv_event_t *e)
 {
-    delete static_cast<State *>(lv_event_get_user_data(e));
+    auto *s = static_cast<State *>(lv_event_get_user_data(e));
+    if (s->bubble && lv_obj_is_valid(s->bubble)) {
+        lv_obj_delete(s->bubble);  // on the top layer, not deleted with the keyboard
+    }
+    delete s;
 }
 }  // namespace
 
@@ -442,8 +444,10 @@ lv_obj_t *keyboard(lv_obj_t *parent, lv_obj_t *textarea, int x, int y, int w, in
                     LV_EVENT_PRESSED, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST
                 })
             lv_obj_add_event_cb(k, fn_press, code, nullptr);
-    // the magnified key, over the key being pressed
-    s->bubble = box(s->kb, 0, 0, 10, 10, 12);
+    // The magnified key, over the key being pressed. On the top layer: as the
+    // keyboard's child, what its app drew above the keyboard (the field's card)
+    // covered the top row's bubble.
+    s->bubble = box(lv_layer_top(), 0, 0, 10, 10, 12);
     lv_obj_set_style_bg_color(s->bubble, lv_color_hex(0x6A6A70), 0);
     lv_obj_set_style_bg_opa(s->bubble, LV_OPA_COVER, 0);
     lv_obj_remove_flag(s->bubble, LV_OBJ_FLAG_CLICKABLE);
@@ -453,7 +457,6 @@ lv_obj_t *keyboard(lv_obj_t *parent, lv_obj_t *textarea, int x, int y, int w, in
     lv_obj_set_style_text_font(s->bubble_label, font(30, false), 0);
     lv_obj_set_style_text_color(s->bubble_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_align(s->bubble_label, LV_ALIGN_TOP_MID, 0, 6);
-    lv_obj_add_flag(s->kb, LV_OBJ_FLAG_OVERFLOW_VISIBLE);  // the bubble rises above the top row
     refresh(s);
     auto_caps(s);
     return s->kb;
