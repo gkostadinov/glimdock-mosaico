@@ -30,7 +30,11 @@ holds the checks).
   stacks and the display's transfers need it: when it ran out, the speech
   connection failed and retried until the board slowed down. Give tasks that
   never touch flash a PSRAM stack (`xTaskCreatePinnedToCoreWithCaps`), and
-  check what each app keeps with RPC 16.
+  check what each app keeps with RPC 16. A task that needs an internal stack
+  but works only now and then can end when idle and be started again: the
+  Camera's capture task does that (8 KB back while no camera is in use). The
+  board's module manager (`module_scan`, `module_event`, 4 KB each, in the
+  vendor BSP) stays for good once a module is first used.
 - **Priorities:** tasks at or above LVGL's draw threads (priority 3) can starve
   the UI. Keep background work at 2 or below unless it blocks quickly. Swifty's
   bird renders at 1, below network and TLS work (2); its 10-second log line

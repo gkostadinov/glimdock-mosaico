@@ -236,6 +236,10 @@ struct {
     volatile bool ui_dirty = false;
     volatile int last_luma = -1;
     volatile bool headless = false;  // streaming for camera_app_take_photo, screen hidden
+    // The capture task runs only while something wants the camera; its 8 KB stack is
+    // internal RAM (it mounts the NAND and saves settings, so it can't be in PSRAM).
+    bool task_running = false;
+    std::mutex task_lock;
     void (*pick)(int index) = nullptr;  // camera_app_pick
 } G;
 
@@ -1611,7 +1615,11 @@ void webcam_frame(const mosaico_camera_frame_t &frame)
 
 void capture_task(void *)
 {
-    load_photos();
+    static bool photos_loaded = false;  // once: the task ends and starts again with the camera
+    if (!photos_loaded) {
+        load_photos();
+        photos_loaded = true;
+    }
     int failures = 0;
     for (;;) {
         // A photo open in the gallery stops the stream too: it frees the
@@ -1644,6 +1652,19 @@ void capture_task(void *)
                 set_torch(true);
             } else {
                 set_torch(false);
+            }
+            // Closed and nothing wants it: end, giving the stack back to internal RAM
+            // (the speech socket's TLS and Wi-Fi need it most when the camera is idle).
+            // Each wake-up sets its flag and then calls ensure_capture_task: checked
+            // under the same lock, none is missed.
+            if (!G.camera && !G.torch_only) {
+                std::unique_lock<std::mutex> guard(G.task_lock);
+                if (!(G.active || G.headless || G.webcam_sink || G.torch_only)) {
+                    G.task_running = false;
+                    guard.unlock();
+                    ESP_LOGI(TAG, "camera idle: capture task ends");
+                    vTaskDelete(nullptr);
+                }
             }
             vTaskDelay(pdMS_TO_TICKS(G.shutdown ? 1000 : 100));
             continue;
@@ -1704,6 +1725,19 @@ void capture_task(void *)
         if (err == ESP_OK) {
             show_frame(next);
         }
+    }
+}
+
+// Starts the capture task unless it runs (after the flag that wants the camera is set).
+void ensure_capture_task()
+{
+    std::lock_guard<std::mutex> guard(G.task_lock);
+    if (G.task_running || !G.started) {
+        return;
+    }
+    G.task_running = xTaskCreatePinnedToCore(capture_task, "camera", 8192, nullptr, 4, nullptr, 1) == pdPASS;
+    if (!G.task_running) {
+        ESP_LOGE(TAG, "capture task: no memory");
     }
 }
 
@@ -2372,11 +2406,11 @@ extern "C" void camera_app_start(lv_obj_t *screen)
         esp_iris_rpc_register(RPC_SERVICE, RPC_SHOOT, rpc_shoot, nullptr);
         esp_iris_rpc_register(RPC_SERVICE, RPC_STATE, rpc_state, nullptr);
         esp_register_shutdown_handler(camera_app_shutdown);
-        xTaskCreatePinnedToCore(capture_task, "camera", 8192, nullptr, 4, nullptr, 1);
         // Syncs the Camera's own photos to the NAS (network only: PSRAM stack).
         xTaskCreatePinnedToCoreWithCaps(upload_task, "cam-upload", 12 * 1024, nullptr, 2, &uploader, 0,
                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         G.started = true;
+        ensure_capture_task();  // loads the photos; ends at once if nothing wants the camera
         set_status("Starting\xE2\x80\xA6");
     }
 }
@@ -2388,6 +2422,7 @@ extern "C" int camera_app_take_photo(uint32_t timeout_ms)
     }
     const TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
     G.headless = true;
+    ensure_capture_task();
     while (!G.streaming && xTaskGetTickCount() < until) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
@@ -2422,6 +2457,7 @@ extern "C" bool camera_app_torch(bool on)
     if (!on) {
         return true;
     }
+    ensure_capture_task();
     for (int i = 0; i < 100 && G.torch_only && !G.torch_lit; ++i) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
@@ -2547,6 +2583,9 @@ extern "C" void camera_app_set_active(bool active)
         G.pick = nullptr;    // left without taking one
     }
     G.active = active && G.started;
+    if (G.active) {
+        ensure_capture_task();
+    }
     if (!G.active && G.gallery >= 0) {
         close_gallery_cb(nullptr);
     }
@@ -2566,6 +2605,9 @@ extern "C" void camera_app_set_frame_sink(void (*sink)(const unsigned char *jpeg
         G.webcam_view = view;    // before the sink: the capture task reads both
     }
     G.webcam_sink = sink;
+    if (sink) {
+        ensure_capture_task();
+    }
     ESP_LOGI(TAG, "webcam frames %s", sink ? "on" : "off");
 }
 
