@@ -16,11 +16,15 @@
     "readme": "store/website/readme.md",
     "changelog": "store/website/changelog.md",
     "covers": [
-      "store/covers/launcher-home-screen.png",
-      "store/covers/glim-systems.png",
-      "store/covers/glim-overview.png",
-      "store/covers/home.png"
-    ]
+      "store/covers/01-launcher.png",
+      "store/covers/02-homelab.png",
+      "store/covers/03-printers-agents.png",
+      "store/covers/04-home.png",
+      "store/covers/05-swifty.png",
+      "store/covers/06-tools.png",
+      "store/covers/07-web-settings.png"
+    ],
+    "attachments": ["docs/media/glimdock-tour.mp4"]
   },
   "device": {
     "default_locale": "en",
