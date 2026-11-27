@@ -74,6 +74,8 @@ add_executable(mosaico-preview
     "${CMAKE_CURRENT_LIST_DIR}/interact_host.cpp"
     "${IDEA}/components/vpn_app/src/vpn_ui.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/vpn_host.cpp"
+    "${IDEA}/components/mosaico_shell/src/wifi_settings.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/board_wifi_host.cpp"
     ${font_sources}
     ${HOME_SOURCES})
 target_include_directories(mosaico-preview PRIVATE

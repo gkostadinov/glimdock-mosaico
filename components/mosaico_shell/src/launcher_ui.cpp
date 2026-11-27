@@ -701,9 +701,10 @@ Cell *make_cell(const std::string &key)
     lv_obj_add_flag(c->obj, LV_OBJ_FLAG_HIDDEN);
     press_fx(c->tile);
     lv_obj_add_flag(c->tile, lv_obj_flag_t(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK));
-    for (lv_event_code_t code : {LV_EVENT_PRESSED, LV_EVENT_PRESSING, LV_EVENT_LONG_PRESSED, LV_EVENT_RELEASED,
-                                 LV_EVENT_PRESS_LOST, LV_EVENT_SHORT_CLICKED
-                                }) {
+    for (lv_event_code_t code : {
+                LV_EVENT_PRESSED, LV_EVENT_PRESSING, LV_EVENT_LONG_PRESSED, LV_EVENT_RELEASED,
+                LV_EVENT_PRESS_LOST, LV_EVENT_SHORT_CLICKED
+            }) {
         lv_obj_add_event_cb(c->tile, tile_cb, code, c);
     }
     if (key == "glimdock") {  // a badge with the alert count
@@ -1293,8 +1294,19 @@ void build_settings(int brightness, bool haptics, bool auto_rotate)
 
     lv_obj_t *wf = glass(c, 10, Y + 452, 460, 112, 28, GREEN);
     ui.s_wifi_dot = dot(wf, 26, 24, 10, OFF, false);
-    ui.s_ssid = label(wf, "Wi-Fi", 46, 16, 230, TEXT, 18, true);
-    ui.s_wifi_state = label(wf, "", 286, 18, 150, TEXT2, 15, true, LV_TEXT_ALIGN_RIGHT);
+    ui.s_ssid = label(wf, "Wi-Fi", 46, 16, 210, TEXT, 18, true);
+    lv_label_set_long_mode(ui.s_ssid, LV_LABEL_LONG_MODE_DOTS);
+    ui.s_wifi_state = label(wf, "", 262, 18, 150, TEXT2, 15, true, LV_TEXT_ALIGN_RIGHT);
+    if (ui.hooks.wifi) {  // the card opens Settings > Wi-Fi
+        icon(wf, "chev", 418, 16, 22, TEXT3, 1.8f);
+        lv_obj_add_flag(wf, LV_OBJ_FLAG_CLICKABLE);
+        press_fx(wf);
+        on(wf, [](lv_event_t *) {
+            if (ui.hooks.wifi) {
+                ui.hooks.wifi();
+            }
+        }, LV_EVENT_CLICKED, nullptr);
+    }
     ui.s_detail = label(wf, "", 26, 48, 410, TEXT2, 15);
     ui.s_versions = label(wf, "", 26, 74, 380, TEXT3, 14);
 
@@ -1354,7 +1366,7 @@ void update_settings(const LauncherStatus &s)
     set_text(ui.s_wifi_state, s.wifi_connected ? "Connected" : s.wifi_configured ? "Connecting\xE2\x80\xA6" : "Not set");
     set_color(ui.s_wifi_state, color);
     set_text(ui.s_detail, s.wifi_connected && s.ip ? s.ip : s.wifi_configured ? "Joining the network\xE2\x80\xA6"
-             : "Set Wi-Fi in Vibe Mode");
+             : "Tap to choose a network");
     set_text(ui.s_versions, s.versions ? s.versions : "");
     set_text(ui.s_zone, s.zone ? s.zone : "UTC");
     if (ui.s_cam_auto && toggle_on(ui.s_cam_auto) != s.camera_auto) {
@@ -1654,7 +1666,7 @@ void launcher_shortcut_remove(const char *key)
         return;
     }
     const std::string k = key;
-    ui.shortcuts.erase(std::remove_if(ui.shortcuts.begin(), ui.shortcuts.end(), [&](const Shortcut &s) {
+    ui.shortcuts.erase(std::remove_if(ui.shortcuts.begin(), ui.shortcuts.end(), [&](const Shortcut & s) {
         return s.key == k;
     }), ui.shortcuts.end());
     L::remove(ui.layout, k);

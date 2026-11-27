@@ -56,6 +56,8 @@ struct LauncherHooks {
     // The shortcuts' editor (optional): a Shortcuts button on the hidden apps'
     // sheet, which the + opens while editing.
     void (*shortcuts)();
+    // Settings > Wi-Fi (optional): the Wi-Fi card opens it.
+    void (*wifi)();
 };
 
 // portrait: a still of Swifty (unused; may be null).

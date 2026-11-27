@@ -8,7 +8,7 @@ elseif(NOT GLIMDOCK_FIRMWARE_DIR)
 endif()
 
 idf_component_register(
-    SRCS "src/shell.cpp" "src/launcher_ui.cpp" "src/launcher_apps.cpp" "src/launcher_layout.cpp" "src/screenshot.cpp" "src/haptics.cpp" "src/boot_stage.c" "src/orientation.cpp" "src/perf.cpp" "src/frame_sync.cpp" "src/time_zone.cpp" "src/web_settings.cpp" "src/reminders.cpp" "src/always_on.cpp" "src/shortcuts.cpp"
+    SRCS "src/shell.cpp" "src/launcher_ui.cpp" "src/launcher_apps.cpp" "src/launcher_layout.cpp" "src/screenshot.cpp" "src/haptics.cpp" "src/boot_stage.c" "src/orientation.cpp" "src/perf.cpp" "src/frame_sync.cpp" "src/time_zone.cpp" "src/web_settings.cpp" "src/reminders.cpp" "src/always_on.cpp" "src/shortcuts.cpp" "src/board_wifi.cpp" "src/wifi_settings.cpp"
     INCLUDE_DIRS "include"
     # display_clock.h: Glimdock's time-zone rules, shared with the launcher.
     PRIV_INCLUDE_DIRS "src" "${GLIMDOCK_FIRMWARE_DIR}/src"
@@ -16,7 +16,7 @@ idf_component_register(
     EMBED_TXTFILES "src/web_settings.html"
     REQUIRES esp_common esp_iris
     PRIV_REQUIRES lvgl mosaico_ui camera_app swifty_app files_app tools_app vpn_app games_app mosaico_storage arduino_compat glimdock_port home_app app_config esp-mosaico-bsp esp_iris esp_app_format
-        button mbedtls bblanchon__arduinojson log esp_driver_i2c esp_timer esp_mosaico_app_recovery esp_lvgl_adapter nvs_flash esp_driver_gpio esp_lcd esp_http_client esp_http_server usb_webcam espressif__esp_tinyusb espressif__tinyusb)
+        button mbedtls bblanchon__arduinojson log esp_driver_i2c esp_timer esp_mosaico_app_recovery esp_lvgl_adapter nvs_flash esp_wifi esp_event esp_driver_gpio esp_lcd esp_http_client esp_http_server usb_webcam espressif__esp_tinyusb espressif__tinyusb)
 
 # Keep ESP-IDF's shared certificate bundle when one HTTPS connection closes
 # (see __wrap_esp_crt_bundle_detach in shell.cpp).

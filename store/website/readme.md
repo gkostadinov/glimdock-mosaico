@@ -38,8 +38,9 @@ wall companion for your homelab and home.
   pinball; **Ridge Rally**, a gravel rally against the clock. Play by touch, or
   tilt the board to steer, turn it to look around and shake it for each game's
   action. Best scores are kept.
-- **Settings**: brightness, haptics, auto-rotate, the panel's corner radius, time
-  zone, camera options and **Web settings**.
+- **Settings**: **Wi-Fi** (pick a network, type its password on the board, or
+  add a hidden one), brightness, haptics, auto-rotate, the panel's corner
+  radius, time zone, camera options and **Web settings**.
 
 The apps sit on home screen pages you swipe between. Hold an icon to rearrange
 them like on a phone: drag icons around and across pages, hide the ones you
@@ -47,7 +48,8 @@ don't use, and bring them back from Settings.
 
 ## Setting up
 
-Glimdock installs next to Vibe Mode and uses Vibe Mode's Wi-Fi. Nothing points at
+Glimdock installs next to Vibe Mode and starts on Vibe Mode's Wi-Fi; to use
+another network, open **Settings > Wi-Fi** and pick it. Nothing points at
 a server until you configure it: Glimdock needs your collector's address and
 display token, Home a hub address and pairing code, and Swifty a model server
 (speech and web search are optional). Without them, Camera, Gallery, Files,

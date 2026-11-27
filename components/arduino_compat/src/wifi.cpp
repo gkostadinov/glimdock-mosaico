@@ -20,6 +20,9 @@ esp_netif_t *sta_netif = nullptr, *ap_netif = nullptr;
 std::atomic<int> sta_status{WL_IDLE_STATUS};
 std::atomic<uint32_t> sta_ip{0};
 std::atomic<bool> sta_wanted{false};
+std::atomic<bool> reconnect_held{false};
+std::mutex board_mutex;
+char board_ssid[33], board_password[65];
 std::mutex callbacks_mutex;
 std::vector<std::pair<WiFiEvent_t, WiFiEventCb>> callbacks;
 
@@ -78,7 +81,7 @@ void WiFiClass::handle_event(int32_t id, void *data, bool ip_event)
                      : WL_DISCONNECTED;
         ESP_LOGW(TAG, "station disconnected, reason %u", unsigned(event->reason));
         dispatch(ARDUINO_EVENT_WIFI_STA_DISCONNECTED, info);
-        if (sta_wanted && auto_reconnect_) {
+        if (sta_wanted && auto_reconnect_ && !reconnect_held) {
             esp_wifi_connect();
         }
         break;
@@ -120,9 +123,51 @@ bool WiFiClass::init()
     return init_ok;
 }
 
+void WiFiClass::setBoardNetwork(const char *ssid, const char *password)
+{
+    std::lock_guard<std::mutex> lock(board_mutex);
+    memset(board_ssid, 0, sizeof(board_ssid));
+    memset(board_password, 0, sizeof(board_password));
+    if (ssid) {
+        strlcpy(board_ssid, ssid, sizeof(board_ssid));
+        strlcpy(board_password, password ? password : "", sizeof(board_password));
+    }
+}
+
+void WiFiClass::holdReconnect(bool hold)
+{
+    reconnect_held = hold;
+    if (!hold && init() && sta_wanted && sta_status != WL_CONNECTED) {
+        esp_wifi_connect();
+    }
+}
+
 wl_status_t WiFiClass::begin(const char *ssid, const char *password)
 {
-    if (!init() || !ssid || !ssid[0] || strlen(ssid) > 32) {
+    char wanted_ssid[33], wanted_password[65];
+    {
+        std::lock_guard<std::mutex> lock(board_mutex);
+        if (board_ssid[0]) {
+            if (ssid && strcmp(ssid, board_ssid)) {
+                ESP_LOGI(TAG, "an app asked for another network; staying on the board's");
+            }
+            ssid = board_ssid;
+            password = board_password;
+        }
+        strlcpy(wanted_ssid, ssid ? ssid : "", sizeof(wanted_ssid));
+        strlcpy(wanted_password, password ? password : "", sizeof(wanted_password));
+    }
+    struct Wipe {
+        char *a, *b;
+        ~Wipe()
+        {
+            memset(a, 0, 33);
+            memset(b, 0, 65);
+        }
+    } wipe{wanted_ssid, wanted_password};
+    ssid = wanted_ssid;
+    password = wanted_password;
+    if (!init() || !ssid[0] || strlen(ssid) > 32) {
         return WL_CONNECT_FAILED;
     }
     wifi_config_t config{};
@@ -199,7 +244,7 @@ bool WiFiClass::disconnect(bool)
 
 bool WiFiClass::reconnect()
 {
-    if (!init() || !sta_wanted) {
+    if (!init() || !sta_wanted || reconnect_held) {
         return false;
     }
     esp_wifi_disconnect();

@@ -117,7 +117,8 @@ The shell registers RPCs on service `0x4744` (18244), callable with
 | 52 | a URL (`http://` or `https://`) / none | Starts a GET of the URL / its result: HTTP status, time, the default route and DNS servers in use, the start of the body. Where the board's traffic goes, with the VPN on or off. |
 | 55 | none, or JSON text: `{"op":"list"}`, `{"op":"run","id":N,"dry_run":true}`, `{"op":"save","shortcut":{...}}`, `{"op":"delete","id":N}`, `{"op":"starters"}`, `{"op":"editor"}`, `{"op":"dry_run","on":true}` | Shortcuts (`shortcuts.h`): the list with each one's steps and the last run, or a change. `dry_run` on makes every run a dry run (nothing sent to Swifty Home or the Interaction board) until a restart. |
 
-| 53 | none / `00` / `01` then text / `02` / `03` / `04` | The home screen: page, editing and layout (pages split by `\|`, keys by commas, hidden keys after `#`). `00` resets the layout, `01` sets it from the text, `02` and `03` start and end editing, `04` shows the hidden apps. The reply comes before the change. |
+| 53 | none / `00` / `01` then text / `02` / `03` / `04` / `05` / `06` | The home screen: page, editing and layout (pages split by `\|`, keys by commas, hidden keys after `#`). `00` resets the layout, `01` sets it from the text, `02` and `03` start and end editing, `04` shows the hidden apps, `05` shows Settings and `06` opens Settings > Wi-Fi. The reply comes before the change. |
+| 56 | `00` / `01` / `02` ssid `00` password / `03` ssid | The board's Wi-Fi (`board_wifi.h`) as JSON: the network, whether it is connected, its address and signal, whether it is saved or Vibe Mode's, the last join's result and the networks from the last scan. `01` scans first (read again for the results), `02` joins (no password: the saved one), `03` forgets a saved network. Passwords are never in the reply. |
 
 While the USB webcam is on, ESP-Iris is stopped: read 44–46 after it ends.
 

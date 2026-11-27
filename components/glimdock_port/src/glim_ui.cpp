@@ -47,6 +47,7 @@ static void wipe(void *p, size_t n)
 #endif
 
 const char *homelabPlatformSsid();
+const char *homelabPlatformPassword();
 
 namespace {
 using namespace mui;
@@ -990,7 +991,7 @@ void load_draft()
         return;
     }
     G.draft_loaded = true;
-    G.draft[0] = G.conn.ssid[0] ? G.conn.ssid : homelabPlatformSsid();
+    G.draft[0] = homelabPlatformSsid();  // the board's network (Settings > Wi-Fi)
     G.draft[2] = G.conn.endpoint;
     G.draft[1] = G.draft[3] = G.draft[4] = "";  // blank keeps what is saved
 }
@@ -1081,9 +1082,10 @@ void form_cancel(lv_event_t *)
 }
 void form_save(lv_event_t *)
 {
+    // Glimdock uses the board's network, chosen in Settings > Wi-Fi.
     ConnectionUpdate u{};
-    strlcpy(u.ssid, G.draft[0].c_str(), sizeof(u.ssid));
-    strlcpy(u.password, G.draft[1].c_str(), sizeof(u.password));
+    strlcpy(u.ssid, homelabPlatformSsid(), sizeof(u.ssid));
+    strlcpy(u.password, homelabPlatformPassword(), sizeof(u.password));
     strlcpy(u.endpoint, G.draft[2].c_str(), sizeof(u.endpoint));
     strlcpy(u.displayToken, G.draft[3].c_str(), sizeof(u.displayToken));
     strlcpy(u.setupToken, G.draft[4].c_str(), sizeof(u.setupToken));
@@ -1110,8 +1112,14 @@ void open_form()
     lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
     G.overlay = o;
     label(o, "Connection", 40, 24, 400, TEXT, 28, true, LV_TEXT_ALIGN_CENTER);
-    for (int i = 0; i < 5; ++i) {
-        lv_obj_t *f = glass(o, 10, 72 + 64 * i, 460, 56, 22, ACC);
+    // The network is the board's: chosen in the launcher's Settings > Wi-Fi.
+    lv_obj_t *net = glass(o, 10, 72, 460, 56, 22, ACC);
+    label(net, "Wi-Fi", 22, 8, 200, TEXT3, 13, true);
+    lv_obj_t *name = label(net, homelabPlatformSsid()[0] ? homelabPlatformSsid() : "Not set", 22, 26, 230, TEXT, 16, true);
+    lv_label_set_long_mode(name, LV_LABEL_LONG_MODE_DOTS);
+    label(net, "Change it in Settings > Wi-Fi", 250, 28, 190, TEXT3, 13, false, LV_TEXT_ALIGN_RIGHT);
+    for (int i = 2; i < 5; ++i) {
+        lv_obj_t *f = glass(o, 10, 72 + 64 * (i - 1), 460, 56, 22, ACC);
         press_fx(f);
         on(f, field_cb, reinterpret_cast<void *>(intptr_t(i)));
         label(f, FIELD_TITLES[i], 22, 8, 200, TEXT3, 13, true);
@@ -1154,7 +1162,7 @@ void page_settings()
     label(cc, "Collector", 42, 16, 200, TEXT, 18, true);
     label(cc, ok ? "Connected" : G.net.configured ? "Not answering" : "Not set up", 230, 18, 210,
           ok ? OK : WARN, 15, true, LV_TEXT_ALIGN_RIGHT);
-    row_text(cc, "Wi-Fi", c.ssid[0] ? c.ssid : homelabPlatformSsid(), 52);
+    row_text(cc, "Wi-Fi", homelabPlatformSsid()[0] ? homelabPlatformSsid() : "Not set", 52);
     row_text(cc, "Endpoint", c.endpoint[0] ? c.endpoint : "Not set", 80);
     row_text(cc, "Display token", c.displayTokenSaved ? "Saved" : "Not set", 108);
     if (c.message[0]) {

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Wi-Fi in Settings**: tap the Wi-Fi card to see the networks around you and
+  join one, typing its password on the board (or Other network... for a hidden
+  one). A wrong password or a network out of reach takes the board back to the
+  one it was on. Networks you join are remembered, the board starts on the one
+  chosen last, and when that one is away it joins another network it knows.
+  Vibe Mode's network stays the default, and every app (Glimdock included)
+  follows the board's choice.
 - **Games**: a new app with six retro 3D games, each with a title screen
   where it plays itself, a pause when you leave, and a best score that is kept.
   **Ember Crypt** is a lantern-lit crawl through crypts that grow as you go:

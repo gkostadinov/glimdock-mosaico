@@ -64,6 +64,14 @@ public:
     IPAddress softAPIP();
     void onEvent(WiFiEventCb callback, WiFiEvent_t event);
 
+    // The board's network (Settings > Wi-Fi): while set, every begin() joins
+    // it, whatever network the caller names, so one app's saved settings never
+    // move the whole board to another network. nullptr ssid clears it.
+    void setBoardNetwork(const char *ssid, const char *password);
+    // While held, a lost or failed association is not retried (a scan needs a
+    // station that is not busy connecting); letting go retries at once.
+    void holdReconnect(bool hold);
+
     // Internal: driver event dispatch.
     void handle_event(int32_t id, void *data, bool ip_event);
 

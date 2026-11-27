@@ -22,6 +22,7 @@
 #include "glim_ui.h"
 #include "glimdock_app.h"
 #include "launcher_ui.h"
+#include "wifi_settings.h"
 #include "tools_app.h"
 #include "vpn_app.h"
 #include "games_app.h"
@@ -123,6 +124,10 @@ bool requestNodeDelete(const char *, const char *)
 const char *homelabPlatformSsid()
 {
     return "HomeWiFi";
+}
+const char *homelabPlatformPassword()
+{
+    return "";
 }
 
 namespace {
@@ -322,8 +327,9 @@ const lv_image_dsc_t *swifty_portrait(int size)
 void render_launcher(int radius)
 {
     lv_display_t *display = lv_display_get_default();
-    lv_obj_t *launcher = launcher_ui_build({nullptr, nullptr, nullptr, nullptr, nullptr, nullptr}, radius, 80, true, true,
-                                           swifty_portrait(168));
+    LauncherHooks hooks{};
+    hooks.wifi = wifi_settings_open;  // the Wi-Fi card's chevron
+    lv_obj_t *launcher = launcher_ui_build(hooks, radius, 80, true, true, swifty_portrait(168));
     glimdock_summary_t glim;
     glimdock_app_summary(&glim);
     glim.started = true;
@@ -370,7 +376,9 @@ void render_launcher(int radius)
     launcher_ui_show_page(0);
     save("launcher-home-screen", display);
     // The VPN's badge after the Wi-Fi icon: connected, then connecting.
-    for (const auto &[state, name] : {std::pair{LauncherVpn::Connected, "launcher-vpn"}, std::pair{LauncherVpn::Connecting, "launcher-vpn-connecting"}}) {
+    for (const auto &[state, name] : {
+                std::pair{LauncherVpn::Connected, "launcher-vpn"}, std::pair{LauncherVpn::Connecting, "launcher-vpn-connecting"}
+            }) {
         status.vpn = state;
         launcher_ui_update(status, glim, home, camera, swifty, files);
         save(name, display);
@@ -380,6 +388,14 @@ void render_launcher(int radius)
     print_layout("start");
     launcher_ui_show_page(6);
     save("launcher-settings", display);
+    // Settings > Wi-Fi: the networks once the scan is done, then a password.
+    wifi_settings_open();
+    run_for(1600);
+    save("launcher-wifi", display);
+    tap({240, 430});  // Neighbour 5G (the fourth row): secured, not saved
+    run_for(400);
+    save("launcher-wifi-password", display);
+    wifi_settings_close();
     launcher_ui_show_page(0);
 
     // The pages: a swipe to the second, with Webcam, Interaction and Calculator.

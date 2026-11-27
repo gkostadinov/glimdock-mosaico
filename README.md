@@ -7,8 +7,9 @@ a USB webcam, a WireGuard VPN, a set of tools and six retro 3D games, all
 native ESP-IDF and LVGL.
 
 It runs as an ordinary ESP-Mosaico Idea: it installs into the application slot
-next to Vibe Mode, keeps Vibe Mode's Wi-Fi and storage, and leaves the
-bootloader, Vibe Mode and their settings alone.
+next to Vibe Mode, starts on Vibe Mode's Wi-Fi (or a network you choose in
+Settings > Wi-Fi), keeps its storage, and leaves the bootloader, Vibe Mode and
+their settings alone.
 
 ![Glimdock on the ESP-Mosaico: the launcher](store/covers/01-launcher.png)
 
@@ -34,7 +35,7 @@ All of these are rendered from the desktop preview's demo data (`host/media.py`)
 | **Calculator** | A four-function calculator. |
 | **VPN** | A WireGuard client: while it is on, all of the board's internet traffic, DNS included, goes through your WireGuard server. A big switch, the connection's state in plain words, its address, last handshake and traffic, and connect at start-up. |
 | **Games** | Six retro 3D games drawn in software on one small engine, each with a title screen where it plays itself and a best score: **Ember Crypt**, a lantern-lit crawl through ray-cast crypts (gather the shards, keep the ember fed, flare the wisps away); **Starbore**, a flat-shaded neon tunnel flyer (thread the gates, sweep up orbs, pulse a gate away); **Skyglide**, a glider over voxel hills at golden hour (thread the hoops, ride the thermals); **Jellystorm**, a wave shooter against swarms of glowing space jellies (pearls for bigger guns, a pulse bomb, a mother jelly every fourth wave); **Lunar Flip**, a moonbase pinball table (bumpers, slingshots, lanes that raise the multiplier, drop targets, a ball save, nudge and tilt); **Ridge Rally**, a gravel stage through autumn pines against the clock (rivals to pass, checkpoints for time, a boost). About 30 frames a second on the board. Played by touch, or by tilting the board (accelerometer; levelled to however it is held during a short countdown, with a Flip switch for up and down), turning it to look around (gyroscope) and shaking it for each game's action; the Interaction module's buttons and lights join in when it is fitted. Short retro sound effects at Glimdock's sound volume. |
-| **Settings** | Brightness, the home screen's hidden apps, the always-on display, haptics, auto-rotate, the panel's corner radius, time zone, camera options and Web settings (servers and keys from a browser). |
+| **Settings** | Wi-Fi (scan, join with a password, hidden networks, forget), brightness, the home screen's hidden apps, the always-on display, haptics, auto-rotate, the panel's corner radius, time zone, camera options and Web settings (servers and keys from a browser). |
 
 Every app works from the board's own settings; nothing points at a particular
 server until you configure it.
@@ -237,7 +238,7 @@ sends video, and reads its microphone, only while a computer has that stream ope
 | Path | Contents |
 | --- | --- |
 | `main/` | Entry point: ESP-Iris boot probe, NVS, Recovery, then the shell. |
-| `components/mosaico_shell` | Display, touch and LVGL, Wi-Fi, the home screen (`launcher_apps.cpp` lists its apps, `launcher_layout.cpp` keeps their pages) and Settings, app switching, auto-rotate, haptics, tear-free frame sync, time zone, ESP-Iris services. |
+| `components/mosaico_shell` | Display, touch and LVGL, the board's Wi-Fi (`board_wifi.cpp`; Settings > Wi-Fi is `wifi_settings.cpp`), the home screen (`launcher_apps.cpp` lists its apps, `launcher_layout.cpp` keeps their pages) and Settings, app switching, auto-rotate, haptics, tear-free frame sync, time zone, ESP-Iris services. |
 | `components/mosaico_ui` | The shared AMOLED UI kit: Inter fonts, controls, keyboard, icons. |
 | `components/glimdock_port` | The Glimdock app on Glimdock's data layer. |
 | `components/arduino_compat` | The small Arduino API subset Glimdock's `network.cpp` uses, on ESP-IDF. |

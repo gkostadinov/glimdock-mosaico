@@ -51,6 +51,8 @@
 #include "time_zone.h"
 #include "reminders.h"
 #include "shortcuts.h"
+#include "board_wifi.h"
+#include "wifi_settings.h"
 #include "web_settings.h"
 #include "tusb.h"
 
@@ -65,7 +67,7 @@ struct {
     ShellApp current = ShellApp::Launcher;
     lv_obj_t *launcher = nullptr, *glim_screen = nullptr, *camera_screen = nullptr, *swifty_screen = nullptr,
               *files_screen = nullptr, *tools_screen = nullptr, *gallery_screen = nullptr, *vpn_screen = nullptr,
-              *games_screen = nullptr;
+               *games_screen = nullptr;
     lv_obj_t *home_screen = nullptr, *home_frame = nullptr;
     lv_indev_read_cb_t touch_read = nullptr;
     esp_lcd_touch_handle_t touch = nullptr;
@@ -182,23 +184,12 @@ void panel_brightness(int percent)
 
 void start_wifi()
 {
-    app_config_wifi_t wifi;
-    esp_err_t err = app_config_load_wifi(&wifi);
-    if (err == ESP_OK) {
-        glimdock_app_set_platform_wifi(wifi.ssid, wifi.password);
-        WiFi.mode(WIFI_STA);
-        WiFi.setAutoReconnect(true);
-        WiFi.begin(wifi.ssid, wifi.password);
-        // Clocks in the launcher, Glimdock and Home need time before any app is
-        // configured; SNTP waits for the network itself.
-        configTime(0, 0, "pool.ntp.org", "time.google.com");
-        time_zone_start();  // automatic: looked up once the network is up
-        ESP_LOGI(TAG, "joining the Vibe Mode Wi-Fi network");
-    } else {
-        WiFi.init();
-        ESP_LOGW(TAG, "no Vibe Mode Wi-Fi (%s); set it in Vibe Mode", esp_err_to_name(err));
-    }
-    mbedtls_platform_zeroize(&wifi, sizeof(wifi));
+    // The network chosen in Settings > Wi-Fi, else Vibe Mode's (board_wifi.h).
+    board_wifi_start();
+    // Clocks in the launcher, Glimdock and Home need time before any app is
+    // configured; SNTP waits for the network itself.
+    configTime(0, 0, "pool.ntp.org", "time.google.com");
+    time_zone_start();  // automatic: looked up once the network is up
 }
 
 // A real control: it (or the parent its clicks bubble to) acts on a click,
@@ -411,13 +402,10 @@ void refresh_launcher(lv_timer_t *)
         snprintf(clock, sizeof(clock), "%02d:%02d", local.tm_hour, local.tm_min);
         snprintf(date, sizeof(date), "%s %d %s", days[local.tm_wday % 7], local.tm_mday, months[local.tm_mon % 12]);
     }
-    const bool connected = WiFi.status() == WL_CONNECTED;
-    app_config_wifi_t probe;
-    const bool configured = app_config_load_wifi(&probe) == ESP_OK;
-    if (configured) {
-        strlcpy(ssid, probe.ssid, sizeof(ssid));
-    }
-    mbedtls_platform_zeroize(&probe, sizeof(probe));
+    const BoardWifiStatus net = board_wifi_status();
+    const bool connected = net.connected;
+    const bool configured = !net.ssid.empty();
+    strlcpy(ssid, net.ssid.c_str(), sizeof(ssid));
     if (connected) {
         strlcpy(ip, WiFi.localIP().toString().c_str(), sizeof(ip));
     }
@@ -442,7 +430,7 @@ void refresh_launcher(lv_timer_t *)
     const LauncherVpn vpn_badge = !vpn.on                      ? LauncherVpn::Off
                                   : vpn.state == VPN_CONNECTED ? LauncherVpn::Connected
                                   : vpn.state == VPN_CONNECTING || vpn.state == VPN_WAITING ? LauncherVpn::Connecting
-                                                                                            : LauncherVpn::Trouble;
+                                  : LauncherVpn::Trouble;
     launcher_ui_update({clock, date, connected, configured, ssid, ip, versions, battery.pct, battery.charging, zone_text, camera_app_auto_facing(),
                         web.running, web.url, web.code, web.note, always_on_timeout(), vpn_badge},
                        glim, home, camera, swifty, files);
@@ -704,6 +692,9 @@ void shell_show(ShellApp app)
 {
     const ShellApp previous = shell.current;
     launcher_ui_calibration(false, shell.radius);
+    if (app != ShellApp::Launcher) {
+        wifi_settings_close();  // Settings > Wi-Fi belongs to the launcher
+    }
     glimdock_app_set_active(false);
     home_app_set_active(false);
     camera_app_set_active(false);
@@ -1712,7 +1703,7 @@ extern "C" esp_err_t mosaico_shell_start(void)
         ESP_LOGI(TAG, "home screen: %s", text);
     },
     [] { haptics_pulse(HapticPulse::Tap); },
-    shortcuts_editor_open},
+    shortcuts_editor_open, wifi_settings_open},
     shell.radius, shell.brightness, haptics_enabled(), orientation_enabled(),
          swifty_app_portrait(168), widgets[0], widgets[1], layout);
     home_app_set_exit_handler([] { shell_show(ShellApp::Launcher); });
@@ -1767,6 +1758,9 @@ extern "C" esp_err_t mosaico_shell_start(void)
         lv_indev_set_scroll_limit(touch, 20);
     }
     lv_timer_create(refresh_launcher, 1000, nullptr);
+    lv_timer_create([](lv_timer_t *) {
+        board_wifi_poll();  // joins from Settings, saving, another known network
+    }, 250, nullptr);
     // A speech connection kept ready on every screen, so a press of the AI key
     // starts recognising at once (a new one takes ~1.3 s: the server's
     // certificate chain is verified in software and it does not resume
@@ -1885,7 +1879,7 @@ extern "C" esp_err_t mosaico_shell_start(void)
         if (request->payload_size >= 1) {
             const uint8_t op = request->payload[0];
             auto *text = new std::string(op == 1 ? std::string(reinterpret_cast<const char *>(request->payload) + 1,
-                                         request->payload_size - 1) : std::string());
+                                                               request->payload_size - 1) : std::string());
             text->insert(0, 1, char(op));
             lv_async_call([](void *arg) {
                 std::unique_ptr<std::string> t(static_cast<std::string *>(arg));
@@ -1895,12 +1889,72 @@ extern "C" esp_err_t mosaico_shell_start(void)
                 case 2: launcher_ui_edit(true); break;
                 case 3: launcher_ui_edit(false); break;
                 case 4: launcher_ui_hidden_apps(true); break;
+                case 5: launcher_ui_show_page(6); break;  // Settings
+                case 6: wifi_settings_open(); break;      // Settings > Wi-Fi
                 default: break;
                 }
             }, text);
         }
         *size = cap ? std::min(cap - 1, launcher_ui_layout(reinterpret_cast<char *>(out), cap)) : 0;
         bsp_display_unlock();
+        return ESP_OK;
+    }, nullptr);
+    // 56: the board's Wi-Fi (board_wifi.h). Payload: 0 status, 1 scan, 2 join
+    // (ssid NUL password; no password: the saved one), 3 forget (ssid). The
+    // reply is JSON; it never carries a password.
+    esp_iris_rpc_register(0x4744, 56, [](const esp_iris_rpc_request_t *request, uint8_t *out, size_t cap, size_t *size, void *) {
+        *size = 0;
+        const uint8_t op = request->payload_size ? request->payload[0] : 0;
+        if (op > 3) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (op >= 2) {
+            auto *args = new std::string(reinterpret_cast<const char *>(request->payload) + 1, request->payload_size - 1);
+            args->insert(0, 1, char(op));
+            lv_async_call([](void *arg) {
+                std::unique_ptr<std::string> a(static_cast<std::string *>(arg));
+                const char *ssid = a->c_str() + 1;
+                const size_t n = strlen(ssid);
+                if ((*a)[0] == 2) {
+                    board_wifi_join(ssid, 1 + n + 1 < a->size() ? a->c_str() + 1 + n + 1 : nullptr);
+                } else {
+                    board_wifi_forget(ssid);
+                }
+                mbedtls_platform_zeroize(&(*a)[0], a->size());
+            }, args);
+            return ESP_OK;
+        }
+        if (!bsp_display_lock(1000)) {
+            return ESP_ERR_TIMEOUT;
+        }
+        if (op == 1) {
+            board_wifi_scan();
+        }
+        static const char *const JOIN[] = {"idle", "joining", "joined", "wrong_password", "not_found", "failed"};
+        const BoardWifiStatus s = board_wifi_status();
+        std::string joining;
+        const BoardWifiJoin join = board_wifi_join_state(&joining);
+        JsonDocument doc;
+        doc["ssid"] = s.ssid;
+        doc["connected"] = s.connected;
+        doc["ip"] = s.ip;
+        doc["rssi"] = s.rssi;
+        doc["saved"] = s.saved;
+        doc["vibe"] = s.vibe;
+        doc["fallback"] = s.fallback;
+        doc["join"] = JOIN[int(join)];
+        doc["joining"] = joining;
+        doc["scanning"] = board_wifi_scanning();
+        JsonArray found = doc["networks"].to<JsonArray>();
+        for (const BoardWifiNetwork &n : board_wifi_results()) {
+            JsonObject o = found.add<JsonObject>();
+            o["ssid"] = n.ssid;
+            o["rssi"] = n.rssi;
+            o["secure"] = n.secure;
+            o["saved"] = n.saved;
+        }
+        bsp_display_unlock();
+        *size = serializeJson(doc, reinterpret_cast<char *>(out), cap);
         return ESP_OK;
     }, nullptr);
     // 45: the LVGL loop and CPU per task during the last webcam session.
