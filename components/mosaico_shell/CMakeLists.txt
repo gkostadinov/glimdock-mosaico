@@ -15,7 +15,7 @@ idf_component_register(
     # The page of the web settings (web_settings.cpp).
     EMBED_TXTFILES "src/web_settings.html"
     REQUIRES esp_common esp_iris
-    PRIV_REQUIRES lvgl mosaico_ui camera_app swifty_app files_app tools_app mosaico_storage arduino_compat glimdock_port home_app app_config esp-mosaico-bsp esp_iris esp_app_format
+    PRIV_REQUIRES lvgl mosaico_ui camera_app swifty_app files_app tools_app vpn_app mosaico_storage arduino_compat glimdock_port home_app app_config esp-mosaico-bsp esp_iris esp_app_format
         button mbedtls bblanchon__arduinojson log esp_driver_i2c esp_timer esp_mosaico_app_recovery esp_lvgl_adapter nvs_flash esp_driver_gpio esp_lcd esp_http_client esp_http_server usb_webcam espressif__esp_tinyusb espressif__tinyusb)
 
 # Keep ESP-IDF's shared certificate bundle when one HTTPS connection closes

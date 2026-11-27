@@ -63,4 +63,15 @@ tools/quality/ (configuration files)
 Build-time dependencies (ESP-IDF, LVGL, TinyUSB, ArduinoJson, libpng, LittleFS,
 esp_websocket_client, esp_lvgl_adapter, the ESP-Mosaico BSP and ESP-Iris) are
 fetched by the build and are not part of this repository; their own licences
-apply to firmware binaries built from it.
+apply to firmware binaries built from it. So are the VPN's WireGuard
+implementation and its X25519, linked into the firmware:
+
+  esphome/wireguard 0.4.8 (https://github.com/esphome-libs/wireguard),
+  Copyright (c) 2021 Daniel Hope, 2021 Kenta Ida, 2022 Tomoyuki Sakurai,
+  2023-2024 Simone Rossetto. BSD 3-Clause License. Includes reference
+  ChaCha20, Poly1305 (poly1305-donna) and BLAKE2s code.
+  esphome/libsodium 1.10021 (https://github.com/esphome-libs/libsodium):
+  libsodium, Copyright (c) 2013-2026 Frank Denis, ISC License; its ESP-IDF
+  packaging, Copyright (c) 2021 Otto Winter, MIT License.
+
+"WireGuard" is a registered trademark of Jason A. Donenfeld.

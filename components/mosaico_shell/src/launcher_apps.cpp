@@ -2,6 +2,7 @@
 // The home screen's apps. To add an app: its ShellApp (shell_internal.h), its
 // screen in shell.cpp's shell_show, and one line here.
 #include "launcher_apps.h"
+#include "vpn_app.h"
 
 #include <string.h>
 
@@ -30,6 +31,7 @@ const LauncherApp LAUNCHER_APPS[] = {
     {"webcam", "Webcam", "webcam", &ROSE, int(ShellApp::Webcam), false},
     {"interaction", "Interaction", "remote", &CYAN, int(ShellApp::Interaction), false},
     {"calculator", "Calculator", "calc", &SLATE, int(ShellApp::Calculator), false},
+    {"vpn", "VPN", "lock", &vpn_accent, int(ShellApp::Vpn), false},
 };
 const int LAUNCHER_APP_COUNT = int(sizeof(LAUNCHER_APPS) / sizeof(LAUNCHER_APPS[0]));
 

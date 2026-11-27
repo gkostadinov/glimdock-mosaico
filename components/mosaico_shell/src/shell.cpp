@@ -20,6 +20,7 @@
 #include "camera_app.h"
 #include "files_app.h"
 #include "tools_app.h"
+#include "vpn_app.h"
 #include "usb_webcam.h"
 #include "swifty_app.h"
 #include "bsp/esp_mosaico.h"
@@ -62,7 +63,7 @@ struct {
     int radius = DEFAULT_RADIUS, brightness = 80;
     ShellApp current = ShellApp::Launcher;
     lv_obj_t *launcher = nullptr, *glim_screen = nullptr, *camera_screen = nullptr, *swifty_screen = nullptr,
-              *files_screen = nullptr, *tools_screen = nullptr, *gallery_screen = nullptr;
+              *files_screen = nullptr, *tools_screen = nullptr, *gallery_screen = nullptr, *vpn_screen = nullptr;
     lv_obj_t *home_screen = nullptr, *home_frame = nullptr;
     lv_indev_read_cb_t touch_read = nullptr;
     esp_lcd_touch_handle_t touch = nullptr;
@@ -698,6 +699,7 @@ void shell_show(ShellApp app)
     files_app_set_active(false);
     tools_app_set_active(false);
     gallery_app_set_active(false);
+    vpn_app_set_active(false);
     shell.current = app;
     const int64_t t0 = esp_timer_get_time();
     save_app(app);
@@ -729,6 +731,10 @@ void shell_show(ShellApp app)
         lv_screen_load(shell.tools_screen);
         tools_app_open_tool(shell.tools_screen, app == ShellApp::Webcam ? TOOLS_WEBCAM
                             : app == ShellApp::Interaction ? TOOLS_INTERACTION : TOOLS_CALCULATOR);
+        break;
+    case ShellApp::Vpn:
+        lv_screen_load(shell.vpn_screen);
+        vpn_app_open(shell.vpn_screen);
         break;
     case ShellApp::Gallery:
         camera_app_start(shell.camera_screen);  // its photos: memory and the NAS list
@@ -987,6 +993,27 @@ void tv_remote(const char *a, char *out, size_t cap)
     tools_board_ir(key.c_str(), d["address"] | -1, d["command"] | -1, out, cap);
 }
 
+// The VPN: its state, or switch it.
+void vpn(const char *a, char *out, size_t cap)
+{
+    const JsonDocument d = args(a);
+    const std::string action = d["action"] | "status";
+    if (action == "on" || action == "off") {
+        vpn_summary_t s;
+        vpn_app_summary(&s);
+        if (action == "on" && !s.configured) {
+            snprintf(out, cap, "The VPN is not set up: a WireGuard configuration goes in Web settings first.");
+            return;
+        }
+        vpn_app_connect(action == "on");
+        snprintf(out, cap, "VPN switched %s (it takes a few seconds to connect). ", action.c_str());
+        const size_t n = strlen(out);
+        vpn_app_report(out + n, cap - n);
+        return;
+    }
+    vpn_app_report(out, cap);
+}
+
 void register_all()
 {
     const std::string open_schema = R"({"type":"object","properties":{"app":{"type":"string","enum":[)" + app_list() +
@@ -1012,6 +1039,11 @@ void register_all()
                         "plug by name, or all (lights).",
                         R"({"type":"object","properties":{"action":{"type":"string"},"target":{"type":"string"},"value":{"type":"string"}},"required":["action"]})",
                         home_control);
+    swifty_app_add_tool("vpn",
+                        "The board's VPN (WireGuard): its state (connected or not, the tunnel address, last handshake, "
+                        "traffic), or switch it on or off. While on, all of the board's internet traffic goes through it.",
+                        R"({"type":"object","properties":{"action":{"type":"string","enum":["status","on","off"]}},"required":[]})",
+                        vpn);
     swifty_app_add_tool("flashlight", "Turn the camera module's light on or off.",
                         R"({"type":"object","properties":{"on":{"type":"boolean"}},"required":["on"]})", flashlight);
     swifty_app_add_tool("list_files",
@@ -1536,12 +1568,13 @@ extern "C" esp_err_t mosaico_shell_start(void)
         swifty_app_config_section("home", home_apply, home_status);
         swifty_app_config_section("files", files_app_config_apply, files_app_config_status);
         swifty_app_config_section("display", always_on_config_apply, always_on_config_status);
+        swifty_app_config_section("vpn", vpn_app_config_apply, vpn_app_config_status);
         agent_tools::register_all();
         reminders_start();
     }
     // Files and Tools: plain black full-panel screens.
     for (lv_obj_t **scr : {
-                &shell.files_screen, &shell.tools_screen, &shell.gallery_screen
+                &shell.files_screen, &shell.tools_screen, &shell.gallery_screen, &shell.vpn_screen
             }) {
         *scr = lv_obj_create(nullptr);
         lv_obj_remove_style_all(*scr);
@@ -1566,6 +1599,10 @@ extern "C" esp_err_t mosaico_shell_start(void)
         th.webcam = webcam_mode::set;
         th.webcam_status = webcam_mode::status;
         tools_app_init(&th);
+        vpn_hooks_t vh = {};
+        vh.exit = [] { shell_show(ShellApp::Launcher); };
+        vh.haptic = [] { haptics_pulse(HapticPulse::Tap); };
+        vpn_app_init(&vh);
         camera_app_set_brightness_hook(panel_brightness);
         gallery_app_set_exit([] { shell_show(ShellApp::Launcher); });
         // The viewfinder's thumbnail opens the Gallery on the newest photo.

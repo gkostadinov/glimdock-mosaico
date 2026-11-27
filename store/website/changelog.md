@@ -20,6 +20,14 @@
 - **Swifty's home control**: exact names win over near ones (a light called
   "Bedroom lamp" no longer counts as the bedroom), and any of the hub's scenes
   can be applied by name.
+- **VPN**: a new app that connects to your WireGuard server. While it is on,
+  all of the board's internet traffic, DNS included, goes through the tunnel,
+  and nothing goes around it; the local network stays direct. Paste a
+  WireGuard configuration in Web settings (or load it with
+  `mosaico-config.py`). The app has a big switch, says what is happening in
+  plain words, shows the tunnel address, last handshake and traffic, and can
+  connect at start-up. It reconnects by itself after Wi-Fi drops, and Swifty
+  can switch it.
 - **Webcam microphone**: in webcam mode the board is also a USB microphone
   ("ESP-Mosaico Microphone", 48 kHz), so calls get its voice along with its
   picture. The computer's input level and mute work; Swifty waits while the

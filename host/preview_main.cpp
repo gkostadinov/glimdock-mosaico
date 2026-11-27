@@ -23,6 +23,7 @@
 #include "glimdock_app.h"
 #include "launcher_ui.h"
 #include "tools_app.h"
+#include "vpn_app.h"
 #include "swifty_figure.h"
 #include "mui.h"
 #include "home_app.h"
@@ -505,6 +506,25 @@ int main(int argc, char **argv)
             }
         }
         tools_app_set_active(false);
+    }
+    {
+        void vpn_host_demo(bool on);
+        vpn_app_init(nullptr);
+        lv_obj_t *vpn = lv_obj_create(nullptr);
+        lv_obj_remove_style_all(vpn);
+        lv_obj_set_style_bg_color(vpn, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(vpn, LV_OPA_COVER, 0);
+        lv_screen_load(vpn);
+        for (int on = 0; on < 2; ++on) {
+            vpn_host_demo(on);
+            vpn_app_open(vpn);
+            for (int k = 0; k < 20; ++k) {
+                nativeClock += 60;
+                (lv_timer_handler)();
+            }
+            save(on ? "vpn-connected" : "vpn-off", lv_display_get_default());
+        }
+        vpn_app_set_active(false);
     }
     lv_obj_t *glim = lv_obj_create(nullptr);
     lv_obj_remove_style_all(glim);

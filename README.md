@@ -3,7 +3,7 @@
 A full-screen shell for the [ESP-Mosaico](https://github.com/esp-mosaico) board
 (ESP32-S31, 480 × 480 AMOLED): a home screen like a phone's, with a homelab
 dashboard, a smart-home wall display, an AI assistant, a camera, a file browser,
-a USB webcam and a set of tools, all native ESP-IDF and LVGL.
+a USB webcam, a WireGuard VPN and a set of tools, all native ESP-IDF and LVGL.
 
 It runs as an ordinary ESP-Mosaico Idea: it installs into the application slot
 next to Vibe Mode, keeps Vibe Mode's Wi-Fi and storage, and leaves the
@@ -31,6 +31,7 @@ All of these are rendered from the desktop preview's demo data (`host/media.py`)
 | **Webcam** | The board as a USB webcam with its microphone (UVC MJPEG 1280 × 720 or 640 × 480, and a UAC2 48 kHz mic; on a Mac, [MosaicoCam](https://github.com/gkostadinov/mosaico-cam) adds filters, upscaling and voice clean-up). |
 | **Interaction** | The Interaction module: its buttons, PIR motion, light sensor, six LEDs and an IR remote for the TV. |
 | **Calculator** | A four-function calculator. |
+| **VPN** | A WireGuard client: while it is on, all of the board's internet traffic, DNS included, goes through your WireGuard server. A big switch, the connection's state in plain words, its address, last handshake and traffic, and connect at start-up. |
 | **Settings** | Brightness, the home screen's hidden apps, the always-on display, haptics, auto-rotate, the panel's corner radius, time zone, camera options and Web settings (servers and keys from a browser). |
 
 Every app works from the board's own settings; nothing points at a particular
@@ -112,6 +113,38 @@ Make and change them three ways:
 They are kept on the board (up to 24) and survive restarts and updates. Tiles
 move and hide like apps.
 
+### VPN
+
+The VPN app connects to one WireGuard server (a peer, in WireGuard's terms) and,
+while it is on, sends all of the board's internet traffic through it: the tunnel
+becomes the default route, and DNS goes to the servers the configuration names,
+through the tunnel. The local network stays direct (as `wg-quick` leaves it), so
+an SMB share or a Swifty Home hub on your LAN is still reached at home. The
+tunnel's own packets go straight out over Wi-Fi.
+
+Set it up with a standard WireGuard `.conf` for the board, made on your server
+as for any client with `AllowedIPs = 0.0.0.0/0`. Paste it (or pick the file) in
+Web settings, or load it with `tools/mosaico-config.py` (`"vpn": {"conf_file":
+"~/path/board.conf"}`; the file must be mode 0600). The fields can also be set
+one by one. Keys never leave the board: Web settings and `--status` show only
+whether each is set, plus the board's own public key, to give the server.
+
+- **While on, nothing goes around the tunnel.** If the server stops answering,
+  internet traffic waits until it is back (the app says so in plain words);
+  switch the VPN off to use the network directly.
+- **Reconnects** by itself after Wi-Fi drops or the server restarts. A server
+  given by name is looked up again (over Wi-Fi, with the network's DNS) when
+  Wi-Fi comes back or while it does not answer.
+- **Connect at start-up** is a switch on the app's screen and in Web settings.
+- **A server at home** (on the board's own internet connection) still carries
+  the traffic, but the address the internet sees stays your home's: the
+  tunnel's counters on the app's screen show the traffic going through.
+- **Swifty** can tell the VPN's state and switch it ("turn on the VPN").
+- **For now:** IPv4 only (IPv6 entries in the file are skipped; the board has no
+  IPv6 internet address of its own), one peer, and either everything
+  (`0.0.0.0/0`) or the tunnel's own network: other split-tunnel networks are not
+  routed. `PersistentKeepalive = 25` helps behind NAT.
+
 ## Hardware
 
 - ESP-Mosaico main board (ESP32-S31, 16 MB flash, PSRAM, 480 × 480 CO5300 AMOLED,
@@ -166,7 +199,7 @@ control. Glimdock's private chat reader is set up with
 Or from a browser: switch on **Web settings** in Settings and open the address it
 shows on a computer or phone on the same network, with the six-digit code shown
 under it. The page edits the same settings (Swifty, Glimdock, Home pairing, Files
-shares, the always-on display). Saved keys never leave the board; the page shows only whether each is
+shares, the VPN, the always-on display). Saved keys never leave the board; the page shows only whether each is
 set. It is plain HTTP on your network, so switch it on only while you use it: it
 turns itself off after 10 minutes unused, after 5 wrong codes and at every
 restart.
@@ -174,7 +207,8 @@ restart.
 ## Privacy
 
 The board only talks to the servers you configure: your Glimdock collector,
-Swifty Home hub, model and speech servers, Tavily and SMB shares. One exception:
+Swifty Home hub, model and speech servers, Tavily, SMB shares and your WireGuard
+server. One exception:
 with the time zone set to **Automatic**, it asks `ipapi.co` for the time zone of
 its public IP address once Wi-Fi is up (and twice a day after that). Pick a time
 zone in Settings to turn that off.
@@ -210,6 +244,7 @@ sends video, and reads its microphone, only while a computer has that stream ope
 | `components/camera_app` | Camera, filters, photos and gallery. |
 | `components/files_app` | NAND and SMB file browser. |
 | `components/tools_app` | Tools (torch, level, compass) and the Calculator, Interaction and Webcam apps on the same screen. |
+| `components/vpn_app` | The VPN: WireGuard ([esphome/wireguard](https://github.com/esphome-libs/wireguard), BSD-3-Clause) with the routing around it, its screen and settings. |
 | `components/usb_webcam` | USB webcam mode (UVC camera and UAC2 microphone), taking USB over from ESP-Iris while it runs. |
 | `components/board_mic` | Who has the board's one microphone: Swifty's speech or the webcam's USB microphone. |
 | `components/mosaico_storage` | Mounts Vibe Mode's NAND volume read-write without ever formatting it. |

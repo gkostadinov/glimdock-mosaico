@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Configure the ESP-Mosaico's apps (Swifty, Glimdock, Home, Files, the display) from one file.
+"""Configure the ESP-Mosaico's apps (Swifty, Glimdock, Home, Files, the display, the VPN) from one file.
 
   python3 projects/glimdock/tools/mosaico-config.py --config-file FILE
   python3 projects/glimdock/tools/mosaico-config.py --status
   python3 projects/glimdock/tools/mosaico-config.py --template > mosaico.json
 
-FILE is JSON with any of five sections; leave out what you don't want to
+FILE is JSON with any of six sections; leave out what you don't want to
 change. Within a section a missing key keeps the board's value and (for
 Swifty) an empty string clears it.
 
@@ -39,10 +39,20 @@ Swifty) an empty string clears it.
   "display":  always_on: seconds without a touch or the AI key before the
               always-on display (a dim clock on black) comes up: 0 (off),
               30, 60, 120 (the default), 300 or 600. Applies at once.
+  "vpn":      the VPN app's WireGuard tunnel. conf_file: a WireGuard .conf
+              (a path, ~ allowed, owned by you, mode 0600) that replaces the
+              whole configuration; or the fields private_key, address, dns,
+              public_key (the server's), preshared_key, endpoint (host:port),
+              allowed_ips (empty: 0.0.0.0/0, everything) and
+              persistent_keepalive (seconds); auto_connect (true/false:
+              connect at start-up); on (true/false: connect or disconnect
+              now). Applies at once; --status shows the state and the board's
+              public key, never a key.
 
 The file must be an absolute path, owned by you, with mode 0600. Its contents
 never appear on a command line or in a log: they reach the Mosaico CLI
-in-process (service 0x4744, method 40). --status prints addresses and which
+in-process (service 0x4744, method 40). MOSAICO_PROJECT names another
+checkout of the project (a worktree) whose ESP-Iris session to use. --status prints addresses and which
 keys are set, never the keys.
 """
 
@@ -60,7 +70,9 @@ import time
 from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parents[3]
-PROJECT = WORKSPACE / "projects/glimdock"
+# MOSAICO_PROJECT: another checkout (a worktree) whose ESP-Iris session to use;
+# two projects' sessions compete for the board's one USB link.
+PROJECT = Path(os.environ.get("MOSAICO_PROJECT") or WORKSPACE / "projects/glimdock").resolve()
 SERVICE = 0x4744
 METHOD = 40
 CHUNK = 3000
@@ -70,6 +82,19 @@ SECTIONS = {
     "home": ("hub", "pairing_code"),
     "files": ("shares", "photos", "swifty"),
     "display": ("always_on",),
+    "vpn": (
+        "conf_file",
+        "private_key",
+        "address",
+        "dns",
+        "public_key",
+        "preshared_key",
+        "endpoint",
+        "allowed_ips",
+        "persistent_keepalive",
+        "auto_connect",
+        "on",
+    ),
 }
 ALWAYS_ON = (0, 30, 60, 120, 300, 600)
 SHARE_KEYS = ("name", "host", "share", "user", "password", "path")
@@ -116,6 +141,7 @@ TEMPLATE = {
         "photos": {"share": "Media", "path": "Photos"},
     },
     "display": {"always_on": 120},
+    "vpn": {"conf_file": "~/.config/mosaico/wireguard.conf", "auto_connect": False, "on": True},
 }
 
 
@@ -144,7 +170,16 @@ def rpc(main, payload: bytes) -> bytes:
 
 
 def status(main) -> dict:
-    return json.loads(rpc(main, b"\0"))
+    # A page at a time (op 5): the whole status is more than one reply holds.
+    # Firmware without op 5 answers "unknown operation": one reply (op 0).
+    text = b""
+    while True:
+        page = rpc(main, b"\5" + struct.pack("<I", len(text)))
+        if not text and page == b"unknown operation":
+            return json.loads(rpc(main, b"\0"))
+        if not page:
+            return json.loads(text)
+        text += page
 
 
 def check_private(path: Path, what: str) -> None:
@@ -195,6 +230,22 @@ def load(path: str) -> dict:
             v = section.get("always_on", 0)
             if isinstance(v, bool) or v not in ALWAYS_ON:
                 raise ValueError(f"display.always_on: seconds, one of {', '.join(map(str, ALWAYS_ON))} (0: off)")
+        elif name == "vpn":
+            for key, v in section.items():
+                if key in ("auto_connect", "on"):
+                    if not isinstance(v, bool):
+                        raise ValueError(f"vpn.{key}: true or false")
+                elif key == "persistent_keepalive":
+                    if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 65535:
+                        raise ValueError("vpn.persistent_keepalive: seconds from 0 (off) to 65535")
+                elif not isinstance(v, str):
+                    raise ValueError(f"vpn.{key}: expected a string")
+            conf = section.get("conf_file")
+            if conf:
+                path = Path(conf).expanduser()
+                check_private(path, "vpn.conf_file")
+                section["conf"] = path.read_text()
+                del section["conf_file"]
         elif any(not isinstance(v, str) for v in section.values()):
             raise ValueError(f"{name}: values must be strings")
     reader = data.get("glimdock", {}).get("private_reader_file")
@@ -308,6 +359,8 @@ def main(argv=None) -> int:
         for name in ("swifty", "glimdock", "files"):
             if name in config:
                 print(f"{name.capitalize()} settings saved.")
+        if "vpn" in config:
+            print("VPN settings saved.")
         if "home" in config:
             ok = follow_pairing(cli) and ok
         if reply == "ok restart":

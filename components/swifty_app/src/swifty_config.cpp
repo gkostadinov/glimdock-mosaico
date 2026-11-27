@@ -35,6 +35,7 @@ std::mutex apply_lock;  // one change at a time (ESP-Iris and the web settings)
 // The frame being received: begin (total size), chunks, commit.
 std::string frame;
 size_t expected = 0;
+std::string status_pages;  // op 5: the status being read a page at a time (no keys in it)
 
 std::string *field(Config &c, int i)
 {
@@ -222,7 +223,9 @@ std::string status_json()
     return reply;
 }
 
-// Payload: op byte. 0 status; 1 begin (u32 size); 2 chunk; 3 commit; 4 abort.
+// Payload: op byte. 0 status; 1 begin (u32 size); 2 chunk; 3 commit; 4 abort;
+// 5 status from an offset (u32): as much as one reply holds, empty at the end
+// (offset 0 takes a fresh copy). The whole status outgrew one reply.
 // Replies are short words, never configuration values except the URLs.
 esp_err_t rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capacity, size_t *size, void *)
 {
@@ -262,6 +265,13 @@ esp_err_t rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capaci
     } else if (op == 4) {
         wipe(frame);
         expected = 0;
+    } else if (op == 5 && n >= 4) {
+        uint32_t offset;
+        memcpy(&offset, data, 4);
+        if (offset == 0) {
+            status_pages = status_json();
+        }
+        reply = offset < status_pages.size() ? status_pages.substr(offset, capacity) : std::string();
     } else {
         reply = "unknown operation";
     }

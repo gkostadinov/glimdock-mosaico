@@ -63,6 +63,8 @@ add_executable(mosaico-preview
     "${IDEA}/components/swifty_app/src/swifty_figure.cpp"
     "${IDEA}/components/tools_app/src/tools_app.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/interact_host.cpp"
+    "${IDEA}/components/vpn_app/src/vpn_ui.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/vpn_host.cpp"
     ${font_sources}
     ${HOME_SOURCES})
 target_include_directories(mosaico-preview PRIVATE
@@ -73,6 +75,7 @@ target_include_directories(mosaico-preview PRIVATE
     "${IDEA}/components/swifty_app/include" "${IDEA}/components/swifty_app/src"
     "${IDEA}/components/mosaico_ui/include"
     "${IDEA}/components/tools_app/include" "${IDEA}/components/files_app/include"
+    "${IDEA}/components/vpn_app/include"
     "${CMAKE_CURRENT_LIST_DIR}/shims"
     "${ARDUINOJSON}" "${CMAKE_BINARY_DIR}")
 target_compile_definitions(mosaico-preview PRIVATE

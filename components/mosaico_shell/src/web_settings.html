@@ -608,8 +608,82 @@ function renderShortcuts() {
   return s;
 }
 
+// The VPN (WireGuard): a whole .conf pasted, or its fields. Keys show only whether they are set.
+const VPN_STATES = { "off": "Off", "not set up": "Not set up", "waiting for Wi-Fi": "Waiting for Wi-Fi",
+  "connecting": "Connecting", "connected": "Connected", "trouble": "Trouble connecting" };
+
+function renderVpn() {
+  const v = status.vpn;
+  if (!v) return el("span");
+  const state = VPN_STATES[v.state] || v.state || "";
+  const s = sectionBox("VPN", "WireGuard · " + state + (v.state === "connected" && v.tunnel_address ? " as " + v.tunnel_address : ""));
+  s.append(el("p", { className: "note", textContent:
+    "While on, all of the board's internet traffic goes through the tunnel (AllowedIPs 0.0.0.0/0), DNS too when the configuration names servers. The local network stays direct." }));
+  if (v.error) s.append(el("p", { className: "msg err", textContent: v.error }));
+  if (v.board_public_key) {
+    const key = el("input", { type: "text", readOnly: true, value: v.board_public_key, spellcheck: false });
+    s.append(el("label", {}, "This board's public key (the server's [Peer] PublicKey for it)", el("div", { className: "row" }, key)));
+  }
+  // A whole configuration file.
+  const conf = el("textarea", { spellcheck: false, placeholder: "[Interface]\nPrivateKey = ...\nAddress = 10.8.0.2/32\nDNS = 10.8.0.1\n\n[Peer]\nPublicKey = ...\nEndpoint = vpn.example.com:51820\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 25" });
+  s.append(el("label", {}, "Paste a WireGuard configuration (.conf)", el("div", { className: "row top" }, conf)));
+  const file = el("input", { type: "file", accept: ".conf,text/plain" });
+  file.onchange = async () => { if (file.files[0]) { conf.value = await file.files[0].text(); conf.dispatchEvent(new Event("input", { bubbles: true })); } };
+  s.append(el("label", {}, "or pick the file", file));
+  const loadConf = actions(s, "Load configuration", async say => {
+    const text = conf.value;
+    conf.value = "";
+    if (await saveSection("vpn", { conf: text }, say)) await reload();
+  });
+  conf.addEventListener("input", () => { loadConf.button.disabled = !conf.value.trim(); });
+  // Or field by field.
+  const grid = el("div", { className: "grid" });
+  const f = {
+    private_key: field("secret", "Private key", v.private_key, "[Interface] PrivateKey"),
+    address: field("text", "Address", v.address, "10.8.0.2/32"),
+    dns: field("text", "DNS", v.dns, "Empty: the network's"),
+    public_key: field("text", "Server public key", v.public_key, "[Peer] PublicKey"),
+    preshared_key: field("secret", "Preshared key", v.preshared_key, "Optional"),
+    endpoint: field("text", "Endpoint", v.endpoint, "vpn.example.com:51820"),
+    allowed_ips: field("text", "Allowed IPs", v.allowed_ips, "Empty: 0.0.0.0/0 (everything)"),
+    persistent_keepalive: field("text", "Persistent keepalive (s)", v.persistent_keepalive ? String(v.persistent_keepalive) : "", "0: off; 25 behind NAT"),
+  };
+  Object.values(f).forEach(x => grid.append(x.box));
+  s.append(grid);
+  const fields = actions(s, "Save", async say => {
+    const change = {};
+    for (const [key, x] of Object.entries(f)) if (x.changed()) change[key] = x.value();
+    if ("persistent_keepalive" in change) {
+      const n = Number(change.persistent_keepalive || 0);
+      if (!Number.isInteger(n) || n < 0 || n > 65535) throw new Error("Keepalive: seconds from 0 to 65535");
+      change.persistent_keepalive = n;
+    }
+    if (await saveSection("vpn", change, say)) await reload();
+  });
+  grid.addEventListener("input", () => { fields.button.disabled = !Object.values(f).some(x => x.changed()); });
+  // Switch and start-up.
+  const auto = el("select");
+  auto.append(el("option", { value: "1", textContent: "Yes" }), el("option", { value: "0", textContent: "No" }));
+  auto.value = v.auto_connect ? "1" : "0";
+  auto.onchange = async () => {
+    try { if (await saveSection("vpn", { auto_connect: auto.value === "1" })) await reload(); }
+    catch (e) { toast(e.message); }
+  };
+  s.append(el("div", { className: "grid" }, el("label", {}, "Connect at start-up", auto)));
+  const toggle = el("button", { type: "button", className: v.on ? "" : "primary", textContent: v.on ? "Disconnect" : "Connect",
+    disabled: !v.configured });
+  const say = el("span", { className: "msg" });
+  toggle.onclick = async () => {
+    toggle.disabled = true;
+    try { if (await saveSection("vpn", { on: !v.on })) setTimeout(() => reload().catch(() => {}), 2500); }
+    catch (e) { say.textContent = e.message; say.className = "msg err"; toggle.disabled = false; }
+  };
+  s.append(el("div", { className: "actions" }, toggle, say));
+  return s;
+}
+
 function render() {
-  $("#sections").replaceChildren(...SIMPLE.map(renderSimple), renderHome(), renderShortcuts(), renderFiles(), renderDisplay());
+  $("#sections").replaceChildren(...SIMPLE.map(renderSimple), renderHome(), renderShortcuts(), renderFiles(), renderVpn(), renderDisplay());
 }
 
 async function reload() {

@@ -76,6 +76,12 @@ CONFIG_LV_FONT_DEFAULT_MONTSERRAT_16=y
 # Collector, agents, private reader, setup portal, captive DNS, hub, ESP-Iris.
 CONFIG_LWIP_MAX_SOCKETS=16
 CONFIG_LWIP_SNTP_MAX_SERVERS=2
+# The VPN's WireGuard interface is a plain lwIP netif that keeps its own state
+# in netif->state. ESP-NETIF must then keep its pointer in the netif's client
+# data instead, which ESP-IDF does when bridge support is built in (no bridge
+# is ever made). Without it, adding the tunnel crashed lwIP's thread in
+# ESP-NETIF's address callback.
+CONFIG_ESP_NETIF_BRIDGE_EN=y
 # The template bootloader (never installed; the board keeps its retained one)
 # must still fit before 0x8000 for the build's size check.
 CONFIG_BOOTLOADER_LOG_LEVEL_ERROR=y
