@@ -64,7 +64,8 @@ public:
         }
         Input in = demo_ ? autopilot() : input;
         // turning and walking, sliding along walls
-        pa_ += in.x * 2.7f * dt + in.turn * 1.3f;  // the board turned: the view turns with it
+        // a tilt turns a little gentler than a drag; turning the board turns the view with it
+        pa_ += in.x * (in.absolute ? 1.8f : 2.7f) * dt + in.turn * 1.3f;
         const float speed = in.y * (in.y > 0 ? 2.4f : 1.5f);
         const float dx = cosf(pa_) * speed * dt, dy = sinf(pa_) * speed * dt;
         move(px_, py_, dx, dy, RADIUS);

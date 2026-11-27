@@ -28,7 +28,7 @@ typedef enum {
 } games_sound_t;
 
 typedef struct {
-    float gravity[3];  // g, in UI coordinates: x right, y down, z out of the glass (the way down)
+    float gravity[3];  // g, the way down, in UI coordinates: x right, y down, z into the glass
     float rate[3];     // rad/s about the same axes (0 without a gyroscope)
     float yaw;         // the board's turn about the vertical since start-up, rad, + to the right
     bool gyro;         // rate and yaw are measured

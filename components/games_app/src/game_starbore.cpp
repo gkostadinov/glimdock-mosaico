@@ -86,12 +86,19 @@ public:
         dt = std::min(dt, 0.1f);
         time_ += dt;
         const Input in = demo_ ? autopilot() : input;
-        // steering: a springy slide across the bore
+        // steering: a tilt places the ship (level is the middle), a drag slides it
         const float k = 1 - expf(-dt * 7);
-        vx_ += (in.x * 6.2f - vx_) * k;
-        vy_ += (in.y * 6.2f - vy_) * k;
-        ox_ += vx_ * dt;
-        oy_ += vy_ * dt;
+        if (in.absolute) {
+            const float reach = R - 0.6f, kp = 1 - expf(-dt * 6);
+            const float nx = ox_ + (in.x * reach - ox_) * kp, ny = oy_ + (in.y * reach - oy_) * kp;
+            vx_ = (nx - ox_) / std::max(dt, 0.001f), vy_ = (ny - oy_) / std::max(dt, 0.001f);
+            ox_ = nx, oy_ = ny;
+        } else {
+            vx_ += (in.x * 6.2f - vx_) * k;
+            vy_ += (in.y * 6.2f - vy_) * k;
+            ox_ += vx_ * dt;
+            oy_ += vy_ * dt;
+        }
         const float r = hypotf(ox_, oy_), limit = R - 0.55f;
         if (r > limit) {
             ox_ *= limit / r, oy_ *= limit / r;

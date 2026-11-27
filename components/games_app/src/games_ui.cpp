@@ -52,21 +52,27 @@ const char *TAG = "games";
 
 // ---- the three games: names, words and colours -------------------------------------------------
 struct Info {
-    const char *name, *tagline, *touch_hint, *tilt_hint;
+    const char *name, *tagline, *touch_hint, *tilt_hint, *flipped_hint;
     Accent accent;
 };
 const Info INFO[games::GAME_COUNT] = {
     {
         "Ember Crypt", "Feed the ember, gather the shards, wake the gate.", "Drag to walk and turn  ·  tap for a flare",
-        "Tilt to walk  ·  turn the board to look  ·  shake for a flare", {0xFFD08A, 0xE0662A, 0xFF9A3C, 0x2A1004, 0x3A2010, 0x1A0C06}
+        "Tilt back to walk, to the side to turn, or turn the board to look  ·  shake for a flare",
+        "Tilt away to walk, to the side to turn, or turn the board to look  ·  shake for a flare",
+        {0xFFD08A, 0xE0662A, 0xFF9A3C, 0x2A1004, 0x3A2010, 0x1A0C06}
     },
     {
         "Starbore", "Thread the gates of a neon bore, faster every sector.", "Drag to steer  ·  tap to pulse a gate away",
-        "Tilt to steer  ·  shake to pulse a gate away", {0x9AF4FF, 0xB43CFF, 0x46E6FF, 0x12062A, 0x2A1450, 0x10082A}
+        "Tilt to place the ship: back for up, away for down  ·  shake to pulse a gate away",
+        "Tilt to place the ship: away for up, back for down  ·  shake to pulse a gate away",
+        {0x9AF4FF, 0xB43CFF, 0x46E6FF, 0x12062A, 0x2A1450, 0x10082A}
     },
     {
         "Skyglide", "Ride the thermals through the golden hoops.", "Drag to bank and pitch  ·  tap for a gust",
-        "Tilt to bank and pitch  ·  shake for a gust", {0xFFE9A8, 0x3A8CFF, 0x8FD8FF, 0x061428, 0x1E3A5A, 0x0A1828}
+        "Tilt to fly: back climbs, away dives, to the side banks  ·  shake for a gust",
+        "Tilt to fly: away climbs, back dives, to the side banks  ·  shake for a gust",
+        {0xFFE9A8, 0x3A8CFF, 0x8FD8FF, 0x061428, 0x1E3A5A, 0x0A1828}
     },
 };
 constexpr int THUMB = 104, FRAME_MS = 33;
@@ -97,8 +103,9 @@ struct Shared {
     std::mutex m;
     // from the UI
     int game = 0;
-    bool demo = true, run = false, tilt = true, thumbs_wanted = false;
+    bool demo = true, run = false, tilt = true, flip = false, thumbs_wanted = false;
     uint32_t reset_seq = 0, level_seq = 0;
+    int64_t hold_until = 0;  // getting ready: the game waits, and the tilt levels to the board as held
     bool down = false;  // a finger steers
     float pad_x = 0, pad_y = 0;
     int taps = 0;
@@ -136,7 +143,7 @@ enum class Mode { Picker, Title, Play, Paused, Over };
 
 struct {
     games_hooks_t hooks{};
-    bool built = false, sound = true, tilt = true;
+    bool built = false, sound = true, tilt = true, flip = false;
     Mode mode = Mode::Picker;
     int game = 0;
     uint32_t best[games::GAME_COUNT] = {};
@@ -146,7 +153,9 @@ struct {
     lv_obj_t *picker = nullptr, *thumb[games::GAME_COUNT] = {}, *card_best[games::GAME_COUNT] = {};
     // title
     lv_obj_t *title = nullptr, *t_name = nullptr, *t_tag = nullptr, *t_best = nullptr, *t_hint = nullptr, *t_play = nullptr;
-    lv_obj_t *t_tilt = nullptr, *t_sound = nullptr, *t_dots[games::GAME_COUNT] = {};
+    lv_obj_t *t_tilt = nullptr, *t_flip = nullptr, *t_sound = nullptr, *t_dots[games::GAME_COUNT] = {};
+    lv_obj_t *h_ready = nullptr, *h_count = nullptr;  // getting ready
+    int64_t ready_until = 0;
     // hud
     lv_obj_t *hud = nullptr, *h_score = nullptr, *h_line = nullptr, *h_fill = nullptr, *h_name = nullptr;
     // cards
@@ -179,6 +188,9 @@ void load_settings()
     uint8_t v;
     if (nvs_get_u8(h, "sound", &v) == ESP_OK) {
         G.sound = v;
+    }
+    if (nvs_get_u8(h, "flip", &v) == ESP_OK) {
+        G.flip = v;
     }
     if (nvs_get_u8(h, "tilt", &v) == ESP_OK) {
         G.tilt = v;
@@ -236,32 +248,37 @@ games::Game &game_at(int i)
 float dead_zone(float v)
 {
     const float a = fabsf(v);
-    if (a < 0.07f) {
+    if (a < 0.03f) {
         return 0;
     }
-    return std::min(1.0f, (a - 0.07f) / 0.93f) * (v < 0 ? -1.0f : 1.0f);
+    return std::min(1.0f, (a - 0.03f) / 0.97f) * (v < 0 ? -1.0f : 1.0f);
 }
 
 // The board as a controller: a finger, else the tilt (levelled where the board
 // was held when the game started or resumed), the gyroscope's turn, a shake,
 // a tap or a second finger, the sub-board's buttons.
-games::Input read_input(float dt, bool tilt, bool down, float pad_x, float pad_y, int taps)
+// The board's top tilted back towards the player is up (forward in the
+// maze), in every game; flip: the player's Flip, the other way round.
+games::Input read_input(float dt, bool tilt, bool down, float pad_x, float pad_y, int taps, bool flip)
 {
     games::Input in;
     games_motion_t m{};
     if (tilt && G.hooks.motion && G.hooks.motion(&m)) {
-        const float *g = m.gravity;
-        // pitch: forward and back, whether the board lies flat or stands up;
-        // roll: like a steering wheel
-        const float pitch = atan2f(g[1], fabsf(g[2]));
+        const float *g = m.gravity;  // the way down: x right, y down, z into the glass
+        // pitch: 0 lying flat, 90 degrees standing up, on past that, so a
+        // board held upright reads both ways; roll: like a steering wheel
+        const float pitch = atan2f(g[1], g[2]);
         const float roll = atan2f(g[0], sqrtf(g[1] * g[1] + g[2] * g[2]));
         if (T.level_now) {
             T.pitch0 = pitch, T.roll0 = roll, T.yaw_last = m.yaw;
             T.level_now = false;
         }
-        constexpr float FULL = 0.42f;  // ~24 degrees of tilt is full steering
+        // straight in proportion: ~29 degrees is full steering, past a dead
+        // zone of under a degree (a curve here felt dead, then too fast)
+        constexpr float FULL = 0.5f;
         in.x = dead_zone((roll - T.roll0) / FULL);
-        in.y = dead_zone((T.pitch0 - pitch) / FULL);
+        in.y = dead_zone(games::angle_diff(T.pitch0, pitch) / FULL * (flip ? -1.0f : 1.0f));
+        in.absolute = true;
         if (m.gyro) {
             in.turn = m.yaw - T.yaw_last;
         }
@@ -275,6 +292,7 @@ games::Input read_input(float dt, bool tilt, bool down, float pad_x, float pad_y
     }
     if (down) {  // the finger wins over the tilt
         in.x = pad_x, in.y = pad_y;
+        in.absolute = false;
     }
     if (taps > 0) {
         in.action = true;
@@ -313,12 +331,14 @@ void make_thumbnails()
 bool frame_once()
 {
     int game, taps;
-    bool demo, run, tilt, down, thumbs_wanted;
+    bool demo, run, tilt, flip, down, thumbs_wanted;
+    int64_t hold_until;
     float pad_x, pad_y;
     uint32_t reset_seq, level_seq;
     {
         std::lock_guard<std::mutex> l(T.s.m);
-        game = T.s.game, demo = T.s.demo, run = T.s.run, tilt = T.s.tilt;
+        game = T.s.game, demo = T.s.demo, run = T.s.run, tilt = T.s.tilt, flip = T.s.flip;
+        hold_until = T.s.hold_until;
         reset_seq = T.s.reset_seq, level_seq = T.s.level_seq;
         down = T.s.down, pad_x = T.s.pad_x, pad_y = T.s.pad_y, taps = T.s.taps;
         T.s.taps = 0;
@@ -351,8 +371,15 @@ bool frame_once()
         T.last_us = 0;  // paused: the next step after it is an ordinary one
         return false;
     }
-    const games::Input in = read_input(dt, tilt && !demo, down && !demo, pad_x, pad_y, demo ? 0 : taps);
-    g.step(dt, in);
+    // getting ready: nothing moves, and the tilt levels to the board as held
+    const bool holding = !demo && t0 < hold_until;
+    if (holding) {
+        T.level_now = true;
+    }
+    const games::Input in = read_input(dt, tilt && !demo, down && !demo, pad_x, pad_y, demo || holding ? 0 : taps, flip);
+    if (!holding) {
+        g.step(dt, in);
+    }
     games::Hud hud;
     g.hud(&hud);
     const uint32_t ev = g.take_events();
@@ -443,6 +470,7 @@ void command(int game, bool demo, bool run, bool reset, int dim_top, int dim_bot
         std::lock_guard<std::mutex> l(T.s.m);
         T.s.game = game, T.s.demo = demo, T.s.run = run;
         T.s.tilt = G.tilt;
+        T.s.flip = G.flip;
         if (reset) {
             ++T.s.reset_seq;
             T.s.over = false;
@@ -617,7 +645,7 @@ void fill_title()
         snprintf(best, sizeof(best), "No best score yet");
     }
     set_text(G.t_best, best);
-    set_text(G.t_hint, G.tilt ? info.tilt_hint : info.touch_hint);
+    set_text(G.t_hint, !G.tilt ? info.touch_hint : G.flip ? info.flipped_hint : info.tilt_hint);
     style_fill(G.t_play, info.accent, true);
     for (int i = 0; i < games::GAME_COUNT; ++i) {
         set_bg_color(G.t_dots[i], lv_color_hex(i == G.game ? info.accent.hi : 0x505058));
@@ -687,6 +715,14 @@ void tilt_cb(lv_event_t *e)
 {
     G.tilt = toggle_on(static_cast<lv_obj_t *>(lv_event_get_target(e)));
     save_u8("tilt", G.tilt);
+    fill_title();
+}
+
+// Tilting the top away the other way round: up for down.
+void flip_cb(lv_event_t *e)
+{
+    G.flip = toggle_on(static_cast<lv_obj_t *>(lv_event_get_target(e)));
+    save_u8("flip", G.flip);
     fill_title();
 }
 
@@ -787,6 +823,18 @@ void tick(lv_timer_t *)
     }
     if (G.mode != Mode::Play) {
         return;
+    }
+    if (G.ready_until) {  // getting ready: 3, 2, 1
+        const int64_t left = G.ready_until - now_us();
+        if (left <= 0) {
+            G.ready_until = 0;
+            set_hidden(G.h_ready, true);
+            set_hidden(G.h_count, true);
+        } else {
+            char n[12];
+            snprintf(n, sizeof(n), "%d", int(left / 600000) + 1);
+            set_text(G.h_count, n);
+        }
     }
     // the HUD, touched only where it changed
     if (hud.score != G.shown_score) {
@@ -892,6 +940,19 @@ void show(Mode mode)
         G.shown_score = -1, G.shown_fill = -1, G.shown_color = 0, G.shown_line[0] = 0;
         command(G.game, false, true, !resume, 30, H, 32);
         relevel();
+        // With Tilt: a moment to hold the board the way you'll play; the tilt
+        // levels to that when it ends (not to how it was held for the tap).
+        bool ready = G.tilt;
+#ifndef ESP_PLATFORM
+        ready = ready && !preview_autoplay;  // the preview's games steer themselves at once
+#endif
+        G.ready_until = ready ? now_us() + 1800000 : 0;
+        {
+            std::lock_guard<std::mutex> l(T.s.m);
+            T.s.hold_until = G.ready_until;
+        }
+        set_hidden(G.h_ready, !ready);
+        set_hidden(G.h_count, !ready);
         if (!resume && G.sound && G.hooks.sound) {
             G.hooks.sound(GAMES_SOUND_START);
         }
@@ -948,18 +1009,22 @@ void build_title(lv_obj_t *s)
     G.t_tag = label(G.title, "", 60, 138, PANEL - 120, TEXT2, 17, false, LV_TEXT_ALIGN_CENTER);
     wrap_label(G.t_tag);
     G.t_best = label(G.title, "", 0, 192, PANEL, TEXT, 16, true, LV_TEXT_ALIGN_CENTER);
-    // tilt and sound
-    label(G.title, "Tilt", 104, 306, 60, TEXT, 16, true);
-    G.t_tilt = toggle(G.title, 150, 300, G.tilt, INFO[0].accent);
+    // tilt, its up and down flipped, and sound
+    label(G.title, "Tilt", 44, 306, 44, TEXT, 16, true);
+    G.t_tilt = toggle(G.title, 84, 300, G.tilt, INFO[0].accent);
     lv_obj_add_event_cb(G.t_tilt, tilt_cb, LV_EVENT_VALUE_CHANGED, nullptr);
-    label(G.title, "Sound", 244, 306, 70, TEXT, 16, true);
-    G.t_sound = toggle(G.title, 308, 300, G.sound, INFO[0].accent);
+    label(G.title, "Flip", 174, 306, 44, TEXT, 16, true);
+    G.t_flip = toggle(G.title, 212, 300, G.flip, INFO[0].accent);
+    lv_obj_add_event_cb(G.t_flip, flip_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+    label(G.title, "Sound", 298, 306, 60, TEXT, 16, true);
+    G.t_sound = toggle(G.title, 356, 300, G.sound, INFO[0].accent);
     lv_obj_add_event_cb(G.t_sound, sound_cb, LV_EVENT_VALUE_CHANGED, nullptr);
     G.t_play = fill_button(G.title, 150, 352, 180, 56, "Play", INFO[0].accent, 20);
     on_click(G.t_play, play_cb);
-    G.t_hint = label(G.title, "", 50, 420, PANEL - 100, TEXT2, 13, false, LV_TEXT_ALIGN_CENTER);
+    G.t_hint = label(G.title, "", 60, 414, PANEL - 120, TEXT2, 13, false, LV_TEXT_ALIGN_CENTER);
+    wrap_label(G.t_hint);  // two lines at most
     for (int i = 0; i < games::GAME_COUNT; ++i) {
-        G.t_dots[i] = box(G.title, 226 + i * 14, 450, 8, 8, 4);
+        G.t_dots[i] = box(G.title, 226 + i * 14, 458, 8, 8, 4);
         lv_obj_set_style_bg_opa(G.t_dots[i], LV_OPA_COVER, 0);
     }
 }
@@ -977,6 +1042,10 @@ void build_hud(lv_obj_t *s)
     G.h_line = label(G.hud, "", 60, 70, PANEL - 120, TEXT, 13, false, LV_TEXT_ALIGN_CENTER);
     lv_obj_t *pause = round_button(G.hud, 400, 28, 46, "pause");
     on_click(pause, pause_cb);
+    G.h_ready = label(G.hud, "Hold the board the way you'll play", 40, 170, PANEL - 80, TEXT, 20, true, LV_TEXT_ALIGN_CENTER);
+    G.h_count = label(G.hud, "3", 0, 206, PANEL, TEXT, 64, true, LV_TEXT_ALIGN_CENTER);
+    lv_obj_add_flag(G.h_ready, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(G.h_count, LV_OBJ_FLAG_HIDDEN);
 }
 
 void build_cards(lv_obj_t *s)

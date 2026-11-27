@@ -11,8 +11,10 @@
   shield, and pulse a gate away when it is too late to dodge. **Skyglide** is a
   glider over hills and lakes at golden hour: thread the hoops for more time,
   ride the thermals for height, and keep off the ground. Drag a finger to steer
-  and tap for each game's action, or switch on Tilt: tilt the board to steer,
-  turn it to look around the crypt, and shake it for the action. The
+  and tap for each game's action, or play with Tilt: hold the board the way you
+  like during a short countdown, then tilt it to steer (back towards you is up,
+  or forward in the crypt, in every game; Flip swaps them), turn it to look
+  around the crypt, and shake it for the action. The
   Interaction module's buttons and lights join in when it is fitted, and the
   games make short retro sounds at Glimdock's sound volume.
 - **Home screen pages**: the icons now sit on pages you swipe between, with

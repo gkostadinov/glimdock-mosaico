@@ -65,7 +65,7 @@ public:
         // bank and pitch follow the stick; a stall drops the nose
         const float kb = 1 - expf(-dt * 3), kp = 1 - expf(-dt * 2.5f);
         bank_ += (in.x * 0.78f - bank_) * kb;
-        float want_pitch = -in.y * 0.42f;
+        float want_pitch = in.y * 0.42f;  // up: the nose rises
         if (speed_ < 11) {
             want_pitch = std::min(want_pitch, -0.25f);
         }
@@ -314,12 +314,12 @@ private:
         const float clearance = alt_ - ahead;
         // the glide slope down (or up) to the hoop's middle
         const float dist = std::max(10.0f, hypotf(next->x - x_, next->y - y_));
-        in.y = clampf(asinf(clampf((alt_ - next->alt + 1) / dist, -0.6f, 0.6f)) / 0.42f, -1, 1);
+        in.y = -clampf(asinf(clampf((alt_ - next->alt + 1) / dist, -0.6f, 0.6f)) / 0.42f, -1, 1);
         if (speed_ < 13 && clearance > 14) {
-            in.y = std::max(in.y, 0.3f);
+            in.y = std::min(in.y, -0.3f);  // nose down for speed
         }
         if (clearance < 9) {
-            in.y = -0.8f;
+            in.y = 0.8f;  // pull up
             in.action = clearance < 6;
         }
         return in;

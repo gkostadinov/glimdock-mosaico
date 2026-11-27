@@ -22,7 +22,9 @@ bool orientation_gravity(float *x, float *y, float *z);
 // While a game steers by tilt: the UI keeps its rotation, and the IMU
 // (accelerometer and gyroscope) is read every 10 ms instead of every 50.
 void orientation_game_mode(bool on);
-// Gravity as orientation_gravity, the gyroscope's rates (rad/s) in the same
-// axes, and the board's turn about the vertical (rad, + clockwise seen from
-// above; gyro false until game mode has measured it). False without an IMU.
+// The way down (g) in the UI's coordinates, x right, y down, z into the glass
+// (unlike orientation_gravity, whose x is mirrored); the gyroscope's rates
+// (rad/s) about the same axes; and the board's turn about the vertical (rad,
+// + clockwise seen from above; gyro false until game mode has measured it).
+// False without an IMU.
 bool orientation_motion(float gravity[3], float rate[3], float *yaw, bool *gyro);

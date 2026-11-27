@@ -23,12 +23,15 @@ enum : uint32_t {
     EV_WARN = 1u << 5,    // running low (oil, time, height)
 };
 
-// Steering in -1..1 (x right, y forward: push or up) from a finger or a tilt,
+// Steering in -1..1 (x right, y forward or up the screen) from a finger or a
+// tilt (the board's top tilted back towards the player is up, in every game),
 // a turn of the board itself (the gyroscope: radians this step, + right) and
 // the game's one action (a tap, a shake, a sub-board button) for this step.
+// absolute: x and y come from the board's tilt, a position the player holds
+// (level is the middle), rather than a drag's push.
 struct Input {
     float x = 0, y = 0, turn = 0;
-    bool action = false;
+    bool action = false, absolute = false;
 };
 
 // What the app shows over the frame.

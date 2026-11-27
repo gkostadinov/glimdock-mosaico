@@ -286,7 +286,9 @@ void sample_gyro(const float before[3], float dt)
             O.hand = O.hand_score > 0 ? 1.0f : -1.0f;
         }
     }
-    // the accelerometer reads "up" at rest: the rate about it is anticlockwise from above
+    // The accelerometer reads "up" (a resting accelerometer's force; z grows
+    // as the glass faces up), so the rate about it is anticlockwise seen from
+    // above: a turn to the right is the opposite.
     const float len = sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
     float up_rate = len > 0.3f ? (w[0] * a[0] + w[1] * a[1] + w[2] * a[2]) / len : 0;
     if (fabsf(up_rate) < 0.03f) {
@@ -463,8 +465,12 @@ bool orientation_motion(float gravity[3], float rate[3], float *yaw, bool *gyro)
     portEXIT_CRITICAL(&O.mux);
     orientation_to_ui(&a[0], &a[1], &a[2]);
     orientation_to_ui(&w[0], &w[1], &w[2]);
-    memcpy(gravity, a, sizeof(a));
-    memcpy(rate, w, sizeof(w));
+    // orientation_to_ui's y and z are the way down along the UI's down and into
+    // the glass, but its x is "up" along the UI's right (a tilt to the right
+    // read as one to the left in the games): mirror x for a true down vector,
+    // and the turn rates with it (a mirror flips a rotation's other two axes).
+    gravity[0] = -a[0], gravity[1] = a[1], gravity[2] = a[2];
+    rate[0] = w[0], rate[1] = -w[1], rate[2] = -w[2];
     return true;
 }
 
