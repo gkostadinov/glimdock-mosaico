@@ -23,6 +23,14 @@ static inline esp_err_t nvs_set_u8(nvs_handle_t, const char *, uint8_t)
 {
     return ESP_FAIL;
 }
+static inline esp_err_t nvs_get_u32(nvs_handle_t, const char *, uint32_t *)
+{
+    return ESP_FAIL;
+}
+static inline esp_err_t nvs_set_u32(nvs_handle_t, const char *, uint32_t)
+{
+    return ESP_FAIL;
+}
 static inline esp_err_t nvs_get_blob(nvs_handle_t, const char *, void *, size_t *)
 {
     return ESP_FAIL;

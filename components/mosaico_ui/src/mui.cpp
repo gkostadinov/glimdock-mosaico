@@ -771,7 +771,16 @@ constexpr float remote_1[] = {14.5f, 10, 14.17f, 11.25f, 13.25f, 12.17f, 12, 12.
 constexpr float remote_2[] = {10, 5, 14, 5}, remote_3[] = {9.5f, 16, 10.5f, 16}, remote_4[] = {13.5f, 16, 14.5f, 16};
 constexpr float remote_5[] = {9.5f, 19, 10.5f, 19}, remote_6[] = {13.5f, 19, 14.5f, 19};
 constexpr home_icons::Path remote_paths[] = {{remote_0, 9}, {remote_1, 13}, {remote_2, 2}, {remote_3, 2}, {remote_4, 2}, {remote_5, 2}, {remote_6, 2}};
-constexpr home_icons::Icon extra[] = {{"house", house_paths, 2}, {"sliders", slider_paths, 6}, {"folder", folder_paths, 1}, {"file", file_paths, 2}, {"image", image_paths, 3}, {"compass", compass_paths, 2}, {"level", level_paths, 4}, {"calc", calc_paths, 8}, {"torch", torch_paths, 3}, {"share", share_paths, 3}, {"trash", trash_paths, 5}, {"photos", photos_paths, 3}, {"webcam", webcam_paths, 4}, {"remote", remote_paths, 7}};
+// A game controller: the body with its grips, a cross pad and two buttons.
+constexpr float pad_0[] = {6, 7.5f, 18, 7.5f, 20.6f, 9, 22.2f, 14, 22.4f, 17.6f, 21, 19, 19, 18.6f, 16.4f, 15.5f, 7.6f, 15.5f,
+                           5, 18.6f, 3, 19, 1.6f, 17.6f, 1.8f, 14, 3.4f, 9, 6, 7.5f
+                          };
+constexpr float pad_1[] = {7.5f, 9.6f, 7.5f, 13.4f};
+constexpr float pad_2[] = {5.6f, 11.5f, 9.4f, 11.5f};
+constexpr float pad_3[] = {16.5f, 10, 17.5f, 11, 16.5f, 12, 15.5f, 11, 16.5f, 10};
+constexpr float pad_4[] = {19, 11.6f, 20, 12.6f, 19, 13.6f, 18, 12.6f, 19, 11.6f};
+constexpr home_icons::Path gamepad_paths[] = {{pad_0, 15}, {pad_1, 2}, {pad_2, 2}, {pad_3, 5}, {pad_4, 5}};
+constexpr home_icons::Icon extra[] = {{"house", house_paths, 2}, {"sliders", slider_paths, 6}, {"folder", folder_paths, 1}, {"file", file_paths, 2}, {"image", image_paths, 3}, {"compass", compass_paths, 2}, {"level", level_paths, 4}, {"calc", calc_paths, 8}, {"torch", torch_paths, 3}, {"share", share_paths, 3}, {"trash", trash_paths, 5}, {"photos", photos_paths, 3}, {"webcam", webcam_paths, 4}, {"remote", remote_paths, 7}, {"gamepad", gamepad_paths, 5}};
 
 void draw_icon(lv_event_t *e)
 {

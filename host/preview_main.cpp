@@ -24,6 +24,11 @@
 #include "launcher_ui.h"
 #include "tools_app.h"
 #include "vpn_app.h"
+#include "games_app.h"
+// games_ui.cpp: the preview's synchronous frames and screens
+extern "C" void games_app_preview_frame(void);
+extern "C" void games_app_preview_mode(int mode);
+extern "C" void games_app_preview_best(int game, uint32_t score);
 #include "swifty_figure.h"
 #include "mui.h"
 #include "home_app.h"
@@ -525,6 +530,54 @@ int main(int argc, char **argv)
             save(on ? "vpn-connected" : "vpn-off", lv_display_get_default());
         }
         vpn_app_set_active(false);
+        // Games: the picker, each title screen with its game playing itself,
+        // a game under way, paused and over.
+        games_hooks_t gh = {};
+        games_app_init(&gh);
+        lv_obj_t *games = lv_obj_create(nullptr);
+        lv_obj_remove_style_all(games);
+        lv_obj_set_style_bg_color(games, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(games, LV_OPA_COVER, 0);
+        lv_screen_load(games);
+        games_app_open(games);
+        games_app_preview_best(0, 3480);
+        games_app_preview_best(1, 12650);
+        const auto frames = [](int n, const char *recording = nullptr) {
+            for (int i = 0; i < n; ++i) {
+                games_app_preview_frame();
+                nativeClock += 33;
+                (lv_timer_handler)();
+                if (recording) {
+                    record(recording, 1, 0);
+                }
+            }
+        };
+        games_app_preview_mode(0);
+        frames(3);
+        save("games-picker", lv_display_get_default());
+        static const char *const names[3] = {"crypt", "starbore", "skyglide"};
+        for (int g = 0; g < 3; ++g) {
+            games_app_select(g);
+            frames(g == 2 ? 120 : 90);
+            save(std::string("games-title-") + names[g], lv_display_get_default());
+            games_app_preview_mode(2);
+            frames(g == 0 ? 260 : 200);
+            save(std::string("games-play-") + names[g], lv_display_get_default());
+            if (recording) {
+                frames(150, (std::string("games-") + names[g]).c_str());
+            }
+            if (g == 1) {
+                games_app_preview_mode(3);
+                frames(2);
+                save("games-paused", lv_display_get_default());
+            }
+            if (g == 2) {
+                games_app_preview_mode(4);
+                frames(3);
+                save("games-over", lv_display_get_default());
+            }
+        }
+        games_app_set_active(false);
     }
     lv_obj_t *glim = lv_obj_create(nullptr);
     lv_obj_remove_style_all(glim);

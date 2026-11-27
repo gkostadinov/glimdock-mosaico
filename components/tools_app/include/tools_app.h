@@ -54,6 +54,12 @@ void tools_app_select(int tool);
 void tools_board_report(char *out, size_t capacity);
 bool tools_board_lights(const char *mode, const char *colour, char *out, size_t capacity);
 bool tools_board_ir(const char *key, int address, int command, char *out, size_t capacity);
+// The Interaction sub-board for the Games app (any task): look for it and poll
+// it fast while on; its two buttons (false: no board); a colour flash on its
+// lights that fades in about half a second.
+void tools_board_game(bool on);
+bool tools_board_buttons(bool *left, bool *right);
+void tools_board_flash(uint32_t rgb);
 
 #ifdef __cplusplus
 }

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Games**: a new app with three retro 3D games, each with a title screen
+  where it plays itself, a pause when you leave, and a best score that is kept.
+  **Ember Crypt** is a lantern-lit crawl through crypts that grow as you go:
+  gather the shards to wake the gate before the oil runs out, and flare the
+  wisps away. **Starbore** sends a dart of a ship down a twisting neon bore:
+  slip through spinning bars, plates and half walls, sweep up orbs for the
+  shield, and pulse a gate away when it is too late to dodge. **Skyglide** is a
+  glider over hills and lakes at golden hour: thread the hoops for more time,
+  ride the thermals for height, and keep off the ground. Drag a finger to steer
+  and tap for each game's action, or switch on Tilt: tilt the board to steer,
+  turn it to look around the crypt, and shake it for the action. The
+  Interaction module's buttons and lights join in when it is fitted, and the
+  games make short retro sounds at Glimdock's sound volume.
 - **Home screen pages**: the icons now sit on pages you swipe between, with
   dots for the page you are on. Webcam, Interaction and Calculator are apps of
   their own on the second page (Tools keeps the torch, level and compass).

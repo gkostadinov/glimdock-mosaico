@@ -32,6 +32,10 @@ wall companion for your homelab and home.
   "All lights off", "Bedroom lights off" or your own steps (Swifty Home lights,
   scenes, plugs and TV, waits, TV remote keys, the board's lights). Made in Web
   settings, on the board or by asking Swifty; starters come from your rooms.
+- **Games**: three retro 3D games. **Ember Crypt**, a lantern-lit crawl through
+  crypts; **Starbore**, a neon tunnel flyer; **Skyglide**, a glider over hills
+  and lakes at golden hour. Play by touch, or tilt the board to steer, turn it
+  to look around and shake it for each game's action. Best scores are kept.
 - **Settings**: brightness, haptics, auto-rotate, the panel's corner radius, time
   zone, camera options and **Web settings**.
 
@@ -45,7 +49,7 @@ Glimdock installs next to Vibe Mode and uses Vibe Mode's Wi-Fi. Nothing points a
 a server until you configure it: Glimdock needs your collector's address and
 display token, Home a hub address and pairing code, and Swifty a model server
 (speech and web search are optional). Without them, Camera, Gallery, Files,
-Tools and Glimdock's demo still work.
+Tools, Games and Glimdock's demo still work.
 
 The easiest way to set everything: open **Settings**, switch on **Web settings**,
 and open the address it shows on a phone or computer on the same network. Enter

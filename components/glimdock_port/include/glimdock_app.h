@@ -66,6 +66,9 @@ void glimdock_app_connection_info(glimdock_connection_info_t *out);
 // The reminder chime on the speaker (three rising notes, twice), queued:
 // returns at once. Plays whatever Glimdock's own sound setting.
 bool glimdock_app_play_reminder(void);
+// A Games app effect (games_sound_t) on the speaker, at Glimdock's sound
+// volume (silent at 0); false when the speaker is busy or missing.
+bool glimdock_app_play_game_sound(int sound);
 
 #ifdef __cplusplus
 }

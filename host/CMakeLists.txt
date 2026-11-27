@@ -62,6 +62,11 @@ add_executable(mosaico-preview
     "${IDEA}/components/glimdock_port/src/glimdock_summary.cpp"
     "${IDEA}/components/swifty_app/src/swifty_figure.cpp"
     "${IDEA}/components/tools_app/src/tools_app.cpp"
+    "${IDEA}/components/games_app/src/games_ui.cpp"
+    "${IDEA}/components/games_app/src/games_common.cpp"
+    "${IDEA}/components/games_app/src/game_crypt.cpp"
+    "${IDEA}/components/games_app/src/game_starbore.cpp"
+    "${IDEA}/components/games_app/src/game_skyglide.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/interact_host.cpp"
     "${IDEA}/components/vpn_app/src/vpn_ui.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/vpn_host.cpp"
@@ -76,6 +81,7 @@ target_include_directories(mosaico-preview PRIVATE
     "${IDEA}/components/mosaico_ui/include"
     "${IDEA}/components/tools_app/include" "${IDEA}/components/files_app/include"
     "${IDEA}/components/vpn_app/include"
+    "${IDEA}/components/games_app/include" "${IDEA}/components/games_app/src"
     "${CMAKE_CURRENT_LIST_DIR}/shims"
     "${ARDUINOJSON}" "${CMAKE_BINARY_DIR}")
 target_compile_definitions(mosaico-preview PRIVATE

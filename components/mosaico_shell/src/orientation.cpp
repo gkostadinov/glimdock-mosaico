@@ -41,6 +41,16 @@ struct {
     volatile int board = 0;    // the rotation gravity calls for, auto-rotate on or off
     volatile uint8_t map = DEFAULT_MAP;
     float a[3] = {0, 0, 1};    // filtered accelerometer, g
+    // Games (orientation_game_mode): the gyroscope, its rest bias, and the
+    // turn about the vertical integrated from it.
+    volatile bool game = false;
+    bool gyro = false;
+    float w[3] = {}, bias[3] = {};
+    float yaw = 0;             // rad, + clockwise seen from above
+    float hand = 1, hand_score = 0;  // the gyro's sense against the accelerometer, learned from tilts
+    float still_sum[3] = {};
+    int still_n = 0;
+    portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
     lv_obj_t *overlay = nullptr, *image = nullptr;
     lv_draw_buf_t *snapshot = nullptr;
     int from = 0;              // overlay start angle, 0.1 degree
@@ -231,18 +241,83 @@ void turn_to(int next)
     ESP_LOGI(TAG, "rotated %d -> %d", previous, next);
 }
 
+// Games: the gyroscope every 10 ms. The turn about the vertical is the rate
+// along gravity; the rest bias is taken while the board is still, and the
+// gyro's sense against the accelerometer (a mirrored axis map would turn the
+// view the wrong way) is learned from tilts: a world-fixed vector seen from
+// the board moves as -w x a.
+void sample_gyro(const float before[3], float dt)
+{
+    float gx, gy, gz;
+    if (bsp_imu_get_gyro(&gx, &gy, &gz) != ESP_OK) {
+        return;
+    }
+    constexpr float RAD = float(M_PI) / 180.0f;
+    const float raw[3] = {gx * RAD, gy * RAD, gz * RAD};
+    float w[3];
+    for (int i = 0; i < 3; ++i) {
+        w[i] = raw[i] - O.bias[i];
+    }
+    const float spin = sqrtf(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+    const float da[3] = {O.a[0] - before[0], O.a[1] - before[1], O.a[2] - before[2]};
+    const float moved = sqrtf(da[0] * da[0] + da[1] * da[1] + da[2] * da[2]);
+    if (spin < 0.05f && moved < 0.01f) {  // still: average the rest rate for the bias
+        for (int i = 0; i < 3; ++i) {
+            O.still_sum[i] += raw[i];
+        }
+        if (++O.still_n >= 50) {
+            for (int i = 0; i < 3; ++i) {
+                O.bias[i] += 0.5f * (O.still_sum[i] / float(O.still_n) - O.bias[i]);
+                O.still_sum[i] = 0;
+            }
+            O.still_n = 0;
+        }
+    } else {
+        O.still_n = 0;
+        for (float &v : O.still_sum) {
+            v = 0;
+        }
+    }
+    const float *a = O.a;
+    if (spin > 0.6f) {
+        const float cx = w[1] * a[2] - w[2] * a[1], cy = w[2] * a[0] - w[0] * a[2], cz = w[0] * a[1] - w[1] * a[0];
+        O.hand_score = std::clamp(O.hand_score - (da[0] * cx + da[1] * cy + da[2] * cz) / dt, -50.0f, 50.0f);
+        if (fabsf(O.hand_score) > 5) {
+            O.hand = O.hand_score > 0 ? 1.0f : -1.0f;
+        }
+    }
+    // the accelerometer reads "up" at rest: the rate about it is anticlockwise from above
+    const float len = sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+    float up_rate = len > 0.3f ? (w[0] * a[0] + w[1] * a[1] + w[2] * a[2]) / len : 0;
+    if (fabsf(up_rate) < 0.03f) {
+        up_rate = 0;
+    }
+    portENTER_CRITICAL(&O.mux);
+    memcpy(O.w, w, sizeof(w));
+    O.yaw -= O.hand * up_rate * dt;
+    O.gyro = true;
+    portEXIT_CRITICAL(&O.mux);
+}
+
 void task(void *)
 {
     int candidate = -1;
     TickType_t since = 0;
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(POLL_MS));
+        const bool game = O.game;
+        vTaskDelay(pdMS_TO_TICKS(game ? 10 : POLL_MS));
         float x, y, z;
         if (O.imu && bsp_imu_get_accel(&x, &y, &z) == ESP_OK) {
-            const float k = 0.3f;
+            const float k = game ? 0.5f : 0.3f;
+            const float before[3] = {O.a[0], O.a[1], O.a[2]};
+            portENTER_CRITICAL(&O.mux);
             O.a[0] += k * (x - O.a[0]);
             O.a[1] += k * (y - O.a[1]);
             O.a[2] += k * (z - O.a[2]);
+            portEXIT_CRITICAL(&O.mux);
+            if (game) {
+                sample_gyro(before, 0.01f);
+            }
             // Kept while flat or near a diagonal (pick's -1).
             const int board = pick(O.board);
             if (board >= 0) {
@@ -253,6 +328,9 @@ void task(void *)
         int want = O.forced;
         if (want < 0) {
             want = O.enabled && O.imu ? pick(current) : (O.enabled ? -1 : 0);
+        }
+        if (game && O.forced < 0) {
+            want = -1;  // a game steers by tilt: the UI keeps its rotation
         }
         if (want < 0 || want == current) {
             candidate = -1;
@@ -293,9 +371,11 @@ esp_err_t rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t capaci
     float gx, gy;
     gravity(&gx, &gy);
     const int n = snprintf(reinterpret_cast<char *>(out), capacity,
-                           "accel %+.2f %+.2f %+.2f | panel gx %+.2f gy %+.2f | rotation %d | auto %d imu %d map %u forced %d",
+                           "accel %+.2f %+.2f %+.2f | panel gx %+.2f gy %+.2f | rotation %d | auto %d imu %d map %u forced %d | "
+                           "game %d gyro %+.2f %+.2f %+.2f rad/s yaw %+.1f deg hand %+.0f (%+.1f) bias %+.3f %+.3f %+.3f",
                            O.a[0], O.a[1], O.a[2], gx, gy, int(bsp_display_get_rotation()), int(O.enabled),
-                           int(O.imu), unsigned(O.map), O.forced);
+                           int(O.imu), unsigned(O.map), O.forced, int(O.game), O.w[0], O.w[1], O.w[2],
+                           O.yaw * 180 / float(M_PI), O.hand, O.hand_score, O.bias[0], O.bias[1], O.bias[2]);
     *size = n < 0 ? 0 : std::min<size_t>(size_t(n), capacity);
     return ESP_OK;
 }
@@ -354,8 +434,37 @@ bool orientation_gravity(float *x, float *y, float *z)
     if (!O.imu) {
         return false;
     }
+    portENTER_CRITICAL(&O.mux);
     *x = O.a[0], *y = O.a[1], *z = O.a[2];
+    portEXIT_CRITICAL(&O.mux);
     orientation_to_ui(x, y, z);
+    return true;
+}
+
+void orientation_game_mode(bool on)
+{
+    if (on && !O.game) {
+        O.hand_score = 0;  // learn afresh: cheap, and a wrong guess can't stick
+    }
+    O.game = on;
+}
+
+bool orientation_motion(float gravity[3], float rate[3], float *yaw, bool *gyro)
+{
+    if (!O.imu) {
+        return false;
+    }
+    float a[3], w[3];
+    portENTER_CRITICAL(&O.mux);
+    memcpy(a, O.a, sizeof(a));
+    memcpy(w, O.w, sizeof(w));
+    *yaw = O.yaw;
+    *gyro = O.gyro && O.game;
+    portEXIT_CRITICAL(&O.mux);
+    orientation_to_ui(&a[0], &a[1], &a[2]);
+    orientation_to_ui(&w[0], &w[1], &w[2]);
+    memcpy(gravity, a, sizeof(a));
+    memcpy(rate, w, sizeof(w));
     return true;
 }
 

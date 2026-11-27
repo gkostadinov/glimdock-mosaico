@@ -3,7 +3,8 @@
 A full-screen shell for the [ESP-Mosaico](https://github.com/esp-mosaico) board
 (ESP32-S31, 480 × 480 AMOLED): a home screen like a phone's, with a homelab
 dashboard, a smart-home wall display, an AI assistant, a camera, a file browser,
-a USB webcam, a WireGuard VPN and a set of tools, all native ESP-IDF and LVGL.
+a USB webcam, a WireGuard VPN, a set of tools and three retro 3D games, all
+native ESP-IDF and LVGL.
 
 It runs as an ordinary ESP-Mosaico Idea: it installs into the application slot
 next to Vibe Mode, keeps Vibe Mode's Wi-Fi and storage, and leaves the
@@ -11,9 +12,9 @@ bootloader, Vibe Mode and their settings alone.
 
 ![Glimdock on the ESP-Mosaico: the launcher](store/covers/01-launcher.png)
 
-| Launcher | Glimdock | Swifty | Home | Tools |
-| :---: | :---: | :---: | :---: | :---: |
-| ![The launcher, Settings and Web settings](docs/media/launcher.gif) | ![A tour of Glimdock's pages](docs/media/glimdock.gif) | ![Swifty listening, thinking and answering](docs/media/swifty.gif) | ![Home's rooms, lights and music](docs/media/home.gif) | ![The spirit level](docs/media/level.gif) |
+| Launcher | Glimdock | Swifty | Home | Tools | Games |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| ![The launcher, Settings and Web settings](docs/media/launcher.gif) | ![A tour of Glimdock's pages](docs/media/glimdock.gif) | ![Swifty listening, thinking and answering](docs/media/swifty.gif) | ![Home's rooms, lights and music](docs/media/home.gif) | ![The spirit level](docs/media/level.gif) | ![Ember Crypt, Starbore and Skyglide](docs/media/games.gif) |
 
 A 40-second tour: [docs/media/glimdock-tour.mp4](docs/media/glimdock-tour.mp4).
 All of these are rendered from the desktop preview's demo data (`host/media.py`).
@@ -32,6 +33,7 @@ All of these are rendered from the desktop preview's demo data (`host/media.py`)
 | **Interaction** | The Interaction module: its buttons, PIR motion, light sensor, six LEDs and an IR remote for the TV. |
 | **Calculator** | A four-function calculator. |
 | **VPN** | A WireGuard client: while it is on, all of the board's internet traffic, DNS included, goes through your WireGuard server. A big switch, the connection's state in plain words, its address, last handshake and traffic, and connect at start-up. |
+| **Games** | Three retro 3D games drawn in software, each with a title screen where it plays itself and a best score: **Ember Crypt**, a lantern-lit crawl through ray-cast crypts (gather the shards, keep the ember fed, flare the wisps away); **Starbore**, a flat-shaded neon tunnel flyer (thread the gates, sweep up orbs, pulse a gate away); **Skyglide**, a glider over voxel hills at golden hour (thread the hoops, ride the thermals). About 30 frames a second on the board. Played by touch, or by tilting the board (accelerometer), turning it to look around (gyroscope) and shaking it for each game's action; the Interaction module's buttons and lights join in when it is fitted. Short retro sound effects at Glimdock's sound volume. |
 | **Settings** | Brightness, the home screen's hidden apps, the always-on display, haptics, auto-rotate, the panel's corner radius, time zone, camera options and Web settings (servers and keys from a browser). |
 
 Every app works from the board's own settings; nothing points at a particular
@@ -245,6 +247,7 @@ sends video, and reads its microphone, only while a computer has that stream ope
 | `components/files_app` | NAND and SMB file browser. |
 | `components/tools_app` | Tools (torch, level, compass) and the Calculator, Interaction and Webcam apps on the same screen. |
 | `components/vpn_app` | The VPN: WireGuard ([esphome/wireguard](https://github.com/esphome-libs/wireguard), BSD-3-Clause) with the routing around it, its screen and settings. |
+| `components/games_app` | The Games app: the picker and title screens, and the three games' software renderers (ray caster, flat-shaded polygons, voxel terrain) into a 240 × 240 frame shown doubled. |
 | `components/usb_webcam` | USB webcam mode (UVC camera and UAC2 microphone), taking USB over from ESP-Iris while it runs. |
 | `components/board_mic` | Who has the board's one microphone: Swifty's speech or the webcam's USB microphone. |
 | `components/mosaico_storage` | Mounts Vibe Mode's NAND volume read-write without ever formatting it. |

@@ -53,6 +53,10 @@ struct Snapshot {
 std::mutex lock;
 Snapshot snap;
 std::atomic<bool> visible{false};
+std::atomic<bool> gaming{false};  // a game is up: poll fast, its flashes on the lights
+std::atomic<uint32_t> flash_colour{0};
+std::atomic<int64_t> flash_at{0};
+constexpr int64_t FLASH_US = 450000;
 std::atomic<int64_t> wanted_until{0};  // Swifty asked: look for the board until then
 std::atomic<int> mode{OFF};
 std::atomic<uint32_t> colour{PALETTE[0]};
@@ -69,7 +73,7 @@ Snapshot read_snapshot()
 
 bool searching()
 {
-    return visible || mode != OFF || esp_timer_get_time() < wanted_until;
+    return visible || gaming || mode != OFF || esp_timer_get_time() < wanted_until;
 }
 
 uint32_t hue_rgb(float h)  // h in degrees, full saturation and value
@@ -217,6 +221,10 @@ void worker(void *)
         case COLOUR: std::fill(frame, frame + LEDS, colour.load()); break;
         default: break;
         }
+        if (gaming && now - flash_at.load() < FLASH_US) {  // a game's flash, fading
+            const float left = 1 - float(now - flash_at.load()) / float(FLASH_US);
+            std::fill(frame, frame + LEDS, scale(flash_colour.load(), left * left));
+        }
         if (!shown_valid || memcmp(frame, shown, sizeof(frame))) {
             mosaico_interact_rgb_t rgb[LEDS];
             for (int i = 0; i < LEDS; ++i) rgb[i] = {uint8_t(frame[i] >> 16), uint8_t(frame[i] >> 8), uint8_t(frame[i])};
@@ -227,7 +235,7 @@ void worker(void *)
                 memcpy(snap.leds, frame, sizeof(frame));
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(gaming ? 30 : 100));
     }
 }
 
@@ -481,6 +489,25 @@ void update()
     }
 }
 }  // namespace interact
+
+// ---- Games (any task) ------------------------------------------------------------------------
+extern "C" void tools_board_game(bool on)
+{
+    interact::gaming = on;
+}
+
+extern "C" bool tools_board_buttons(bool *left, bool *right)
+{
+    const interact::Snapshot s = interact::read_snapshot();
+    *left = s.left, *right = s.right;
+    return s.present;
+}
+
+extern "C" void tools_board_flash(uint32_t rgb)
+{
+    interact::flash_colour = rgb;
+    interact::flash_at = esp_timer_get_time();
+}
 
 // ---- Swifty (any task) -----------------------------------------------------------------------
 extern "C" void tools_board_report(char *out, size_t cap)

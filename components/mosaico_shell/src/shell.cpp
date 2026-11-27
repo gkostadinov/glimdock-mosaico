@@ -19,6 +19,7 @@
 #include "boot_stage.h"
 #include "camera_app.h"
 #include "files_app.h"
+#include "games_app.h"
 #include "tools_app.h"
 #include "vpn_app.h"
 #include "usb_webcam.h"
@@ -63,7 +64,8 @@ struct {
     int radius = DEFAULT_RADIUS, brightness = 80;
     ShellApp current = ShellApp::Launcher;
     lv_obj_t *launcher = nullptr, *glim_screen = nullptr, *camera_screen = nullptr, *swifty_screen = nullptr,
-              *files_screen = nullptr, *tools_screen = nullptr, *gallery_screen = nullptr, *vpn_screen = nullptr;
+              *files_screen = nullptr, *tools_screen = nullptr, *gallery_screen = nullptr, *vpn_screen = nullptr,
+              *games_screen = nullptr;
     lv_obj_t *home_screen = nullptr, *home_frame = nullptr;
     lv_indev_read_cb_t touch_read = nullptr;
     esp_lcd_touch_handle_t touch = nullptr;
@@ -446,7 +448,7 @@ void go_launcher_async(void *)
 }
 
 // ESP-Iris RPC 0x4744/30: open an app (payload: 0 launcher, 1 Glimdock, 2 Home,
-// 3 Camera), for development and testing from the Mac.
+// 3 Camera, ... 12 Games), for development and testing from the Mac.
 void open_async(void *app)
 {
     shell_show(ShellApp(uintptr_t(app)));
@@ -472,6 +474,10 @@ esp_err_t open_rpc(const esp_iris_rpc_request_t *request, uint8_t *, size_t, siz
     }
     if (request->payload_size >= 2 && app == ShellApp::Glimdock) {
         glimdock_app_select(request->payload[1]);
+    }
+    // Games: a game's title screen (0 Ember Crypt, 1 Starbore, 2 Skyglide; 255 the picker).
+    if (request->payload_size >= 2 && app == ShellApp::Games) {
+        games_app_select(request->payload[1] == 255 ? -1 : request->payload[1]);
     }
     lv_async_call(open_async, reinterpret_cast<void *>(uintptr_t(app)));
     bsp_display_unlock();
@@ -700,6 +706,7 @@ void shell_show(ShellApp app)
     tools_app_set_active(false);
     gallery_app_set_active(false);
     vpn_app_set_active(false);
+    games_app_set_active(false);
     shell.current = app;
     const int64_t t0 = esp_timer_get_time();
     save_app(app);
@@ -745,6 +752,10 @@ void shell_show(ShellApp app)
         lv_screen_load(shell.home_screen);
         home_app_open(shell.home_frame);
         home_app_set_active(true);
+        break;
+    case ShellApp::Games:
+        lv_screen_load(shell.games_screen);
+        games_app_open(shell.games_screen);
         break;
     default:
         lv_screen_load(shell.launcher);
@@ -793,7 +804,9 @@ std::string app_list()
 {
     std::string names = "\"launcher\"";
     for (int i = 1; i < SHELL_APPS; ++i) {
-        names += ",\"" + std::string(shell_app_name(ShellApp(i))) + "\"";
+        if (launcher_app_key(ShellApp(i))) {  // a value not taken yet has no key
+            names += ",\"" + std::string(shell_app_name(ShellApp(i))) + "\"";
+        }
     }
     return names;
 }
@@ -1429,7 +1442,7 @@ namespace aod {
 bool busy()
 {
     if (webcam_mode::switching != -1 || shell.current == ShellApp::Camera || shell.lit || ai_holding ||
-            reminders_showing()) {
+            reminders_showing() || games_app_playing()) {
         return true;
     }
     swifty_summary_t s;
@@ -1462,6 +1475,9 @@ void pause(bool paused)
         break;
     case ShellApp::Files:
         files_app_set_active(!paused);
+        break;
+    case ShellApp::Games:
+        games_app_set_active(!paused);  // a title screen's game stops playing itself
         break;
     default:
         break;
@@ -1572,9 +1588,9 @@ extern "C" esp_err_t mosaico_shell_start(void)
         agent_tools::register_all();
         reminders_start();
     }
-    // Files and Tools: plain black full-panel screens.
+    // Files, Tools, the Gallery and Games: plain black full-panel screens.
     for (lv_obj_t **scr : {
-                &shell.files_screen, &shell.tools_screen, &shell.gallery_screen, &shell.vpn_screen
+                &shell.files_screen, &shell.tools_screen, &shell.gallery_screen, &shell.vpn_screen, &shell.games_screen
             }) {
         *scr = lv_obj_create(nullptr);
         lv_obj_remove_style_all(*scr);
@@ -1603,6 +1619,24 @@ extern "C" esp_err_t mosaico_shell_start(void)
         vh.exit = [] { shell_show(ShellApp::Launcher); };
         vh.haptic = [] { haptics_pulse(HapticPulse::Tap); };
         vpn_app_init(&vh);
+        // Games: the IMU as a controller, sounds through Glimdock's speaker
+        // worker, the Interaction sub-board's buttons and lights.
+        games_hooks_t gh = {};
+        gh.exit = [] { shell_show(ShellApp::Launcher); };
+        gh.motion = [](games_motion_t * m) {
+            return orientation_motion(m->gravity, m->rate, &m->yaw, &m->gyro);
+        };
+        gh.hold = orientation_game_mode;
+        gh.haptic = [](bool strong) {
+            haptics_pulse(strong ? HapticPulse::Key : HapticPulse::Tap);
+        };
+        gh.sound = [](games_sound_t sound) {
+            glimdock_app_play_game_sound(int(sound));
+        };
+        gh.board_link = tools_board_game;
+        gh.board_buttons = tools_board_buttons;
+        gh.board_flash = tools_board_flash;
+        games_app_init(&gh);
         camera_app_set_brightness_hook(panel_brightness);
         gallery_app_set_exit([] { shell_show(ShellApp::Launcher); });
         // The viewfinder's thumbnail opens the Gallery on the newest photo.
