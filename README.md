@@ -78,6 +78,40 @@ the same way, down to the clock's light, but the clock stays away: the
 webcam's page stays on screen. Wi-Fi stays connected (no modem sleep), so
 Glimdock keeps its data current and the AI key starts listening at once.
 
+### Shortcuts
+
+One-tap tiles on the home screen, like Shortcuts on a phone: "All lights off",
+"Bedroom lights off", or your own. A shortcut is a name, an icon, a colour and
+up to ten steps run in order:
+
+- **Swifty Home**: lights on, off or toggled (all of them, a room or one light),
+  brightness, colour, a scene, a plug, the TV or the speaker. Steps that the
+  hub asks to confirm (the TV's power, Movie) are confirmed by the tap.
+- **Wait** up to a minute, a **TV remote** key from the Interaction module's
+  infrared LED, the Interaction module's **lights**, the **screen's
+  brightness**, **open an app**, or the **flashlight**.
+
+A tap runs it: the tile shows a spinner, then a tick or a cross, and a toast at
+the foot of the screen says how it went or which step failed (with a buzz, two
+for a failure). The first time Swifty Home answers, starters are made from its
+rooms: "All lights off" and lights off for up to three rooms with lights (the
+living room and a bedroom first). Delete the ones you do not want; they do not
+come back.
+
+Make and change them three ways:
+
+- **Web settings**: the Shortcuts section lists them (Run, a dry-run Test,
+  Edit, Delete) and builds steps from your hub's rooms, lights, plugs and
+  scenes.
+- **On the board**: the shortcuts sheet lists them (Run, Test, Delete) and
+  makes the common ones in two taps: lights off, on or toggled for all lights
+  or a room, or a scene.
+- **Swifty**: "make me a shortcut that turns off the bedroom lights" (its tools
+  add, list, run and delete them).
+
+They are kept on the board (up to 24) and survive restarts and updates. Tiles
+move and hide like apps.
+
 ## Hardware
 
 - ESP-Mosaico main board (ESP32-S31, 16 MB flash, PSRAM, 480 × 480 CO5300 AMOLED,

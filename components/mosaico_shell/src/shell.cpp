@@ -48,6 +48,7 @@
 #include "shell_internal.h"
 #include "time_zone.h"
 #include "reminders.h"
+#include "shortcuts.h"
 #include "web_settings.h"
 #include "tusb.h"
 
@@ -1634,12 +1635,41 @@ extern "C" esp_err_t mosaico_shell_start(void)
         ESP_LOGI(TAG, "home screen: %s", text);
     },
     [] { haptics_pulse(HapticPulse::Tap); },
-    nullptr},  // shortcuts: the shortcut editor, once there is one
+    shortcuts_editor_open},
     shell.radius, shell.brightness, haptics_enabled(), orientation_enabled(),
          swifty_app_portrait(168), widgets[0], widgets[1], layout);
     home_app_set_exit_handler([] { shell_show(ShellApp::Launcher); });
     web_settings_set_restart(restart_board);  // a save that applies after a restart
     always_on_start({aod::busy, aod::pause, aod::light, aod::brightness, aod::info, aod::no_clock});
+    {
+        ShortcutHooks sh = {};
+        sh.home_start = [] {
+            if (shell.home_frame) {
+                home_app_start(shell.home_frame);
+            }
+        };
+        sh.open_app = [](const char *app, const char *tool) {
+            static const char *const TOOL_NAMES[] = {"torch", "level", "compass"};
+            for (int i = 0; i < SHELL_APPS; ++i)
+                if (!strcmp(app, shell_app_name(ShellApp(i)))) {
+                    for (int t = 0; t < 3 && i == int(ShellApp::Tools) && tool && *tool; ++t)
+                        if (!strcmp(tool, TOOL_NAMES[t])) {
+                            tools_app_select(t);
+                        }
+                    lv_async_call(open_async, reinterpret_cast<void *>(uintptr_t(i)));
+                    return true;
+                }
+            return false;
+        };
+        sh.brightness = [](int percent) {
+            set_brightness(percent, true);
+        };
+        sh.flashlight = [](bool on) {
+            camera_app_start(shell.camera_screen);
+            return camera_app_torch(on);
+        };
+        shortcuts_start(sh);
+    }
     lv_indev_t *touch = bsp_display_get_input_dev();
     if (touch) {
         shell.touch_read = lv_indev_get_read_cb(touch);

@@ -28,6 +28,10 @@ wall companion for your homelab and home.
 - **Interaction**: the Interaction module's buttons, motion and light sensors,
   LEDs and IR TV remote.
 - **Tools** and **Calculator**: torch, spirit level and compass; a calculator.
+- **Shortcuts**: one-tap tiles on the home screen, like Shortcuts on a phone:
+  "All lights off", "Bedroom lights off" or your own steps (Swifty Home lights,
+  scenes, plugs and TV, waits, TV remote keys, the board's lights). Made in Web
+  settings, on the board or by asking Swifty; starters come from your rooms.
 - **Settings**: brightness, haptics, auto-rotate, the panel's corner radius, time
   zone, camera options and **Web settings**.
 

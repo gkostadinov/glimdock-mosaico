@@ -19,6 +19,13 @@
 #include "home_prefs.h"
 #include "mui.h"
 
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#define HOME_LOG(...) ESP_LOGI("home", __VA_ARGS__)
+#else
+#define HOME_LOG(...) (printf(__VA_ARGS__), printf("\n"))
+#endif
+
 namespace home {
 namespace {
 
@@ -1758,27 +1765,271 @@ extern "C" void home_app_pairing_info(home_pairing_info_t *out)
     strlcpy(out->note, pairing_note.c_str(), sizeof(out->note));
 }
 
-// ---- Swifty's tools ---------------------------------------------------------------------------
+// ---- Swifty's tools and shortcuts -------------------------------------------------------------
 namespace home {
 namespace {
+std::string lower(std::string s)
+{
+    for (char &ch : s) {
+        ch = char(tolower(uint8_t(ch)));
+    }
+    return s;
+}
+
 bool matches(const std::string &name, const char *want)
 {
     if (!want || !*want || name.empty()) {
         return false;
     }
-    std::string a = name, b = want;
-    for (char &c : a) {
-        c = char(tolower(uint8_t(c)));
-    }
-    for (char &c : b) {
-        c = char(tolower(uint8_t(c)));
-    }
+    const std::string a = lower(name), b = lower(want);
     return a == b || a.find(b) != std::string::npos || b.find(a) != std::string::npos;
+}
+
+bool same_name(const std::string &name, const std::string &want)
+{
+    return !name.empty() && lower(name) == lower(want);
 }
 
 void put(char *out, size_t cap, const std::string &text)
 {
     strlcpy(out, text.c_str(), cap);
+}
+
+// One hub action a command turns into.
+struct Planned {
+    std::string action, target, label, name;
+    JsonDocument params;
+};
+
+struct Plan {
+    std::vector<Planned> acts;
+    std::string what;      // "Living room lights off", or why it cannot be done
+    std::string resolved;  // the target as the hub knows it: a room id, a device target, "all" or a scene id
+};
+
+template <typename T> Planned planned(const char *action, const std::string &target, const char *key, T value,
+                                      const std::string &label, const char *name)
+{
+    Planned p{action, target, label, name, JsonDocument()};
+    p.params[key] = value;
+    return p;
+}
+Planned planned(const char *action, const std::string &target, const std::string &label, const char *name)
+{
+    Planned p{action, target, label, name, JsonDocument()};
+    p.params.to<JsonObject>();
+    return p;
+}
+
+const Item *find_item(const std::vector<Item> &list, const std::string &want, bool exact)
+{
+    for (const Item &i : list)
+        if (exact ? (i.target == want || same_name(i.name, want)) : matches(i.name, want.c_str())) {
+            return &i;
+        }
+    return nullptr;
+}
+
+JsonObjectConst find_room(const std::string &want, bool exact)
+{
+    for (JsonObjectConst r : rooms())
+        if (exact ? (want == (r["id"] | "") || same_name(r["name"] | "", want)) : matches(r["name"] | "", want.c_str())) {
+            return r;
+        }
+    return JsonObjectConst();
+}
+
+// What a command (verb, target, value; see home_app.h) sends. False: why not, in plan.what.
+bool plan_command(const std::string &verb, const std::string &target, const std::string &value, Plan &plan)
+{
+    const Derived d = build();
+    const bool all = target.empty() || same_name(target, "all") || same_name(target, "everything") ||
+                     same_name(target, "all lights") || target == "all_bulbs";
+    // Exact names (or ids) first, a room before a light; then near names.
+    JsonObjectConst room;
+    const Item *bulb = nullptr;
+    if (!all) {
+        room = find_room(target, true);
+        if (room.isNull()) {
+            bulb = find_item(d.bulbs, target, true);
+        }
+        if (room.isNull() && !bulb) {
+            room = find_room(target, false);
+        }
+        if (room.isNull() && !bulb) {
+            bulb = find_item(d.bulbs, target, false);
+        }
+    }
+    const int number = atoi(value.c_str());
+    auto fail = [&](const std::string & why) {
+        plan.what = why;
+        return false;
+    };
+    const bool lights_verb = verb == "lights_on" || verb == "lights_off" || verb == "lights_toggle" || verb == "brightness";
+    if (lights_verb) {
+        bool on = verb != "lights_off";
+        if (verb == "lights_toggle") {
+            // Off when any of them is on, else on.
+            bool any_on = false;
+            for (const Item &b : d.bulbs) {
+                const bool in = bulb ? &b == bulb : !room.isNull() ? room_of(b.target) == room : all;
+                any_on |= in && b.known && b.on;
+            }
+            on = !any_on;
+        }
+        const int pct = verb == "brightness" ? std::clamp(number, 0, 100) : 100;
+        const bool dark = !on || pct == 0;
+        // A toggle is told as one ("on or off"): which way it goes depends on the moment.
+        const std::string toggled = verb == "lights_toggle" ? " on or off" : "";
+        if (bulb) {
+            plan.resolved = bulb->target;
+            if (dark) {
+                plan.acts.push_back(planned("light.power", bulb->target, "on", false, bulb->name, "light"));
+            } else if (verb == "brightness") {
+                plan.acts.push_back(planned("light.brightness", bulb->target, "percent", std::max(10, pct), bulb->name, "light"));
+            } else {
+                plan.acts.push_back(planned("light.power", bulb->target, "on", true, bulb->name, "light"));
+            }
+            plan.what = bulb->name + (!toggled.empty() ? toggled : dark ? " off" : verb == "brightness" ? " to " + std::to_string(pct) + "%" : " on");
+            return true;
+        }
+        if (!room.isNull()) {
+            const std::string id = room["id"] | "", name = room["name"] | "";
+            plan.resolved = id;
+            if (dark) {
+                plan.acts.push_back(planned("room.power", id, "on", false, name + " lights", "lights"));
+            } else {
+                plan.acts.push_back(planned("room.brightness", id, "percent", pct, name + " lights", "lights"));
+            }
+            plan.what = name + " lights" + (!toggled.empty() ? toggled : dark ? " off" : verb == "brightness" ? " " + std::to_string(pct) + "%" : " on");
+            return true;
+        }
+        if (all) {
+            plan.resolved = "all";
+            if (dark) {
+                plan.acts.push_back(planned("lights.power", "all_bulbs", "on", false, "lights", "lights"));
+            } else {
+                plan.acts.push_back(planned("lights.brightness", "all_bulbs", "percent", std::max(1, pct), "lights", "lights"));
+            }
+            plan.what = std::string("All lights") + (!toggled.empty() ? toggled : dark ? " off" : verb == "brightness" ? " " + std::to_string(pct) + "%" : " on");
+            return true;
+        }
+        return fail("No room or light called \"" + target + "\".");
+    }
+    if (verb == "color") {
+        static const struct {
+            const char *name;
+            int hue;
+        } NAMES[] = {{"warm", 34}, {"cool", 210}, {"red", 0}, {"orange", 28},
+            {"yellow", 52}, {"green", 120}, {"blue", 225}, {"purple", 270}, {"pink", 320}
+        };
+        int hue = -1;
+        for (const auto &n : NAMES)
+            if (matches(n.name, value.c_str())) {
+                hue = n.hue;
+            }
+        if (hue < 0 && !value.empty() && isdigit(uint8_t(value[0]))) {
+            hue = number % 360;
+        }
+        if (hue < 0) {
+            return fail("Name a colour (warm, cool, red, orange, yellow, green, blue, purple, pink) or a hue.");
+        }
+        for (const Item &b : d.bulbs)
+            if ((bulb && &b == bulb) || (!bulb && !room.isNull() && room_of(b.target) == room) || (!bulb && room.isNull() && all))
+                if (b.color) {
+                    plan.acts.push_back(planned("light.hue", b.target, "hue", hue, b.name, "light"));
+                }
+        if (plan.acts.empty()) {
+            return fail("No colour light matches \"" + target + "\".");
+        }
+        plan.resolved = bulb ? bulb->target : !room.isNull() ? std::string(room["id"] | "") : std::string("all");
+        plan.what = std::to_string(plan.acts.size()) + " light(s) to " + value;
+        return true;
+    }
+    if (verb == "scene") {
+        // The hub's scenes by id or name; Movie is a scene that asks first.
+        const std::string want = value.empty() ? target : value;
+        std::string id, name;
+        JsonArrayConst scenes = hub.scenes ? (*hub.scenes)["scenes"].as<JsonArrayConst>() : JsonArrayConst();
+        for (int exact = 1; exact >= 0 && id.empty(); --exact)
+            for (JsonObjectConst s : scenes) {
+                const std::string sid = s["id"] | "", sname = s["name"] | "";
+                if (exact ? (want == sid || same_name(sname, want)) : matches(sname, want.c_str())) {
+                    id = sid, name = sname.empty() ? sid : sname;
+                    break;
+                }
+            }
+        if (id.empty()) {
+            // Without the list (or on an older hub): the three every hub has.
+            if (matches("movie", want.c_str())) {
+                id = "movie", name = "Movie";
+            } else if (matches("evening", want.c_str())) {
+                id = "evening", name = "Evening";
+            } else if (matches("lights off", want.c_str()) || matches("all off", want.c_str()) || same_name(want, "off")) {
+                id = "all_off", name = "Lights off";
+            }
+        }
+        if (id.empty()) {
+            std::string names;
+            for (JsonObjectConst s : scenes) {
+                names += (names.empty() ? "" : ", ") + std::string(s["name"] | (s["id"] | ""));
+            }
+            return fail("Scenes: " + (names.empty() ? std::string("Movie, Evening, Lights off") : names) + ".");
+        }
+        plan.resolved = id;
+        plan.acts.push_back(id == "movie" ? planned("scene.movie", id, name, "lights") : planned("scene.apply", id, name, "lights"));
+        plan.what = "the " + name + " scene";
+        return true;
+    }
+    if (verb == "volume" || verb == "play" || verb == "pause" || verb == "mute" || verb == "unmute") {
+        if (!d.speaker) {
+            return fail("No speaker.");
+        }
+        const std::string t = d.speaker->target;
+        plan.resolved = t;
+        if (verb == "volume") {
+            plan.acts.push_back(planned("speaker.volume", t, "level", std::clamp(number, 0, 100), "Volume", "speaker"));
+        } else if (verb == "play") {
+            plan.acts.push_back(planned("speaker.play", t, "Play", "speaker"));
+        } else if (verb == "pause") {
+            plan.acts.push_back(planned("speaker.pause", t, "Pause", "speaker"));
+        } else {
+            plan.acts.push_back(planned("speaker.mute", t, "muted", verb == "mute", "Mute", "speaker"));
+        }
+        plan.what = verb == "volume" ? "volume " + std::to_string(std::clamp(number, 0, 100)) : verb;
+        return true;
+    }
+    if (verb == "tv_on" || verb == "tv_off" || verb == "tv_toggle") {
+        if (!d.tv) {
+            return fail("No TV.");
+        }
+        const bool on = verb == "tv_toggle" ? !(d.tv->known && d.tv->on) : verb == "tv_on";
+        plan.resolved = d.tv->target;
+        plan.acts.push_back(planned("tv.power", d.tv->target, "on", on, on ? "Turn on the TV" : "Turn off the TV", "TV"));
+        plan.what = verb == "tv_toggle" ? "TV on or off" : on ? "TV on" : "TV off";
+        return true;
+    }
+    if (verb == "plug_on" || verb == "plug_off" || verb == "plug_toggle") {
+        const Item *p = find_item(d.plugs, target, true);
+        if (!p) {
+            p = find_item(d.plugs, target, false);
+        }
+        if (!p) {
+            return fail("No plug called \"" + target + "\".");
+        }
+        const bool on = verb == "plug_toggle" ? !(p->known && p->on) : verb == "plug_on";
+        plan.resolved = p->target;
+        plan.acts.push_back(planned("plug.power", p->target, "on", on, p->name, "plug"));
+        plan.what = p->name + (verb == "plug_toggle" ? " on or off" : on ? " on" : " off");
+        return true;
+    }
+    return fail("Unknown action \"" + verb + "\".");
+}
+
+// A run ends in one of these phases (web core/actions.js).
+bool failed_phase(const std::string &phase)
+{
+    return phase == "no_response" || phase == "failed" || phase == "refused";
 }
 }  // namespace
 }  // namespace home
@@ -1826,132 +2077,195 @@ extern "C" void home_app_describe(char *out, size_t capacity)
 extern "C" void home_app_command(const char *verb_c, const char *target_c, const char *value_c, char *out, size_t capacity)
 {
     using namespace home;
-    const std::string verb = verb_c ? verb_c : "", target = target_c ? target_c : "", value = value_c ? value_c : "";
     if (!hub.paired()) {
         return put(out, capacity, "Not paired with Swifty Home.");
     }
-    const Derived d = build();
-    const bool all = target.empty() || matches("all", target.c_str()) || matches("everything", target.c_str());
-    JsonObjectConst room;
-    for (JsonObjectConst r : rooms())
-        if (matches(r["name"] | "", target.c_str())) {
-            room = r;
+    Plan plan;
+    if (!plan_command(verb_c ? verb_c : "", target_c ? target_c : "", value_c ? value_c : "", plan)) {
+        return put(out, capacity, plan.what);
+    }
+    for (Planned &p : plan.acts) {
+        act(p.action, p.target, std::move(p.params), p.label, p.name);
+    }
+    put(out, capacity, "Sent: " + plan.what + ". It takes a moment to show.");
+}
+
+bool home_app_ready()
+{
+    using namespace home;
+    return G.built && hub.paired() && hub.devices && hub.rooms && !hub.catalog.empty();
+}
+
+bool home_app_resolve(const char *verb, const char *target, const char *value, std::string &what, std::string &resolved)
+{
+    using namespace home;
+    if (!hub.paired()) {
+        what = "Not paired with Swifty Home.";
+        return false;
+    }
+    Plan plan;
+    const bool ok = plan_command(verb ? verb : "", target ? target : "", value ? value : "", plan);
+    what = plan.what;
+    resolved = plan.resolved;
+    return ok;
+}
+
+bool home_app_run(const char *verb, const char *target, const char *value, bool dry_run, HomeRunDone done, std::string &what)
+{
+    using namespace home;
+    if (!G.built) {
+        what = "Home has not started yet.";
+        return false;
+    }
+    if (!hub.paired()) {
+        what = "Not paired with Swifty Home.";
+        return false;
+    }
+    Plan plan;
+    if (!plan_command(verb ? verb : "", target ? target : "", value ? value : "", plan)) {
+        what = plan.what;
+        return false;
+    }
+    what = plan.what;
+    // Nothing is sent unless every part may be.
+    for (const Planned &p : plan.acts) {
+        const std::string flow = hub.flow(p.action);
+        if (!hub.can(p.action)) {
+            what = "This display may not do that (" + p.action + ").";
+            return false;
         }
-    const Item *bulb = nullptr;
-    for (const Item &b : d.bulbs)
-        if (matches(b.name, target.c_str())) {
-            bulb = &b;
+        if (flow != "direct" && flow != "prepare_confirm") {
+            what = "That needs a passkey (" + p.action + ").";
+            return false;
         }
-    const int number = atoi(value.c_str());
-    auto sent = [&](const std::string & what) {
-        put(out, capacity, "Sent: " + what + ". It takes a moment to show.");
+    }
+    if (dry_run) {
+        std::string sends;
+        for (const Planned &p : plan.acts) {
+            std::string params;
+            serializeJson(p.params, params);
+            sends += (sends.empty() ? "" : "; ") + p.action + " " + p.target + " " + params;
+        }
+        HOME_LOG("dry-run: %s -> %s", plan.what.c_str(), sends.c_str());
+        hub.after(300, [done, sends] {
+            done(true, "dry-run: " + sends);
+        });
+        return true;
+    }
+    // Each part counts once: when the hub reports how it ended. The whole
+    // command fails if any part does, or after 15 s without an answer.
+    struct State {
+        size_t left;
+        bool finished = false, failed = false;
+        std::string error;
+        HomeRunDone done;
     };
-    if (verb == "lights_on" || verb == "lights_off" || verb == "brightness") {
-        const bool on = verb != "lights_off";
-        const int pct = verb == "brightness" ? std::clamp(number, 0, 100) : 100;
-        if (bulb && room.isNull()) {
-            if (!on || pct == 0) {
-                act("light.power", bulb->target, param("on", false), bulb->name, "light");
-            } else if (verb == "brightness") {
-                act("light.brightness", bulb->target, param("percent", std::max(10, pct)), bulb->name, "light");
-            } else {
-                act("light.power", bulb->target, param("on", true), bulb->name, "light");
-            }
-            return sent(bulb->name + (on && pct ? " to " + std::to_string(pct) + "%" : " off"));
+    auto st = std::make_shared<State>();
+    st->left = plan.acts.size();
+    st->done = std::move(done);
+    auto finish_one = [st](bool ok, const std::string & error) {
+        if (st->finished) {
+            return;
         }
-        if (!room.isNull()) {
-            const std::string id = room["id"] | "", name = room["name"] | "";
-            if (!on || pct == 0) {
-                act("room.power", id, param("on", false), name + " lights", "lights");
-            } else {
-                act("room.brightness", id, param("percent", pct), name + " lights", "lights");
-            }
-            return sent(name + " lights " + (on && pct ? std::to_string(pct) + "%" : "off"));
+        if (!ok && !st->failed) {
+            st->failed = true;
+            st->error = error;
         }
-        if (all) {
-            if (!on || pct == 0) {
-                act("lights.power", "all_bulbs", param("on", false), "lights", "lights");
-            } else {
-                act("lights.brightness", "all_bulbs", param("percent", std::max(1, pct)), "lights", "lights");
-            }
-            return sent(std::string("all lights ") + (on && pct ? std::to_string(pct) + "%" : "off"));
+        if (--st->left == 0) {
+            st->finished = true;
+            st->done(!st->failed, st->error);
         }
-        return put(out, capacity, "No room or light called \"" + target + "\".");
-    }
-    if (verb == "color") {
-        static const struct {
-            const char *name;
-            int hue;
-        } NAMES[] = {{"warm", 34}, {"cool", 210}, {"red", 0}, {"orange", 28},
-            {"yellow", 52}, {"green", 120}, {"blue", 225}, {"purple", 270}, {"pink", 320}
+    };
+    hub.after(15000, [st] {
+        if (!st->finished) {
+            st->finished = true;
+            st->done(false, "No answer from Swifty Home.");
+        }
+    });
+    for (Planned &p : plan.acts) {
+        auto once = std::make_shared<bool>(false);
+        const std::string who = p.label, target = p.target, name = p.name;
+        RunHandler handler = [finish_one, once, who, target, name](const DocPtr & run, const std::string & error) {
+            if (*once) {
+                return;
+            }
+            if (!run) {
+                *once = true;
+                lean_settle(target, false);
+                finish_one(false, error.empty() ? "That did not work." : error);
+                return;
+            }
+            const std::string phase = (*run)["phase"] | "";
+            if (phase == "commanded") {
+                return;  // still running
+            }
+            *once = true;
+            const bool failed = failed_phase(phase);
+            lean_settle(target, !failed);
+            finish_one(!failed, failed ? "The " + name + " didn't answer." : std::string());
         };
-        int hue = -1;
-        for (const auto &n : NAMES)
-            if (matches(n.name, value.c_str())) {
-                hue = n.hue;
-            }
-        if (hue < 0 && !value.empty() && isdigit(uint8_t(value[0]))) {
-            hue = number % 360;
-        }
-        if (hue < 0) {
-            return put(out, capacity, "Name a colour (warm, cool, red, orange, yellow, green, blue, purple, pink) or a hue.");
-        }
-        std::vector<const Item *> which;
-        for (const Item &b : d.bulbs)
-            if ((bulb && &b == bulb) || (!bulb && !room.isNull() && room_of(b.target) == room) || (!bulb && room.isNull() && all))
-                if (b.color) {
-                    which.push_back(&b);
+        if (hub.flow(p.action) == "direct") {
+            hub.execute(p.action, p.target, std::move(p.params), handler);
+        } else {
+            // Asks first (the TV's power, Movie): the shortcut was the tap that confirms.
+            hub.prepare(p.action, p.target, std::move(p.params), [handler](const DocPtr & prep, const std::string & error) {
+                if (!prep) {
+                    handler(nullptr, error);
+                } else {
+                    hub.confirm(prep, handler);
                 }
-        if (which.empty()) {
-            return put(out, capacity, "No colour light matches \"" + target + "\".");
+            });
         }
-        for (const Item *b : which) {
-            act("light.hue", b->target, param("hue", hue), b->name, "light");
-        }
-        return sent(std::to_string(which.size()) + " light(s) to " + value);
     }
-    if (verb == "scene") {
-        if (matches("movie", value.c_str())) {
-            act("scene.movie", "movie", no_params(), "Movie", "lights");
-        } else if (matches("evening", value.c_str())) {
-            act("scene.apply", "evening", no_params(), "Evening", "lights");
-        } else if (matches("lights off", value.c_str()) || matches("off", value.c_str())) {
-            act("scene.apply", "all_off", no_params(), "Lights off", "lights");
-        } else {
-            return put(out, capacity, "Scenes: Movie, Evening, Lights off.");
-        }
-        return sent("the " + value + " scene");
-    }
-    if (verb == "volume" || verb == "play" || verb == "pause" || verb == "mute" || verb == "unmute") {
-        if (!d.speaker) {
-            return put(out, capacity, "No speaker.");
-        }
-        const std::string t = d.speaker->target;
-        if (verb == "volume") {
-            act("speaker.volume", t, param("level", std::clamp(number, 0, 100)), "Volume", "speaker");
-        } else if (verb == "play") {
-            act("speaker.play", t, no_params(), "Play", "speaker");
-        } else if (verb == "pause") {
-            act("speaker.pause", t, no_params(), "Pause", "speaker");
-        } else {
-            act("speaker.mute", t, param("muted", verb == "mute"), "Mute", "speaker");
-        }
-        return sent(verb == "volume" ? "volume " + std::to_string(std::clamp(number, 0, 100)) : verb);
-    }
-    if (verb == "tv_on" || verb == "tv_off") {
-        if (!d.tv) {
-            return put(out, capacity, "No TV.");
-        }
-        act("tv.power", d.tv->target, param("on", verb == "tv_on"), verb == "tv_on" ? "Turn on the TV" : "Turn off the TV", "TV");
-        return sent(verb == "tv_on" ? "TV on" : "TV off");
-    }
-    if (verb == "plug_on" || verb == "plug_off") {
-        for (const Item &p : d.plugs)
-            if (matches(p.name, target.c_str())) {
-                act("plug.power", p.target, param("on", verb == "plug_on"), p.name, "plug");
-                return sent(p.name + (verb == "plug_on" ? " on" : " off"));
+    return true;
+}
+
+std::string home_app_choices_json()
+{
+    using namespace home;
+    JsonDocument doc;
+    doc["paired"] = hub.paired();
+    doc["ready"] = home_app_ready();
+    const Derived d = build();
+    JsonArray rs = doc["rooms"].to<JsonArray>();
+    for (JsonObjectConst r : rooms()) {
+        int lights = 0;
+        for (const Item &b : d.bulbs)
+            if (room_of(b.target) == r) {
+                ++lights;
             }
-        return put(out, capacity, "No plug called \"" + target + "\".");
+        JsonObject o = rs.add<JsonObject>();
+        o["id"] = r["id"] | "";
+        o["name"] = r["name"] | "";
+        o["lights"] = lights;
     }
-    put(out, capacity, "Unknown action \"" + verb + "\".");
+    auto items = [&](const char *key, const std::vector<Item> &list) {
+        JsonArray a = doc[key].to<JsonArray>();
+        for (const Item &i : list) {
+            JsonObject o = a.add<JsonObject>();
+            o["target"] = i.target;
+            o["name"] = i.name;
+            if (key[0] == 'l') {
+                o["color"] = i.color;
+            }
+        }
+    };
+    items("lights", d.bulbs);
+    items("plugs", d.plugs);
+    JsonArray ss = doc["scenes"].to<JsonArray>();
+    if (hub.scenes)
+        for (JsonObjectConst s : (*hub.scenes)["scenes"].as<JsonArrayConst>()) {
+            JsonObject o = ss.add<JsonObject>();
+            o["id"] = s["id"] | "";
+            o["name"] = s["name"] | (s["id"] | "");
+        }
+    if (d.tv) {
+        doc["tv"] = d.tv->name;
+    }
+    if (d.speaker) {
+        doc["speaker"] = d.speaker->name;
+    }
+    std::string out;
+    serializeJson(doc, out);
+    return out;
 }

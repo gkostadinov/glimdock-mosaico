@@ -40,10 +40,10 @@ void home_app_summary(home_summary_t *out);
 
 // For Swifty (call with the display lock held): the home as text, and a
 // command. verb: lights_on, lights_off, brightness (value 0-100), color (value
-// a hue 0-359 or a colour name), scene (value Movie, Evening or Lights off),
-// volume (0-100), play, pause, mute, unmute, tv_on, tv_off, plug_on, plug_off.
-// target: a room, light, plug or "all" (may be empty). Writes what was sent or
-// why not.
+// a hue 0-359 or a colour name), scene (value: one of the hub's scenes, by
+// name or id), volume (0-100), play, pause, mute, unmute, tv_on, tv_off,
+// plug_on, plug_off. target: a room, light, plug or "all" (may be empty);
+// exact names win over near ones. Writes what was sent or why not.
 void home_app_describe(char *out, size_t capacity);
 void home_app_command(const char *verb, const char *target, const char *value, char *out, size_t capacity);
 
@@ -62,4 +62,30 @@ void home_app_pairing_info(home_pairing_info_t *out);
 
 #ifdef __cplusplus
 }
+
+#include <functional>
+#include <string>
+
+// For shortcuts (LVGL task, or with the display lock held). Verbs as
+// home_app_command's, plus lights_toggle, plug_toggle and tv_toggle (off when
+// on, else on). A target may also be a room id or a device target.
+//
+// Home is started, paired and has the hub's lists (rooms, devices, actions).
+bool home_app_ready();
+// Checks a command without sending it: what it would do ("Bedroom lights
+// off") or why not, and the target as the hub knows it (a room id, a device
+// target, "all" or a scene id).
+bool home_app_resolve(const char *verb, const char *target, const char *value, std::string &what, std::string &resolved);
+// Sends a command and calls done once, on the LVGL task, when the hub reports
+// how it ended (a failure names the part that did not answer), or after 15 s.
+// Actions that ask first (the TV's power, Movie) are confirmed: the shortcut
+// was the tap. dry_run: resolved and logged, nothing sent. False: it could not
+// start (what says why; done is not called). what: what it does.
+using HomeRunDone = std::function<void(bool ok, const std::string &message)>;
+bool home_app_run(const char *verb, const char *target, const char *value, bool dry_run, HomeRunDone done, std::string &what);
+// Rooms (with their number of lights), lights, plugs, scenes, the TV and the
+// speaker, as JSON for shortcut editors: {"paired","ready","rooms":[{"id",
+// "name","lights"}],"lights":[{"target","name","color"}],"plugs":[...],
+// "scenes":[{"id","name"}],"tv":"name","speaker":"name"}.
+std::string home_app_choices_json();
 #endif

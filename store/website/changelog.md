@@ -9,7 +9,17 @@
   them where you like, onto other pages too (hold at the edge to turn the
   page). The − hides an app; the + (or Settings, Home screen) brings hidden
   apps back. The arrangement is kept across restarts and updates.
-
+- **Shortcuts**: one-tap tiles on the home screen, like Shortcuts on a phone.
+  Starters come from your Swifty Home rooms ("All lights off", "Living room
+  lights off", ...); make your own in Web settings, on the board or by asking
+  Swifty ("make me a shortcut that turns off the bedroom lights"). Steps: Swifty
+  Home lights (on, off, toggle, brightness, colour), scenes, plugs, the TV and
+  speaker, waits, TV remote keys, the Interaction module's lights, the screen's
+  brightness, opening an app and the flashlight. A tap shows a tick or a cross
+  and a toast with how it went or which step failed.
+- **Swifty's home control**: exact names win over near ones (a light called
+  "Bedroom lamp" no longer counts as the bedroom), and any of the hub's scenes
+  can be applied by name.
 - **Webcam microphone**: in webcam mode the board is also a USB microphone
   ("ESP-Mosaico Microphone", 48 kHz), so calls get its voice along with its
   picture. The computer's input level and mute work; Swifty waits while the

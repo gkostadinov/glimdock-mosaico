@@ -55,6 +55,20 @@ button:disabled { opacity: 0.4; cursor: default; }
   background: var(--accent); color: #06200f; font-weight: 600; padding: 10px 18px; border-radius: 999px;
   transition: opacity 0.2s, transform 0.2s; pointer-events: none; }
 #toast.on { opacity: 1; transform: translate(-50%, 0); }
+.sc { border: 1px solid var(--edge); border-radius: 16px; padding: 12px 14px; margin-top: 12px; }
+.sc .top { display: flex; align-items: center; gap: 10px; }
+.sc .name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc .steps { color: var(--text2); font-size: 13px; margin-top: 4px; }
+.sc .tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.sc .tools button { margin-top: 0; }
+.chip { width: 12px; height: 12px; border-radius: 6px; flex: none; }
+.step { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 8px; align-items: end; margin-top: 10px;
+  padding-top: 10px; border-top: 1px solid var(--edge); }
+.step select, .step input { margin-top: 0; }
+.step .ctl { display: flex; gap: 4px; }
+.step .ctl button { padding: 8px 10px; }
+@media (max-width: 560px) { .step { grid-template-columns: 1fr 1fr; } }
+button.danger { color: var(--red); }
 </style>
 </head>
 <body>
@@ -349,12 +363,258 @@ function renderDisplay() {
   return s;
 }
 
+// ---- Shortcuts: one-tap tiles on the board's home screen ----
+let shortcuts = null;  // the board's answer to /api/shortcuts
+const ACCENT_COLOURS = { violet: "#8c73ff", cyan: "#6fe3f7", amber: "#f7ce7e", green: "#8ee6b5" };
+const KINDS = [["home", "Swifty Home"], ["wait", "Wait"], ["ir", "TV remote (infrared)"], ["board_lights", "Interaction board lights"],
+  ["brightness", "Screen brightness"], ["open", "Open an app"], ["flashlight", "Flashlight"]];
+const VERBS = { lights_on: "Lights on", lights_off: "Lights off", lights_toggle: "Lights on or off", brightness: "Brightness",
+  color: "Colour", scene: "Scene", plug_on: "Plug on", plug_off: "Plug off", plug_toggle: "Plug on or off", tv_on: "TV on",
+  tv_off: "TV off", tv_toggle: "TV on or off", volume: "Speaker volume", play: "Play", pause: "Pause", mute: "Mute", unmute: "Unmute" };
+const LIGHT_VERBS = ["lights_on", "lights_off", "lights_toggle", "brightness", "color"];
+const PLUG_VERBS = ["plug_on", "plug_off", "plug_toggle"];
+
+function options(select, pairs, value) {
+  select.replaceChildren(...pairs.map(([v, t]) => el("option", { value: v, textContent: t })));
+  if (value !== undefined && value !== null && value !== "") {
+    if (![...select.options].some(o => o.value === String(value)))
+      select.append(el("option", { value: String(value), textContent: value + " (saved)" }));
+    select.value = String(value);
+  }
+  return select;
+}
+
+function homeTargets(verb) {
+  const h = shortcuts.home || {};
+  if (LIGHT_VERBS.includes(verb))
+    return [["all", "All lights"], ...(h.rooms || []).filter(r => r.lights > 0).map(r => [r.id, r.name + " (room)"]),
+      ...(h.lights || []).map(l => [l.target, l.name])];
+  if (PLUG_VERBS.includes(verb)) return (h.plugs || []).map(p => [p.target, p.name]);
+  return null;
+}
+
+function targetName(target) {
+  const h = shortcuts.home || {};
+  if (target === "all" || !target) return "all lights";
+  const room = (h.rooms || []).find(r => r.id === target);
+  if (room) return room.name;
+  const dev = [...(h.lights || []), ...(h.plugs || [])].find(d => d.target === target);
+  return dev ? dev.name : target;
+}
+
+function stepText(s) {
+  switch (s.do) {
+    case "home": {
+      const verb = VERBS[s.verb] || s.verb;
+      if (s.verb === "scene") return "Scene " + (sceneName(s.value || s.target));
+      const t = homeTargets(s.verb) ? " · " + targetName(s.target) : "";
+      return verb + t + (s.value ? " · " + s.value + (["brightness", "volume"].includes(s.verb) ? "%" : "") : "");
+    }
+    case "wait": return "Wait " + s.seconds + " s";
+    case "ir": return "TV remote: " + s.key;
+    case "board_lights": return "Board lights: " + s.mode + (s.colour ? " " + s.colour : "");
+    case "brightness": return "Screen " + s.percent + "%";
+    case "open": return "Open " + s.app + (s.tool ? " (" + s.tool + ")" : "");
+    case "flashlight": return "Flashlight " + (s.on ? "on" : "off");
+  }
+  return s.do;
+}
+
+function sceneName(id) {
+  const sc = ((shortcuts.home || {}).scenes || []).find(x => x.id === id);
+  return sc ? sc.name : id;
+}
+
+// One step's row: what kind, then its fields.
+function stepRow(step, list, rows, redraw) {
+  const row = el("div", { className: "step" });
+  const kind = options(el("select"), KINDS, step.do);
+  const a = el("select"), b = el("select"), c = el("input");
+  const la = el("label", {}, "", a), lb = el("label", {}, "", b), lc = el("label", {}, "", c);
+  const up = el("button", { type: "button", textContent: "↑", title: "Earlier" });
+  const down = el("button", { type: "button", textContent: "↓", title: "Later" });
+  const del = el("button", { type: "button", className: "danger", textContent: "×", title: "Remove this step" });
+  const lk = el("label", {}, "Step", kind);
+  row.append(lk, la, lb, lc, el("div", { className: "ctl" }, up, down, del));
+  const setLabel = (l, text, show) => { l.firstChild.textContent = text; l.classList.toggle("hidden", !show); };
+  function fill() {
+    const k = kind.value;
+    setLabel(la, "", false); setLabel(lb, "", false); setLabel(lc, "", false);
+    c.type = "text"; c.placeholder = "";
+    if (k === "home") {
+      options(a, Object.entries(VERBS), step.verb || "lights_off");
+      setLabel(la, "Do", true);
+      const verb = a.value, targets = homeTargets(verb);
+      if (verb === "scene") {
+        const scenes = ((shortcuts.home || {}).scenes || []).map(x => [x.id, x.name]);
+        options(b, scenes.length ? scenes : [["evening", "Evening"], ["movie", "Movie"], ["all_off", "Lights off"]], step.value || step.target);
+        setLabel(lb, "Scene", true);
+      } else if (targets) {
+        options(b, targets.length ? targets : [["", "None found"]], step.target || (targets[0] || [""])[0]);
+        setLabel(lb, LIGHT_VERBS.includes(verb) ? "Which lights" : "Which plug", true);
+      }
+      if (["brightness", "volume"].includes(verb)) {
+        c.type = "number"; c.min = 0; c.max = 100; c.value = step.value || 50; setLabel(lc, "Percent", true);
+      } else if (verb === "color") {
+        c.value = step.value || "warm"; c.placeholder = "warm, cool, red, blue … or a hue"; setLabel(lc, "Colour", true);
+      }
+    } else if (k === "wait") {
+      c.type = "number"; c.min = 0.1; c.max = 60; c.step = 0.1; c.value = step.seconds || 2; setLabel(lc, "Seconds", true);
+    } else if (k === "ir") {
+      options(a, (shortcuts.ir_keys || []).map(x => [x, x.replace(/_/g, " ")]), step.key || "power"); setLabel(la, "Key", true);
+    } else if (k === "board_lights") {
+      options(a, (shortcuts.board_modes || []).map(x => [x, x]), step.mode || "rainbow"); setLabel(la, "Mode", true);
+      c.value = step.colour || ""; c.placeholder = "red, warm, #RRGGBB"; setLabel(lc, "Colour (for colour)", true);
+    } else if (k === "brightness") {
+      c.type = "number"; c.min = 5; c.max = 100; c.value = step.percent || 60; setLabel(lc, "Percent", true);
+    } else if (k === "open") {
+      options(a, (shortcuts.apps || []).map(x => [x, x]), step.app || "glimdock"); setLabel(la, "App", true);
+      options(b, [["", "—"], ...(shortcuts.tools || []).map(x => [x, x])], step.tool || ""); setLabel(lb, "Tool", a.value === "tools");
+    } else if (k === "flashlight") {
+      options(a, [["true", "On"], ["false", "Off"]], step.on === false ? "false" : "true"); setLabel(la, "Light", true);
+    }
+  }
+  function read() {
+    const k = kind.value, s = { do: k };
+    if (k === "home") {
+      s.verb = a.value;
+      if (s.verb === "scene") s.value = b.value;
+      else if (homeTargets(s.verb)) s.target = b.value;
+      if (["brightness", "volume", "color"].includes(s.verb)) s.value = c.value.trim();
+    } else if (k === "wait") s.seconds = Number(c.value);
+    else if (k === "ir") s.key = a.value;
+    else if (k === "board_lights") { s.mode = a.value; if (c.value.trim()) s.colour = c.value.trim(); }
+    else if (k === "brightness") s.percent = Number(c.value);
+    else if (k === "open") { s.app = a.value; if (a.value === "tools" && b.value) s.tool = b.value; }
+    else if (k === "flashlight") s.on = a.value === "true";
+    return s;
+  }
+  kind.onchange = () => { step = { do: kind.value }; fill(); };
+  a.onchange = () => { step = read(); if (kind.value === "home") { delete step.target; delete step.value; } fill(); };
+  const entry = { row, read };
+  const move = d => {
+    const i = rows.indexOf(entry), j = i + d;
+    if (j < 0 || j >= rows.length) return;
+    rows.splice(i, 1); rows.splice(j, 0, entry);
+    redraw();
+  };
+  up.onclick = () => move(-1);
+  down.onclick = () => move(1);
+  del.onclick = () => { rows.splice(rows.indexOf(entry), 1); redraw(); };
+  fill();
+  return entry;
+}
+
+// The editor for one shortcut (sc null: a new one).
+function shortcutEditor(sc, done) {
+  const box = el("div", { className: "sc" });
+  const name = field("text", "Name", sc ? sc.name : "", "On the tile, e.g. Bedroom lights off");
+  const icon = options(el("select"), (shortcuts.icons || []).map(x => [x, x]), sc ? sc.icon : "");
+  const accent = options(el("select"), (shortcuts.accents || []).map(x => [x, x]), sc ? sc.accent : "violet");
+  if (!sc) {
+    icon.prepend(el("option", { value: "", textContent: "Chosen for the first step" }));
+    icon.value = "";
+  }
+  box.append(el("div", { className: "grid" }, name.box, el("div", { className: "grid" },
+    el("label", {}, "Icon", icon), el("label", {}, "Colour", accent))));
+  const list = el("div");
+  box.append(list);
+  const rows = [];
+  const redraw = () => list.replaceChildren(...rows.map(r => r.row));
+  const steps = sc ? sc.steps : [{ do: "home", verb: "lights_off", target: "all" }];
+  steps.forEach(s => rows.push(stepRow(s, list, rows, redraw)));
+  redraw();
+  const add = el("button", { type: "button", className: "small", textContent: "Add a step" });
+  add.onclick = () => {
+    if (rows.length >= 10) return toast("Ten steps at most");
+    rows.push(stepRow({ do: "home", verb: "lights_off", target: "all" }, list, rows, redraw)); redraw();
+  };
+  box.append(add);
+  const save = el("button", { type: "button", className: "primary", textContent: sc ? "Save" : "Make it" });
+  const cancel = el("button", { type: "button", textContent: "Cancel" });
+  const msg = el("span", { className: "msg" });
+  box.append(el("div", { className: "actions" }, save, cancel, msg));
+  cancel.onclick = () => done(false);
+  save.onclick = async () => {
+    const out = { name: name.value(), accent: accent.value, steps: rows.map(r => r.read()) };
+    if (icon.value) out.icon = icon.value;
+    if (sc) out.id = sc.id;
+    save.disabled = true;
+    msg.textContent = "Saving…"; msg.className = "msg";
+    try {
+      await api("/api/shortcuts", { op: "save", shortcut: out });
+      toast(sc ? "Saved" : "On the home screen");
+      done(true);
+    } catch (e) { msg.textContent = e.message; msg.className = "msg err"; save.disabled = false; }
+  };
+  return box;
+}
+
+function renderShortcuts() {
+  const s = sectionBox("Shortcuts", "One-tap tiles on the home screen");
+  if (!shortcuts) {
+    s.append(el("p", { className: "note", textContent: "The board did not send its shortcuts." }));
+    return s;
+  }
+  const h = shortcuts.home || {};
+  if (!h.paired) s.append(el("p", { className: "note", textContent: "Pair Swifty Home (above) for home steps." }));
+  else if (!h.ready) s.append(el("p", { className: "note", textContent: "Swifty Home has not answered yet: rooms and lights come when it does." }));
+  if (shortcuts.dry_run) s.append(el("p", { className: "msg err", textContent: "Every run is a dry run (set over ESP-Iris) until the board restarts." }));
+  const holder = el("div");
+  s.append(holder);
+  const all = shortcuts.shortcuts || [];
+  const redrawSection = async changed => {
+    if (changed) shortcuts = await api("/api/shortcuts");
+    s.replaceWith(renderShortcuts());
+  };
+  all.forEach(sc => {
+    const card = el("div", { className: "sc" });
+    const chip = el("span", { className: "chip" });
+    chip.style.background = ACCENT_COLOURS[sc.accent] || "#888";
+    card.append(el("div", { className: "top" }, chip, el("span", { className: "name", textContent: sc.name }),
+      el("span", { className: "note", textContent: sc.icon })));
+    card.append(el("div", { className: "steps", textContent: sc.steps.map(stepText).join(" → ") }));
+    const run = el("button", { type: "button", className: "small", textContent: "Run" });
+    const test = el("button", { type: "button", className: "small", textContent: "Test (dry run)" });
+    const edit = el("button", { type: "button", className: "small", textContent: "Edit" });
+    const del = el("button", { type: "button", className: "small danger", textContent: "Delete" });
+    card.append(el("div", { className: "tools" }, run, test, edit, del));
+    const call = async (body, okText) => {
+      try { await api("/api/shortcuts", body); toast(okText); return true; } catch (e) { toast(e.message); return false; }
+    };
+    run.onclick = () => call({ op: "run", id: sc.id }, "Running on the board");
+    test.onclick = () => call({ op: "run", id: sc.id, dry_run: true }, "Dry run: see the board");
+    edit.onclick = () => card.replaceWith(shortcutEditor(sc, changed => redrawSection(changed)));
+    del.onclick = async () => {
+      if (!confirm("Delete “" + sc.name + "” and its tile?")) return;
+      if (await call({ op: "delete", id: sc.id }, "Deleted")) redrawSection(true);
+    };
+    holder.append(card);
+  });
+  if (!all.length) holder.append(el("p", { className: "note", textContent: "No shortcuts yet." }));
+  else holder.append(el("p", { className: "note", textContent: "Each is a tile on the home screen: move or hide it there, like an app." }));
+  const add = el("button", { type: "button", className: "primary", textContent: "New shortcut", disabled: all.length >= (shortcuts.max || 24) });
+  const starters = el("button", { type: "button", textContent: "Add starters", disabled: !h.ready });
+  starters.title = "All lights off, and lights off for your rooms";
+  add.onclick = () => { holder.prepend(shortcutEditor(null, changed => redrawSection(changed))); add.disabled = true; };
+  starters.onclick = async () => {
+    try {
+      const { added } = await api("/api/shortcuts", { op: "starters" });
+      toast(added ? added + " added" : "They are there already");
+      redrawSection(true);
+    } catch (e) { toast(e.message); }
+  };
+  s.append(el("div", { className: "actions" }, add, starters));
+  return s;
+}
+
 function render() {
-  $("#sections").replaceChildren(...SIMPLE.map(renderSimple), renderHome(), renderFiles(), renderDisplay());
+  $("#sections").replaceChildren(...SIMPLE.map(renderSimple), renderHome(), renderShortcuts(), renderFiles(), renderDisplay());
 }
 
 async function reload() {
   status = await api("/api/status");
+  shortcuts = await api("/api/shortcuts").catch(e => { if (e.message === "sign in") throw e; return null; });
   render();
   show("main");
 }
