@@ -24,6 +24,9 @@ struct LauncherStatus {
     // why it is off (empty: no reason to give).
     bool web_on = false;
     const char *web_url = "", *web_code = "", *web_note = "";
+    // The always-on display's timeout in seconds (one of ALWAYS_ON_CHOICES, 0
+    // off); -1 unknown.
+    int always_on = -1;
 };
 
 struct LauncherHooks {
@@ -36,6 +39,7 @@ struct LauncherHooks {
     void (*time_zone)(int step);                // Settings: the next (+1) or previous (-1) time zone choice
     void (*camera_auto)(bool enabled);          // Settings: the camera's automatic front/rear
     void (*web_settings)(bool on);              // Settings: the web settings server
+    void (*always_on)(int seconds);             // Settings: the always-on display's timeout (0 off)
 };
 
 // portrait: a still of Swifty for its page (may be null).

@@ -28,10 +28,28 @@ All of these are rendered from the desktop preview's demo data (`host/media.py`)
 | **Camera** | Viewfinder, filters and photos for the camera module; finds front or rear by itself, gallery (tap for the photo alone, double-tap or pinch to zoom), NAS sync. |
 | **Files** | The board's NAND storage and SMB shares, with image and text previews. |
 | **Tools** | Torch, spirit level, compass, calculator, the Interaction module (buttons, PIR, light sensor, LEDs, IR remote) and a USB webcam with its microphone (UVC MJPEG 1280 × 720 or 640 × 480, and a UAC2 48 kHz mic; on a Mac, [MosaicoCam](https://github.com/gkostadinov/mosaico-cam) adds filters, upscaling and voice clean-up). |
-| **Settings** | Brightness, haptics, auto-rotate, the panel's corner radius, time zone, camera options and Web settings (servers and keys from a browser). |
+| **Settings** | Brightness, the always-on display, haptics, auto-rotate, the panel's corner radius, time zone, camera options and Web settings (servers and keys from a browser). |
 
 Every app works from the board's own settings; nothing points at a particular
 server until you configure it.
+
+### Always-on display
+
+After a while without a touch or the AI key (2 minutes by default; 30 seconds
+to 10 minutes, or off, in Settings) the app fades to low light for its last few
+seconds (10, or a third of a 30-second wait), as a phone's screen does. Then
+the screen becomes a dim clock on black: the time, the date, the next reminder
+within a day and the battery. The AMOLED lights only those pixels, at a tenth of
+your brightness (2 to 6 %). The clock is drawn once a minute and moves a few
+pixels each time against burn-in, and the app under it stops drawing and
+polling meanwhile (Glimdock's pages, Home's hub, Swifty's bird). A touch, the AI
+key or a due reminder brings back the app as it was, at full light; that touch
+or key press does nothing else.
+
+It stays off in USB webcam mode, in the camera's viewfinder, while Swifty
+listens or answers, and while a reminder or the screen light is up. Wi-Fi stays
+connected (no modem sleep), so Glimdock keeps its data current and the AI key
+starts listening at once.
 
 ## Hardware
 
@@ -87,7 +105,7 @@ control. Glimdock's private chat reader is set up with
 Or from a browser: switch on **Web settings** in Settings and open the address it
 shows on a computer or phone on the same network, with the six-digit code shown
 under it. The page edits the same settings (Swifty, Glimdock, Home pairing, Files
-shares). Saved keys never leave the board; the page shows only whether each is
+shares, the always-on display). Saved keys never leave the board; the page shows only whether each is
 set. It is plain HTTP on your network, so switch it on only while you use it: it
 turns itself off after 10 minutes unused, after 5 wrong codes and at every
 restart.

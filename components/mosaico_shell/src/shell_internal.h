@@ -11,5 +11,9 @@ void shell_screenshot_register();
 enum class ShellApp : uint8_t { Launcher = 0, Glimdock = 1, Home = 2, Camera = 3, Swifty = 4, Files = 5, Tools = 6, Gallery = 7 };
 constexpr int SHELL_APPS = 8;
 
+// The always-on display's timeouts that Settings offers, in seconds (0: never).
+constexpr int ALWAYS_ON_CHOICES[] = {0, 30, 60, 120, 300, 600};
+constexpr int ALWAYS_ON_COUNT = int(sizeof(ALWAYS_ON_CHOICES) / sizeof(ALWAYS_ON_CHOICES[0]));
+
 // Implemented in shell.cpp; safe from the LVGL task only.
 void shell_show(ShellApp app);

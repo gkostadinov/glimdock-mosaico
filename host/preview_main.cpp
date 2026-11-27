@@ -293,6 +293,7 @@ void render_launcher(int radius)
     home.plugs[1].known = true;
     LauncherStatus status{"20:41", "Sun 23 Nov", true, true, "HomeWiFi", "192.0.2.42", "Firmware 1.1.0", 84, true};
     status.camera_auto = true;  // the board's default
+    status.always_on = 120;      // the always-on display's default: 2 minutes
     camera_summary_t camera{};
     swifty_summary_t swifty{};
     swifty.configured = true;
@@ -315,7 +316,7 @@ void render_launcher(int radius)
         record("launcher", 60, 33);
         launcher_ui_show_page(6);
         record("launcher", 24, 33);
-        record("launcher", 40, 33, scroll_to(400, 30));
+        record("launcher", 40, 33, scroll_to(520, 30));  // down to Web settings
         status.web_on = true, status.web_url = "http://192.0.2.42", status.web_code = "482913";
         launcher_ui_update(status, glim, home, camera, swifty, files);
         record("launcher", 50, 33);

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Configure the ESP-Mosaico's apps (Swifty, Glimdock, Home) from one file.
+"""Configure the ESP-Mosaico's apps (Swifty, Glimdock, Home, Files, the display) from one file.
 
   python3 projects/glimdock/tools/mosaico-config.py --config-file FILE
   python3 projects/glimdock/tools/mosaico-config.py --status
   python3 projects/glimdock/tools/mosaico-config.py --template > mosaico.json
 
-FILE is JSON with any of four sections; leave out what you don't want to
+FILE is JSON with any of five sections; leave out what you don't want to
 change. Within a section a missing key keeps the board's value and (for
 Swifty) an empty string clears it.
 
@@ -36,6 +36,9 @@ Swifty) an empty string clears it.
               swifty: Swifty's own folder, the only place it writes (notes,
               lists, schedules), {"share", "path"} (default: the photos
               share, "Swifty").
+  "display":  always_on: seconds without a touch or the AI key before the
+              always-on display (a dim clock on black) comes up: 0 (off),
+              30, 60, 120 (the default), 300 or 600. Applies at once.
 
 The file must be an absolute path, owned by you, with mode 0600. Its contents
 never appear on a command line or in a log: they reach the Mosaico CLI
@@ -66,7 +69,9 @@ SECTIONS = {
     "glimdock": ("endpoint", "token", "setup_token", "ca", "ssid", "password", "private_reader_file"),
     "home": ("hub", "pairing_code"),
     "files": ("shares", "photos", "swifty"),
+    "display": ("always_on",),
 }
+ALWAYS_ON = (0, 30, 60, 120, 300, 600)
 SHARE_KEYS = ("name", "host", "share", "user", "password", "path")
 TEMPLATE = {
     "swifty": {
@@ -110,6 +115,7 @@ TEMPLATE = {
         ],
         "photos": {"share": "Media", "path": "Photos"},
     },
+    "display": {"always_on": 120},
 }
 
 
@@ -185,6 +191,10 @@ def load(path: str) -> dict:
                     or any(not isinstance(v, str) for v in folder.values())
                 ):
                     raise ValueError(f'files.{key}: expected {{"share": "...", "path": "..."}}')
+        elif name == "display":
+            v = section.get("always_on", 0)
+            if isinstance(v, bool) or v not in ALWAYS_ON:
+                raise ValueError(f"display.always_on: seconds, one of {', '.join(map(str, ALWAYS_ON))} (0: off)")
         elif any(not isinstance(v, str) for v in section.values()):
             raise ValueError(f"{name}: values must be strings")
     reader = data.get("glimdock", {}).get("private_reader_file")

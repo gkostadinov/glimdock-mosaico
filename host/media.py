@@ -40,7 +40,8 @@ DEMO_STATUS = """{"swifty":{"llm_url":"http://model-server:8080/v1","llm_model":
 "search_key":true},"glimdock":{"ssid":"HomeWiFi","endpoint":"https://collector.example/api/v1/snapshot",
 "password":true,"token":true,"setup_token":false,"ca":true},"home":{"paired":true,"hub":"http://hub.example:8080",
 "name":"Living room","pairing":""},"files":{"shares":[{"name":"NAS","host":"nas.example","share":"media",
-"user":"mosaico","path":"","password":true}],"photos":{"share":"NAS","path":"Mosaico Photos"}}}"""
+"user":"mosaico","path":"","password":true}],"photos":{"share":"NAS","path":"Mosaico Photos"}},
+"display":{"always_on":120}}"""
 
 
 def font(size, semi=True):

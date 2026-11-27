@@ -12,6 +12,7 @@
 #include "ArduinoJson.h"
 #include "Preferences.h"
 #include "WiFi.h"
+#include "always_on.h"
 #include "app_config.h"
 #include "boot_stage.h"
 #include "camera_app.h"
@@ -62,6 +63,7 @@ struct {
     lv_indev_read_cb_t touch_read = nullptr;
     esp_lcd_touch_handle_t touch = nullptr;
     bool touch_pressed = false;
+    bool lit = false;  // a brightness for a moment holds the panel (screen light, screen flash)
 } shell;
 
 lv_obj_t *app_screen(lv_obj_t **frame, int x, int y, int w, int h, uint32_t bg)
@@ -146,7 +148,9 @@ void save_radius(int radius)
 void set_brightness(int percent, bool save)
 {
     shell.brightness = std::clamp(percent, 5, 100);
-    bsp_display_brightness_set(shell.brightness);
+    if (!always_on_resting()) {  // else it applies when the board wakes
+        bsp_display_brightness_set(shell.brightness);
+    }
     if (!save) {
         return;
     }
@@ -164,6 +168,7 @@ void start_apps();
 // waits for the frame being sent.
 void panel_brightness(int percent)
 {
+    shell.lit = percent >= 0;
     frame_sync_wait_idle(100);
     bsp_display_brightness_set(percent < 0 ? shell.brightness : std::clamp(percent, 5, 100));
 }
@@ -311,6 +316,12 @@ void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
     if (script.pending || script.running) {
         play_touch_script(data);
     }
+    // A touch on the always-on clock wakes the board and goes no further,
+    // until the finger is lifted (it would land on the app as a tap).
+    if (always_on_touch(data->state == LV_INDEV_STATE_PRESSED)) {
+        data->state = LV_INDEV_STATE_RELEASED;
+        mui::note_touches(0, nullptr);
+    }
     const bool pressed = data->state == LV_INDEV_STATE_PRESSED;
     if (pressed != shell.touch_pressed) {
         shell.touch_pressed = pressed;
@@ -366,20 +377,26 @@ void read_battery()
     }
 }
 
-void refresh_launcher(lv_timer_t *)
+// The clocks' time now (Glimdock's clock zone); false until it is set.
+bool clock_now(tm &local)
 {
-    if (shell.current != ShellApp::Launcher) {
-        return;
-    }
     uint8_t zone = 0;
     Preferences p;
-    if (p.begin("display", true)) {  // Glimdock's clock zone
+    if (p.begin("display", true)) {
         zone = p.getUChar("clockZone", 0) % DISPLAY_CLOCK_ZONE_COUNT;
         p.end();
     }
+    return displayClockTm(time(nullptr), zone, local);
+}
+
+void refresh_launcher(lv_timer_t *)
+{
+    if (shell.current != ShellApp::Launcher || always_on_showing()) {
+        return;
+    }
     tm local{};
     char clock[8] = "--:--", date[24] = "", ip[24] = "", ssid[40] = "", versions[48];
-    if (displayClockTm(time(nullptr), zone, local)) {
+    if (clock_now(local)) {
         static const char *const days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
         static const char *const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
@@ -414,7 +431,7 @@ void refresh_launcher(lv_timer_t *)
     WebSettingsInfo web;
     web_settings_info(&web);
     launcher_ui_update({clock, date, connected, configured, ssid, ip, versions, battery.pct, battery.charging, zone_text, camera_app_auto_facing(),
-                        web.running, web.url, web.code, web.note},
+                        web.running, web.url, web.code, web.note, always_on_timeout()},
                        glim, home, camera, swifty, files);
 }
 
@@ -451,9 +468,15 @@ esp_err_t open_rpc(const esp_iris_rpc_request_t *request, uint8_t *, size_t, siz
     return ESP_OK;
 }
 
+// The press that woke the board from the always-on clock: its click does nothing more.
+std::atomic<bool> ai_woke{false};
+
 void ai_key_clicked(void *, void *)
 {
     haptics_pulse(HapticPulse::Key);
+    if (ai_woke.exchange(false)) {
+        return;
+    }
     if (bsp_display_lock(1000)) {
         lv_async_call(go_launcher_async, nullptr);
         bsp_display_unlock();
@@ -576,6 +599,7 @@ void swifty_listen_async(void *on)
 
 void ai_key_double(void *, void *)
 {
+    ai_woke = false;
     haptics_pulse(HapticPulse::Key);
     if (bsp_display_lock(1000)) {
         lv_async_call(open_async, reinterpret_cast<void *>(uintptr_t(ShellApp::Swifty)));
@@ -584,14 +608,23 @@ void ai_key_double(void *, void *)
 }
 
 // The key is down: a click goes to the launcher, a hold talks. Start the
-// speech connection now, so a hold finds it (nearly) ready.
+// speech connection now, so a hold finds it (nearly) ready. On the always-on
+// clock (or dimmed) the press wakes the board at once (a hold still talks).
 void ai_key_down(void *, void *)
 {
+    if (always_on_resting() && bsp_display_lock(1000)) {
+        ai_woke = true;
+        lv_async_call([](void *) {
+            always_on_wake();
+        }, nullptr);
+        bsp_display_unlock();
+    }
     swifty_app_prewarm(true);
 }
 
 void ai_key_hold(void *, void *)
 {
+    ai_woke = false;
     haptics_pulse(HapticPulse::Key);
     ai_holding = true;
     if (bsp_display_lock(1000)) {
@@ -695,6 +728,7 @@ void shell_show(ShellApp app)
     ESP_LOGI(TAG, "showing %s (saving it %lld ms, opening %lld ms)", NAMES[int(app) % SHELL_APPS], (long long)((t1 - t0) / 1000),
              (long long)((esp_timer_get_time() - t1) / 1000));
     swifty_app_prewarm(!camera_screen());  // at once: a press right after leaving the camera finds it ready sooner
+    always_on_wake();  // opened while the always-on clock was up (a tool, an RPC): shown at full light
 }
 
 namespace {
@@ -753,21 +787,27 @@ void open_app(const char *a, char *out, size_t cap)
 
 void device_status(const char *, char *out, size_t cap)
 {
-    char zone[64];
+    char zone[64], clock_mode[40];
     time_zone_text(zone, sizeof(zone));
+    const int idle = always_on_timeout();
+    if (!idle) {
+        strlcpy(clock_mode, "off", sizeof(clock_mode));
+    } else {
+        snprintf(clock_mode, sizeof(clock_mode), "after %d %s unused", idle < 60 ? idle : idle / 60, idle < 60 ? "s" : "min");
+    }
     const bool wifi = WiFi.status() == WL_CONNECTED;
     camera_summary_t cam{};
     camera_app_summary(&cam);
     const int64_t up = esp_timer_get_time() / 1000000;
     snprintf(out, cap,
              "Board: ESP-Mosaico (ESP32-S31), firmware %s.\nBattery: %s%s.\nWi-Fi: %s%s%s (signal %d dBm).\n"
-             "Screen brightness %d%%, haptics %s, auto-rotate %s.\nTime zone: %s.\nShowing: %s.\n"
+             "Screen brightness %d%%, haptics %s, auto-rotate %s, always-on clock %s.\nTime zone: %s.\nShowing: %s.\n"
              "Camera: %d photo(s)%s.\nMemory free: %u KB internal, %u KB PSRAM. Up %d h %d min.",
              esp_app_get_description()->version,
              battery.pct < 0 ? "unknown" : (std::to_string(battery.pct) + "%").c_str(), battery.charging ? ", charging" : "",
              wifi ? WiFi.SSID().c_str() : "not connected", wifi ? ", " : "", wifi ? WiFi.localIP().toString().c_str() : "",
              wifi ? int(WiFi.RSSI()) : 0, shell.brightness, haptics_enabled() ? "on" : "off",
-             orientation_enabled() ? "on" : "off", zone, APP_NAMES[int(shell.current)], cam.photos,
+             orientation_enabled() ? "on" : "off", clock_mode, zone, APP_NAMES[int(shell.current)], cam.photos,
              cam.present ? "" : ", no camera seen yet", unsigned(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
              unsigned(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024), int(up / 3600), int(up / 60 % 60));
 }
@@ -1316,6 +1356,72 @@ void usb_kick(void *)
     vTaskDelete(nullptr);
 }
 
+// The always-on display (always_on.cpp): what keeps the screen up, the app
+// that pauses under the clock, and the panel's light.
+namespace aod {
+bool busy()
+{
+    if (usb_webcam_owns_usb() || webcam_mode::switching != -1 || shell.current == ShellApp::Camera || shell.lit ||
+            ai_holding || reminders_showing()) {
+        return true;
+    }
+    swifty_summary_t s;
+    swifty_app_summary(&s);
+    return s.listening || s.busy;
+}
+
+// Only apps that resume where they were: Tools keeps a torch on and the
+// Gallery its photo (they draw nothing while the clock is up anyway).
+void pause(bool paused)
+{
+    switch (shell.current) {
+    case ShellApp::Launcher:
+        if (!paused) {
+            refresh_launcher(nullptr);  // it skipped its refreshes meanwhile
+        }
+        break;
+    case ShellApp::Glimdock:
+        glimdock_app_set_active(!paused);  // no page rebuilt for new data; the network keeps polling
+        break;
+    case ShellApp::Home:
+        if (paused) {
+            home_app_set_active(false);  // the hub is not polled
+        } else {
+            home_app_open(shell.home_frame);  // and asked again at once
+        }
+        break;
+    case ShellApp::Swifty:
+        swifty_app_set_active(!paused);  // the bird stops rendering
+        break;
+    case ShellApp::Files:
+        files_app_set_active(!paused);
+        break;
+    default:
+        break;
+    }
+}
+
+// The panel's light for the dimmed stage and the clock (-1: the person's).
+void light(int percent)
+{
+    frame_sync_wait_idle(100);  // a panel command on the frames' link
+    bsp_display_brightness_set(percent < 0 ? shell.brightness : std::clamp(percent, 1, 100));
+}
+
+int brightness()
+{
+    return shell.brightness;
+}
+
+void info(AlwaysOnInfo *out)
+{
+    out->timed = clock_now(out->local);
+    read_battery();
+    out->battery = battery.pct;
+    out->charging = battery.charging;
+}
+}  // namespace aod
+
 extern "C" esp_err_t mosaico_shell_start(void)
 {
     xTaskCreatePinnedToCore(usb_kick, "usb_kick", 2560, nullptr, 1, nullptr, 0);  // ends itself: a plain stack
@@ -1387,6 +1493,7 @@ extern "C" esp_err_t mosaico_shell_start(void)
         swifty_app_config_section("glimdock", glimdock_apply, glimdock_status);
         swifty_app_config_section("home", home_apply, home_status);
         swifty_app_config_section("files", files_app_config_apply, files_app_config_status);
+        swifty_app_config_section("display", always_on_config_apply, always_on_config_status);
         agent_tools::register_all();
         reminders_start();
     }
@@ -1469,11 +1576,13 @@ extern "C" esp_err_t mosaico_shell_start(void)
             web_settings_stop("");
         }
         refresh_launcher(nullptr);  // the address and code, or why not, at once
-    }},
+    },
+    always_on_set_timeout},
     shell.radius, shell.brightness, haptics_enabled(), orientation_enabled(),
          swifty_app_portrait(168), widgets[0], widgets[1]);
     home_app_set_exit_handler([] { shell_show(ShellApp::Launcher); });
     web_settings_set_restart(restart_board);  // a save that applies after a restart
+    always_on_start({aod::busy, aod::pause, aod::light, aod::brightness, aod::info});
     lv_indev_t *touch = bsp_display_get_input_dev();
     if (touch) {
         shell.touch_read = lv_indev_get_read_cb(touch);
@@ -1539,21 +1648,30 @@ extern "C" esp_err_t mosaico_shell_start(void)
     esp_iris_rpc_register(0x4744, 48, touch_script_rpc, nullptr);
     // 47: as the AI key, for timing the voice start from anywhere. Payload 1:
     // past its hold time (opens Swifty when needed, talks); 0: released; 2: a
-    // real press (key down, the hold 300 ms later); 3: as a touch (activity).
+    // real press (key down, the hold 300 ms later); 3: as a touch (activity;
+    // wakes the always-on clock); 4: a click (key down, the click 250 ms later).
     esp_iris_rpc_register(0x4744, 47, [](const esp_iris_rpc_request_t *request, uint8_t *, size_t, size_t *size, void *) {
         *size = 0;
         if (request->payload_size < 1) {
             return ESP_ERR_INVALID_ARG;
         }
         const uint8_t what = request->payload[0];
-        if (what == 2) {
+        if (what == 2 || what == 4) {
             ai_key_down(nullptr, nullptr);
+        }
+        if (what == 4) {
+            vTaskDelay(pdMS_TO_TICKS(250));
+            ai_key_clicked(nullptr, nullptr);
+            return ESP_OK;
         }
         if (!bsp_display_lock(1000)) {
             return ESP_ERR_TIMEOUT;
         }
         if (what == 3) {
             lv_display_trigger_activity(nullptr);
+            lv_async_call([](void *) {
+                always_on_wake();
+            }, nullptr);
         } else if (what == 2) {
             lv_timer_t *t = lv_timer_create([](lv_timer_t *) {
                 swifty_listen_async(reinterpret_cast<void *>(1));
@@ -1563,6 +1681,31 @@ extern "C" esp_err_t mosaico_shell_start(void)
             lv_async_call(swifty_listen_async, what ? reinterpret_cast<void *>(1) : nullptr);
         }
         bsp_display_unlock();
+        return ESP_OK;
+    }, nullptr);
+    // 49: the always-on display: its state; payload 01 shows the clock now, 02
+    // dims, 00 wakes.
+    esp_iris_rpc_register(0x4744, 49, [](const esp_iris_rpc_request_t *request, uint8_t *out, size_t cap, size_t *size, void *) {
+        *size = 0;
+        if (!bsp_display_lock(1000)) {
+            return ESP_ERR_TIMEOUT;
+        }
+        if (request->payload_size >= 1 && request->payload[0] == 2) {
+            lv_async_call([](void *) {
+                always_on_dim();
+            }, nullptr);
+        } else if (request->payload_size >= 1 && request->payload[0]) {
+            lv_async_call([](void *) {
+                always_on_show();
+            }, nullptr);
+        } else if (request->payload_size >= 1) {
+            lv_async_call([](void *) {
+                always_on_wake();
+            }, nullptr);
+        }
+        always_on_report(reinterpret_cast<char *>(out), cap);
+        bsp_display_unlock();
+        *size = strnlen(reinterpret_cast<char *>(out), cap);
         return ESP_OK;
     }, nullptr);
     // 45: the LVGL loop and CPU per task during the last webcam session.

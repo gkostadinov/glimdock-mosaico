@@ -328,8 +328,29 @@ function renderFiles() {
   return s;
 }
 
+// The always-on display: a dim clock after this long without use.
+const ALWAYS_ON = [[0, "Off"], [30, "After 30 seconds"], [60, "After 1 minute"], [120, "After 2 minutes"],
+  [300, "After 5 minutes"], [600, "After 10 minutes"]];
+
+function renderDisplay() {
+  const d = status.display || {};
+  const saved = d.always_on ?? 0;
+  const s = sectionBox("Display", "Applies at once");
+  const select = el("select");
+  for (const [v, text] of ALWAYS_ON) select.append(el("option", { value: String(v), textContent: text }));
+  select.value = String(saved);
+  s.append(el("label", {}, "Always-on display", select));
+  s.append(el("p", { className: "note",
+    textContent: "A dim clock on black once the board is unused this long. A touch, the AI key or a reminder brings back the app." }));
+  const { button } = actions(s, "Save", async say => {
+    if (await saveSection("display", { always_on: Number(select.value) }, say)) await reload();
+  });
+  select.onchange = () => { button.disabled = Number(select.value) === saved; };
+  return s;
+}
+
 function render() {
-  $("#sections").replaceChildren(...SIMPLE.map(renderSimple), renderHome(), renderFiles());
+  $("#sections").replaceChildren(...SIMPLE.map(renderSimple), renderHome(), renderFiles(), renderDisplay());
 }
 
 async function reload() {

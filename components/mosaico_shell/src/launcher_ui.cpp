@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <algorithm>
 #include <string>
 
 #include "mui.h"
@@ -60,7 +61,8 @@ struct {
     // Settings sheet
     lv_obj_t *s_bright = nullptr, *s_bright_bar = nullptr, *s_radius = nullptr, *s_wifi_dot = nullptr,
               *s_ssid = nullptr, *s_detail = nullptr, *s_wifi_state = nullptr, *s_versions = nullptr, *s_zone = nullptr,
-               *s_cam_auto = nullptr, *s_web = nullptr, *s_web_hint = nullptr, *s_web_url = nullptr, *s_web_code = nullptr;
+               *s_cam_auto = nullptr, *s_web = nullptr, *s_web_hint = nullptr, *s_web_url = nullptr, *s_web_code = nullptr,
+                *s_aod = nullptr;
     // Corner calibration
     lv_obj_t *calibration = nullptr, *guide = nullptr, *cal_value = nullptr;
 } ui;
@@ -528,7 +530,20 @@ void build_settings(int brightness, bool haptics, bool auto_rotate)
     lv_obj_add_event_cb(slider, bright_cb, LV_EVENT_VALUE_CHANGED, nullptr);
     lv_obj_add_event_cb(slider, bright_cb, LV_EVENT_RELEASED, nullptr);
 
-    lv_obj_t *hp = glass(c, 10, 192, 224, 112, 26, GREEN);
+    // Always-on display: a dim clock after this long without a touch or the AI key.
+    lv_obj_t *aod = glass(c, 10, 192, 460, 124, 28, GREEN);
+    label(aod, "Always-on display", 24, 16, 300, TEXT, 18, true);
+    label(aod, "A dim clock on black after this long unused", 24, 42, 412, TEXT3, 14);
+    static const char *const AOD_LABELS[ALWAYS_ON_COUNT] = {"Off", "30 s", "1 min", "2 min", "5 min", "10 min"};
+    ui.s_aod = capsule(aod, 16, 70, 428, 40, AOD_LABELS, ALWAYS_ON_COUNT, -1, GREEN, 14);
+    lv_obj_add_event_cb(ui.s_aod, [](lv_event_t *e) {
+        const int i = capsule_selected(lv_event_get_current_target_obj(e));
+        if (ui.hooks.always_on && i >= 0 && i < ALWAYS_ON_COUNT) {
+            ui.hooks.always_on(ALWAYS_ON_CHOICES[i]);
+        }
+    }, LV_EVENT_VALUE_CHANGED, nullptr);
+
+    lv_obj_t *hp = glass(c, 10, 328, 224, 112, 26, GREEN);
     // Two switches: touch ticks, and turning the UI with the board.
     label(hp, "Haptics", 22, 19, 120, TEXT, 17, true);
     lv_obj_t *t = toggle(hp, 146, 14, haptics, GREEN);
@@ -537,7 +552,7 @@ void build_settings(int brightness, bool haptics, bool auto_rotate)
     t = toggle(hp, 146, 62, auto_rotate, GREEN);
     lv_obj_add_event_cb(t, rotate_cb, LV_EVENT_VALUE_CHANGED, nullptr);
 
-    lv_obj_t *cr = glass(c, 246, 192, 224, 112, 26, GREEN);
+    lv_obj_t *cr = glass(c, 246, 328, 224, 112, 26, GREEN);
     label(cr, "Corners", 22, 16, 170, TEXT, 18, true);
     label(cr, "Glass radius", 22, 42, 170, TEXT3, 14);
     lv_obj_t *minus = field_button(cr, 20, 68, 48, 34, "\xE2\x88\x92", 20);
@@ -547,7 +562,7 @@ void build_settings(int brightness, bool haptics, bool auto_rotate)
     lv_obj_t *plus = field_button(cr, 156, 68, 48, 34, "+", 20);
     on(plus, corners_step_cb, LV_EVENT_CLICKED, reinterpret_cast<void *>(intptr_t(4)));
 
-    lv_obj_t *wf = glass(c, 10, 316, 460, 112, 28, GREEN);
+    lv_obj_t *wf = glass(c, 10, 452, 460, 112, 28, GREEN);
     ui.s_wifi_dot = dot(wf, 26, 24, 10, OFF, false);
     ui.s_ssid = label(wf, "Wi-Fi", 46, 16, 230, TEXT, 18, true);
     ui.s_wifi_state = label(wf, "", 286, 18, 150, TEXT2, 15, true, LV_TEXT_ALIGN_RIGHT);
@@ -555,7 +570,7 @@ void build_settings(int brightness, bool haptics, bool auto_rotate)
     ui.s_versions = label(wf, "", 26, 74, 380, TEXT3, 14);
 
     // Time zone: automatic (from the network's location) or one of the clock's zones.
-    lv_obj_t *tz = glass(c, 10, 440, 460, 112, 28, GREEN);
+    lv_obj_t *tz = glass(c, 10, 576, 460, 112, 28, GREEN);
     label(tz, "Time zone", 24, 16, 200, TEXT, 18, true);
     label(tz, "Clocks in every app", 24, 42, 220, TEXT3, 14);
     ui.s_zone = label(tz, "", 24, 72, 250, TEXT2, 16, true);
@@ -574,7 +589,7 @@ void build_settings(int brightness, bool haptics, bool auto_rotate)
         }
     }, LV_EVENT_CLICKED, nullptr);
     // Camera: front/rear found automatically, or only by its button.
-    lv_obj_t *cam = glass(c, 10, 564, 460, 96, 28, GREEN);
+    lv_obj_t *cam = glass(c, 10, 700, 460, 96, 28, GREEN);
     label(cam, "Camera", 24, 16, 260, TEXT, 18, true);
     label(cam, "Find front or rear automatically", 24, 44, 300, TEXT3, 14);
     label(cam, "Off: only the camera's button switches", 24, 64, 300, TEXT3, 14);
@@ -585,7 +600,7 @@ void build_settings(int brightness, bool haptics, bool auto_rotate)
         }
     }, LV_EVENT_VALUE_CHANGED, nullptr);
     // Web settings: URLs and keys from a browser, only while switched on.
-    lv_obj_t *web = glass(c, 10, 672, 460, 132, 28, GREEN);
+    lv_obj_t *web = glass(c, 10, 808, 460, 132, 28, GREEN);
     label(web, "Web settings", 24, 16, 260, TEXT, 18, true);
     ui.s_web_hint = label(web, "", 24, 44, 320, TEXT3, 14);
     ui.s_web_url = label(web, "", 24, 68, 412, TEXT, 18, true);
@@ -596,7 +611,7 @@ void build_settings(int brightness, bool haptics, bool auto_rotate)
             ui.hooks.web_settings(toggle_on(lv_event_get_current_target_obj(e)));
         }
     }, LV_EVENT_VALUE_CHANGED, nullptr);
-    box(c, 0, 804, 1, 60);  // room to scroll the last card clear of the rounded bottom
+    box(c, 0, 940, 1, 60);  // room to scroll the last card clear of the rounded bottom
     lv_obj_add_flag(c, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(c, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(c, LV_SCROLLBAR_MODE_OFF);
@@ -615,6 +630,14 @@ void update_settings(const LauncherStatus &s)
     set_text(ui.s_zone, s.zone ? s.zone : "UTC");
     if (ui.s_cam_auto && toggle_on(ui.s_cam_auto) != s.camera_auto) {
         toggle_set(ui.s_cam_auto, s.camera_auto, false);
+    }
+    if (ui.s_aod && s.always_on >= 0) {
+        const int *end = ALWAYS_ON_CHOICES + ALWAYS_ON_COUNT;
+        const int i = int(std::find(ALWAYS_ON_CHOICES, end, s.always_on) - ALWAYS_ON_CHOICES);
+        const int shown = capsule_selected(ui.s_aod);
+        if (i < ALWAYS_ON_COUNT && shown != i) {
+            capsule_select(ui.s_aod, i, shown >= 0);
+        }
     }
     if (ui.s_web) {
         if (toggle_on(ui.s_web) != s.web_on) {

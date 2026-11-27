@@ -6,6 +6,12 @@
   ("ESP-Mosaico Microphone", 48 kHz), so calls get its voice along with its
   picture. The computer's input level and mute work; Swifty waits while the
   computer uses it.
+- **Always-on display**: after a while unused (2 minutes by default; 30 seconds
+  to 10 minutes or off in Settings and Web settings) the app fades to low light
+  for a few seconds, then the screen becomes a dim clock on black with the date,
+  the next reminder and the battery. The clock is drawn once a minute, a few
+  pixels away each time, while the app under it rests. A touch, the AI key or a
+  reminder brings the app back as it was.
 
 ## 1.1.0
 

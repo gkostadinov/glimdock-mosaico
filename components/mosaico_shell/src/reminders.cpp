@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "ArduinoJson.h"
+#include "always_on.h"
 #include "esp_log.h"
 #include "glimdock_app.h"
 #include "haptics.h"
@@ -188,6 +189,7 @@ void snooze_cb(lv_event_t *)
 
 void show(const Reminder &r)
 {
+    always_on_wake();  // the board's clock gives way, at full light
     R.shown = r;
     lv_obj_t *back = box(lv_layer_top(), 0, 0, PANEL, PANEL);  // dims the app and takes its taps
     lv_obj_set_style_bg_color(back, lv_color_black(), 0);
@@ -385,6 +387,25 @@ void delete_tool(const char *args, char *out, size_t cap)
     dirty = true;
 }
 }  // namespace
+
+bool reminders_showing()
+{
+    return R.card != nullptr;
+}
+
+bool reminders_next(time_t *at, char *text, size_t capacity)
+{
+    std::lock_guard<std::mutex> g(lock);
+    auto it = std::min_element(list.begin(), list.end(), [](const Reminder & a, const Reminder & b) {
+        return a.at < b.at;
+    });
+    if (it == list.end()) {
+        return false;
+    }
+    *at = it->at;
+    strlcpy(text, it->text.c_str(), capacity);
+    return true;
+}
 
 void reminders_start()
 {
