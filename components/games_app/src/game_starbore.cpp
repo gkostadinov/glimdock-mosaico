@@ -427,6 +427,13 @@ void Starbore::render(uint16_t *fb)
     prof_.mark(0);
     // objects by depth, drawn inside their segment
     size_t gi = gates_.size(), oi = orbs_.size();
+    int dust_order[36], di = 36;  // the dust by depth, nearest last
+    for (int i = 0; i < 36; ++i) {
+        dust_order[i] = i;
+    }
+    std::sort(dust_order, dust_order + 36, [this](int a, int b) {
+        return dust_[a].z < dust_[b].z;
+    });
     const uint16_t neon_edge = hex(0x2EE8FF), neon_ring = hex(0xFF3FD0);
     for (int i = RINGS - 2; i >= 0; --i) {
         const float z = float(k0 + i) * SEG;
@@ -460,39 +467,59 @@ void Starbore::render(uint16_t *fb)
             }
         }
         prof_.mark(2);
-        // what lies in this segment
+        // what lies in this segment, far to near: gates, orbs and dust drawn in
+        // one order, so nothing behind a gate shows through it
+        struct Thing {
+            float z;
+            int kind, index;  // 0 gate, 1 orb, 2 dust
+        } things[64];
+        int n = 0;
         while (gi > 0 && gates_[gi - 1].z >= z) {
             --gi;
-            if (!gates_[gi].broken && gates_[gi].z < z + SEG * 2 && gates_[gi].z > zc + NEAR) {
-                draw_gate(fb, gates_[gi]);
+            if (n < 64 && !gates_[gi].broken && gates_[gi].z < z + SEG * 2 && gates_[gi].z > zc + NEAR) {
+                things[n++] = {gates_[gi].z, 0, int(gi)};
             }
         }
         while (oi > 0 && orbs_[oi - 1].z >= z) {
             --oi;
-            const Orb &o = orbs_[oi];
-            if (!o.alive) {
-                continue;
+            if (n < 64 && orbs_[oi].alive) {
+                things[n++] = {orbs_[oi].z, 1, int(oi)};
             }
-            const V3 c = to_cam(center(o.z) + V3{o.x, o.y, 0});
-            if (c.z > NEAR + 0.3f) {
-                const P2 p = project(c);
-                const float rr = std::min(9.0f, F * 0.3f / c.z);
-                const int f = 32 - fog_of(c.z) * 3 / 4;
-                const float pulse = 0.85f + 0.15f * sinf(time_ * 9 + o.z);
-                glow(fb, p.x, p.y, rr * 2.4f * pulse, scale565(rgb(60, 200, 120), f), 0);
-                glow(fb, p.x, p.y, rr, scale565(rgb(200, 255, 210), f), 0.5f);
+        }
+        while (di > 0 && dust_[dust_order[di - 1]].z >= z) {
+            --di;
+            if (n < 64) {
+                things[n++] = {dust_[dust_order[di]].z, 2, dust_order[di]};
+            }
+        }
+        std::sort(things, things + n, [](const Thing & a, const Thing & b) {
+            return a.z > b.z;
+        });
+        for (int t = 0; t < n; ++t) {
+            if (things[t].kind == 0) {
+                draw_gate(fb, gates_[size_t(things[t].index)]);
+            } else if (things[t].kind == 1) {
+                const Orb &o = orbs_[size_t(things[t].index)];
+                const V3 c = to_cam(center(o.z) + V3{o.x, o.y, 0});
+                if (c.z > NEAR + 0.3f) {
+                    const P2 p = project(c);
+                    const float rr = std::min(9.0f, F * 0.3f / c.z);
+                    const int f = 32 - fog_of(c.z) * 3 / 4;
+                    const float pulse = 0.85f + 0.15f * sinf(time_ * 9 + o.z);
+                    glow(fb, p.x, p.y, rr * 2.4f * pulse, scale565(rgb(60, 200, 120), f), 0);
+                    glow(fb, p.x, p.y, rr, scale565(rgb(200, 255, 210), f), 0.5f);
+                }
+            } else {  // a dust streak, for speed
+                const V3 &d = dust_[things[t].index];
+                const V3 base = center(d.z) + V3{d.x, d.y, 0};
+                const V3 a = to_cam(base), b = to_cam(base + V3{0, 0, 0.25f + speed_ * 0.03f});
+                if (a.z > NEAR && b.z > NEAR) {
+                    edge(fb, a, b, mix565(hex(0xB8C8FF), hex(FOG), fog_of(a.z)));
+                }
             }
         }
     }
     prof_.mark(3);
-    // dust streaks for speed
-    for (const V3 &d : dust_) {
-        const V3 base = center(d.z) + V3{d.x, d.y, 0};
-        const V3 a = to_cam(base), b = to_cam(base + V3{0, 0, 0.25f + speed_ * 0.03f});
-        if (a.z > NEAR && b.z > NEAR) {
-            edge(fb, a, b, mix565(hex(0xB8C8FF), hex(FOG), fog_of(a.z)));
-        }
-    }
     if (burst_ > 0) {  // the shattered gate's flash
         const V3 c = to_cam(center(burst_z_));
         if (c.z > NEAR) {

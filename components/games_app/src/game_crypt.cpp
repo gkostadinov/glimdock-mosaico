@@ -693,60 +693,95 @@ void Crypt::draw_sprite(uint16_t *fb, float sx, float sy, int kind, float size, 
         return;
     }
     const float cx = float(W) / 2 * (1 + tx / tz), scale = float(H) / tz;
-    const float s = scale * size, cy = float(horizon) + scale * lift;
+    const float cy = float(horizon) + scale * lift;
+    // Right up close a sprite would cover the whole view, a pixel at a time:
+    // it stops growing (a wisp that reached you was the slow frame).
+    const float s = std::min(scale * size, 120.0f);
     const int x1 = std::max(0, int(cx - s)), x2 = std::min(W - 1, int(cx + s));
     const int y1 = std::max(0, int(cy - s)), y2 = std::min(H - 1, int(cy + s));
+    if (x1 > x2 || y1 > y2) {
+        return;
+    }
     const float d = hypotf(rx, ry);
     const int lit = light_level(d, reach);
     const float fade = clampf(1.25f - d / 16, 0.3f, 1), near = clampf((tz - 0.25f) * 2, 0, 1);
     const float inv_s = 1.0f / s;
+    float vs[H];  // each row's v, once
+    for (int y = y1; y <= y2; ++y) {
+        vs[y] = (float(y) + 0.5f - cy) * inv_s;
+    }
+    // everything that is the same for the whole sprite, worked out once
+    if (kind == 0) {  // a shard: a glowing crystal, two-faced, with a halo
+        const uint16_t dark[2] = {shade(0x9FF8FF, 0.65f * fade), shade(0x3AB4DC, 0.65f * fade)};
+        const uint16_t bright[2] = {shade(0x9FF8FF, 1.15f * fade), shade(0x3AB4DC, 1.15f * fade)};
+        const uint16_t white = hex(0xFFFFFF), halo = rgb(40, 150, 190);
+        for (int x = x1; x <= x2; ++x) {
+            if (tz >= zbuf_[x]) {
+                continue;
+            }
+            const float u = (float(x) + 0.5f - cx) * inv_s, au = fabsf(u) * 2.1f, u2 = u * u;
+            const int face = u < 0 ? 0 : 1;
+            uint16_t *col = fb + x * H;
+            for (int y = y1; y <= y2; ++y) {
+                const float v = vs[y], f = au + fabsf(v) * 1.15f;
+                if (f < 1) {
+                    const float t = 1 - f;
+                    const uint16_t c = mix565(dark[face], bright[face], int(t * 32));
+                    col[y] = mix565(c, white, v < -0.35f ? 11 : int(t * t * 12.8f));
+                } else {
+                    const float g = 1 - (u2 + v * v);
+                    if (g > 0) {
+                        col[y] = add565(col[y], scale565(halo, int(g * g * 20 * fade)));
+                    }
+                }
+            }
+        }
+        return;
+    }
+    if (kind == 1) {  // oil: an amber flask on the floor, lit by the lantern
+        const float k = 0.3f + 0.7f * float(lit) / float(LEVELS - 1);
+        const uint16_t body = shade(0xF0A030, k), neck = shade(0x6A4A30, k), shine = shade(0xF0A030, k + 0.45f, 0xFFFFE0, 0.45f);
+        for (int x = x1; x <= x2; ++x) {
+            if (tz >= zbuf_[x]) {
+                continue;
+            }
+            const float u = (float(x) + 0.5f - cx) * inv_s, u2 = u * u;
+            uint16_t *col = fb + x * H;
+            for (int y = y1; y <= y2; ++y) {
+                const float v = vs[y], b = u2 + (v - 0.25f) * (v - 0.25f) * 1.2f;
+                if (b < 0.42f) {
+                    col[y] = (u < -0.15f && v > 0 && v < 0.4f) ? shine : body;
+                } else if (fabsf(u) < 0.22f && v > -0.85f && v < -0.2f) {
+                    col[y] = neck;
+                }
+            }
+        }
+        return;
+    }
+    // a wisp: pale light that drifts; blue and faint when chased off
+    const float flick = (0.8f + 0.2f * sinf(time_ * 17 + phase * 5)) * near;
+    const float amp = 26 * flick * fade;
+    if (amp < 0.5f) {
+        return;
+    }
+    const uint16_t c = kind == 3 ? rgb(40, 80, 160) : rgb(150, 90, 230);
+    const uint16_t core = scale565(rgb(255, 235, 255), int(26 * flick));
     for (int x = x1; x <= x2; ++x) {
         if (tz >= zbuf_[x]) {
             continue;
         }
-        const float u = (float(x) + 0.5f - cx) * inv_s;
+        const float u = (float(x) + 0.5f - cx) * inv_s, u2 = u * u;
+        uint16_t *col = fb + x * H;
         for (int y = y1; y <= y2; ++y) {
-            const float v = (float(y) + 0.5f - cy) * inv_s;
-            uint16_t &p = fb[x * H + y];
-            switch (kind) {
-            case 0: {  // a shard: a glowing crystal, two-faced, with a halo
-                const float f = fabsf(u) * 2.1f + fabsf(v) * 1.15f;
-                if (f < 1) {
-                    const float t = 1 - f;
-                    const uint32_t face = u < 0 ? 0x9FF8FF : 0x3AB4DC;
-                    p = shade(face, (0.65f + 0.5f * t) * fade, 0xFFFFFF, v < -0.35f ? 0.35f : t * t * 0.4f);
-                } else {
-                    const float g = 1 - (u * u + v * v);
-                    if (g > 0) {
-                        p = add565(p, scale565(rgb(40, 150, 190), int(g * g * 20 * fade)));
-                    }
-                }
-                break;
+            const float vv = vs[y] * 1.15f, r2 = u2 + vv * vv, g = 1 - r2;
+            if (g <= 0) {
+                continue;
             }
-            case 1: {  // oil: an amber flask on the floor, lit by the lantern
-                const float body = u * u + (v - 0.25f) * (v - 0.25f) * 1.2f;
-                const bool neck = fabsf(u) < 0.22f && v > -0.85f && v < -0.2f;
-                if (body < 0.42f || neck) {
-                    const float k = (0.3f + 0.7f * float(lit) / float(LEVELS - 1));
-                    const float hi = (u < -0.15f && v > 0 && v < 0.4f) ? 0.45f : 0;
-                    p = shade(neck && body >= 0.42f ? 0x6A4A30 : 0xF0A030, k + hi, 0xFFFFE0, hi);
-                }
-                break;
+            uint16_t p = add565(col[y], scale565(c, int(g * g * g * amp)));
+            if (r2 < 0.025f) {
+                p = add565(p, core);
             }
-            default: {  // a wisp: pale light that drifts; blue and faint when chased off
-                const float flick = (0.8f + 0.2f * sinf(time_ * 17 + phase * 5)) * near;
-                const float r2 = u * u + (v * 1.15f) * (v * 1.15f);
-                const float g = 1 - r2;
-                if (g > 0) {
-                    const uint16_t c = kind == 3 ? rgb(40, 80, 160) : rgb(150, 90, 230);
-                    p = add565(p, scale565(c, int(g * g * g * 26 * flick * fade)));
-                    if (r2 < 0.025f) {
-                        p = add565(p, scale565(rgb(255, 235, 255), int(26 * flick)));
-                    }
-                }
-                break;
-            }
-            }
+            col[y] = p;
         }
     }
 }

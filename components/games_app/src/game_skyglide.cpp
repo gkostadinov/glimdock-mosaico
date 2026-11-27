@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <initializer_list>
 #include <vector>
 
 #include "games_common.h"
@@ -17,7 +18,7 @@ constexpr int MAP = 256, MASK = MAP - 1, BANDS = 8, LIGHTS = 32, FOGS = 16;
 constexpr float HS = 0.3f;              // world height per height step
 constexpr float FAR = 270, FOCAL = 140; // view distance; ~81 degrees across
 constexpr int WATER = 52;               // height steps
-constexpr float RING_R = 6.5f, G = 9.8f;
+constexpr float RING_R = 7.5f, G = 9.8f;
 constexpr int SKY_ROWS = 151;  // the sky's gradient, horizon to zenith
 constexpr uint32_t ZENITH = 0x24306E, HAZE = 0xF2C493, SUN = 0xFFE6B0;
 
@@ -62,13 +63,12 @@ public:
         dt = std::min(dt, 0.1f);
         clock_ += dt;
         const Input in = demo_ ? autopilot() : input;
-        // bank and pitch follow the stick; a stall drops the nose
-        const float kb = 1 - expf(-dt * 3), kp = 1 - expf(-dt * 2.5f);
-        bank_ += (in.x * 0.78f - bank_) * kb;
-        float want_pitch = in.y * 0.42f;  // up: the nose rises
-        if (speed_ < 11) {
-            want_pitch = std::min(want_pitch, -0.25f);
-        }
+        // bank and pitch follow the stick. Slow, the nose can rise less, smoothly
+        // (a stall that dropped the nose and let it rise again bounced)
+        const float kb = 1 - expf(-dt * 4), kp = 1 - expf(-dt * 2.5f);
+        bank_ += (in.x * 0.85f - bank_) * kb;
+        const float climb_limit = clampf((speed_ - 9) / 10, -0.4f, 1) * 0.42f;
+        const float want_pitch = std::min(in.y * 0.42f, climb_limit);  // up: the nose rises
         pitch_ += (want_pitch - pitch_) * kp;
         // energy: diving speeds up, climbing slows; drag and a gentle sink
         speed_ += (-G * sinf(pitch_) * 0.8f - 0.0016f * speed_ * speed_ + 0.35f) * dt;
@@ -83,7 +83,7 @@ public:
         const float lift = thermal_lift(x_, y_) + (gust_ > 0 ? 10 : 0) + (demo_ ? 1.4f : 0);
         alt_ += (speed_ * sinf(pitch_) - 0.9f + lift) * dt;
         alt_ = std::min(alt_, 230.0f);
-        heading_ += 2.6f * G * tanf(bank_) / speed_ * dt;  // an arcade turn: tight enough for the hoops
+        heading_ += 3.4f * G * tanf(bank_) / speed_ * dt;  // an arcade turn: tight enough for the hoops
         const float v = speed_ * cosf(pitch_);
         x_ += cosf(heading_) * v * dt;
         y_ += sinf(heading_) * v * dt;
@@ -276,8 +276,8 @@ private:
 
     void add_ring()
     {
-        const float h = last_h_ + rng_.range(-0.75f, 0.75f);
-        const float d = rng_.range(48, 70);
+        const float h = last_h_ + rng_.range(-0.55f, 0.55f);
+        const float d = rng_.range(55, 78);
         const float x = last_x_ + cosf(h) * d, y = last_y_ + sinf(h) * d;
         float top = 0;
         for (int i = 0; i <= 10; ++i) {
@@ -399,7 +399,7 @@ void Skyglide::render(uint16_t *fb)
     const float rx = -fy_, ry = fx_;
     const float half = float(W) / 2 / FOCAL;
     horizon_ = float(H) * 0.42f + tanf(pitch_) * FOCAL;
-    shear_ = tanf(bank_);
+    shear_ = tanf(bank_ * 0.3f);  // the land tilts a little; the glider itself banks (a full tilt skewed it all)
     float hz[W];
     int *ybuf = ybuf_;
     for (int c = 0; c < W; ++c) {
@@ -506,28 +506,30 @@ void Skyglide::render(uint16_t *fb)
         first = false;
     }
     prof_.mark(3);
-    // the glider, from just behind: long white wings, red tips
+    // the glider, from just behind: long white wings, red tips, banking into
+    // its turns (the right wing dips for a right turn)
     const float bob = sinf(clock_ * 1.7f) * 1.2f;
     const float cx = float(W) / 2, cy = float(H) * 0.8f + bob - pitch_ * 12;
+    const float roll = bank_ * 0.7f, rc = cosf(roll), rs = sinf(roll);
+    const auto shape = [&](std::initializer_list<P2> local, uint16_t colour) {
+        P2 pts[8];
+        int n = 0;
+        for (const P2 &q : local) {
+            pts[n++] = {cx + q.x * rc - q.y * rs, cy + q.x * rs + q.y * rc};
+        }
+        fill_poly(fb, pts, n, colour, true);
+    };
     const uint16_t wing = hex(0xF4F4F0), under = hex(0xB8BCC4), tip = hex(0xE0402A);
-    const P2 lw[4] = {{cx - 62, cy - 1}, {cx - 4, cy - 4}, {cx - 4, cy + 2}, {cx - 61, cy + 2}};
-    const P2 rw[4] = {{cx + 4, cy - 4}, {cx + 62, cy - 1}, {cx + 61, cy + 2}, {cx + 4, cy + 2}};
-    fill_poly(fb, lw, 4, wing, true);
-    fill_poly(fb, rw, 4, wing, true);
-    line(fb, cx - 61, cy + 2, cx - 4, cy + 2, under, true);
-    line(fb, cx + 4, cy + 2, cx + 61, cy + 2, under, true);
-    const P2 ltip[4] = {{cx - 66, cy - 1}, {cx - 58, cy - 1.5f}, {cx - 58, cy + 2}, {cx - 65, cy + 2}};
-    const P2 rtip[4] = {{cx + 58, cy - 1.5f}, {cx + 66, cy - 1}, {cx + 65, cy + 2}, {cx + 58, cy + 2}};
-    fill_poly(fb, ltip, 4, tip, true);
-    fill_poly(fb, rtip, 4, tip, true);
-    const P2 body[6] = {{cx - 4, cy + 6}, {cx - 3, cy - 13}, {cx, cy - 17}, {cx + 3, cy - 13}, {cx + 4, cy + 6}, {cx, cy + 8}};
-    fill_poly(fb, body, 6, hex(0xE8E8E4), true);
-    const P2 canopy[4] = {{cx - 2.5f, cy - 6}, {cx, cy - 13}, {cx + 2.5f, cy - 6}, {cx, cy - 3}};
-    fill_poly(fb, canopy, 4, hex(0x30486A), true);
-    const P2 stab[4] = {{cx - 17, cy + 9}, {cx + 17, cy + 9}, {cx + 16, cy + 11}, {cx - 16, cy + 11}};
-    fill_poly(fb, stab, 4, wing, true);
-    const P2 fin[4] = {{cx - 1.2f, cy + 10}, {cx - 0.8f, cy - 2}, {cx + 0.8f, cy - 2}, {cx + 1.2f, cy + 10}};
-    fill_poly(fb, fin, 4, tip, true);
+    shape({{-62, -1}, {-4, -4}, {-4, 2}, {-61, 2}}, wing);
+    shape({{4, -4}, {62, -1}, {61, 2}, {4, 2}}, wing);
+    shape({{-61, 2}, {-4, 2}, {-4, 3}, {-61, 3}}, under);
+    shape({{4, 2}, {61, 2}, {61, 3}, {4, 3}}, under);
+    shape({{-66, -1}, {-58, -1.5f}, {-58, 2}, {-65, 2}}, tip);
+    shape({{58, -1.5f}, {66, -1}, {65, 2}, {58, 2}}, tip);
+    shape({{-4, 6}, {-3, -13}, {0, -17}, {3, -13}, {4, 6}, {0, 8}}, hex(0xE8E8E4));
+    shape({{-2.5f, -6}, {0, -13}, {2.5f, -6}, {0, -3}}, hex(0x30486A));
+    shape({{-17, 9}, {17, 9}, {16, 11}, {-16, 11}}, wing);
+    shape({{-1.2f, 10}, {-0.8f, -2}, {0.8f, -2}, {1.2f, 10}}, tip);
     prof_.mark(4);
 }
 
