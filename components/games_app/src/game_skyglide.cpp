@@ -49,7 +49,7 @@ public:
         time_left_ = 40, clock_ = 0, rings_done_ = 0, warn_ = 0, dist_ = 0, gust_ = 0;
         gusts_ = 2, crashed_ = false;
         rings_.clear();
-        last_x_ = x_ + cosf(heading_) * 20, last_y_ = y_ + sinf(heading_) * 20, last_h_ = heading_;
+        last_x_ = x_ + cosf(heading_) * 20, last_y_ = y_ + sinf(heading_) * 20, last_h_ = heading_, last_alt_ = alt_;
         while (rings_.size() < 5) {
             add_ring();
         }
@@ -65,13 +65,17 @@ public:
         const Input in = demo_ ? autopilot() : input;
         // bank and pitch follow the stick. Slow, the nose can rise less, smoothly
         // (a stall that dropped the nose and let it rise again bounced)
-        const float kb = 1 - expf(-dt * 4), kp = 1 - expf(-dt * 2.5f);
+        const float kb = 1 - expf(-dt * 4), kp = 1 - expf(-dt * 3);
         bank_ += (in.x * 0.85f - bank_) * kb;
-        const float climb_limit = clampf((speed_ - 9) / 10, -0.4f, 1) * 0.42f;
-        const float want_pitch = std::min(in.y * 0.42f, climb_limit);  // up: the nose rises
+        // up to ~29 degrees nose up and ~34 down; only a truly slow glider
+        // loses its climb
+        const float climb_limit = clampf((speed_ - 8) / 7, -0.3f, 1) * 0.5f;
+        const float want_pitch = std::min(in.y * (in.y > 0 ? 0.5f : 0.6f), climb_limit);  // up: the nose rises
         pitch_ += (want_pitch - pitch_) * kp;
-        // energy: diving speeds up, climbing slows; drag and a gentle sink
-        speed_ += (-G * sinf(pitch_) * 0.8f - 0.0016f * speed_ * speed_ + 0.35f) * dt;
+        // energy, kindly: diving speeds up, climbing slows (less than a real
+        // glider would), drag, and a little push so level flight holds its speed
+        // (more speed than this left no time to line up with a hoop)
+        speed_ += (-G * sinf(pitch_) * 0.6f - 0.0016f * speed_ * speed_ + 0.4f) * dt;
         speed_ = clampf(speed_, 8, 44);
         // the action: a gust lifts for a moment
         if (in.action && gusts_ > 0 && gust_ <= 0) {
@@ -274,19 +278,30 @@ private:
         return lift;
     }
 
+    // The next hoop: one a glider can reach from the last, climbing at most
+    // about one in three and diving one in two; over a ridge too steep, it
+    // tries another way.
     void add_ring()
     {
-        const float h = last_h_ + rng_.range(-0.55f, 0.55f);
-        const float d = rng_.range(55, 78);
-        const float x = last_x_ + cosf(h) * d, y = last_y_ + sinf(h) * d;
-        float top = 0;
-        for (int i = 0; i <= 10; ++i) {
-            const float t = float(i) / 10;
-            top = std::max(top, ground(mixf(last_x_, x, t), mixf(last_y_, y, t)));
+        float h = 0, d = 0, x = 0, y = 0, alt = 0;
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            const float spread = attempt < 4 ? 0.55f : 1.1f;
+            h = last_h_ + rng_.range(-spread, spread);
+            d = rng_.range(55, 78);
+            x = last_x_ + cosf(h) * d, y = last_y_ + sinf(h) * d;
+            float top = 0;
+            for (int i = 0; i <= 10; ++i) {
+                const float t = float(i) / 10;
+                top = std::max(top, ground(mixf(last_x_, x, t), mixf(last_y_, y, t)));
+            }
+            alt = std::max(top + rng_.range(16, 26), float(WATER) * HS + 16);
+            alt = std::max(alt, last_alt_ - 0.5f * d);
+            if (alt <= last_alt_ + 0.32f * d) {
+                break;
+            }
         }
-        const float alt = std::max(top + rng_.range(16, 28), float(WATER) * HS + 16);
         rings_.push_back({x, y, alt, h, false});
-        last_x_ = x, last_y_ = y, last_h_ = h;
+        last_x_ = x, last_y_ = y, last_h_ = h, last_alt_ = alt;
     }
 
     Input autopilot() const
@@ -314,7 +329,8 @@ private:
         const float clearance = alt_ - ahead;
         // the glide slope down (or up) to the hoop's middle
         const float dist = std::max(10.0f, hypotf(next->x - x_, next->y - y_));
-        in.y = -clampf(asinf(clampf((alt_ - next->alt + 1) / dist, -0.6f, 0.6f)) / 0.42f, -1, 1);
+        const float slope = -asinf(clampf((alt_ - next->alt + 1) / dist, -0.55f, 0.48f));  // the pitch for the glide slope
+        in.y = clampf(slope / (slope > 0 ? 0.5f : 0.6f), -1, 1);
         if (speed_ < 13 && clearance > 14) {
             in.y = std::min(in.y, -0.3f);  // nose down for speed
         }
@@ -338,7 +354,7 @@ private:
     Rng rng_;
     float x_ = 40, y_ = 40, alt_ = 80, heading_ = 0, pitch_ = 0, bank_ = 0, speed_ = 18;
     float time_left_ = 40, clock_ = 0, warn_ = 0, dist_ = 0, dist_points_ = 0, lift_cue_ = 0;
-    float last_x_ = 0, last_y_ = 0, last_h_ = 0;
+    float last_x_ = 0, last_y_ = 0, last_h_ = 0, last_alt_ = 0;
     int rings_done_ = 0, gusts_ = 2;
     float gust_ = 0;
     bool crashed_ = false, land_built_ = false;
@@ -501,6 +517,17 @@ void Skyglide::render(uint16_t *fb)
                 const float s = rel_h > 0 ? 1 : -1, cx = float(W) / 2 + s * 100, cy = 70;
                 const P2 tri[3] = {{cx + s * 9, cy}, {cx - s * 5, cy - 9}, {cx - s * 5, cy + 9}};
                 fill_poly(fb, tri, 3, hex(0xFFD24A), true);
+            } else {  // ahead but above or below the view: up or down
+                const float dx = r.x - x_, dy = r.y - y_, z = dx * fx_ + dy * fy_;
+                if (z > 1) {
+                    const float sy = horizon_ - (r.alt - alt_) / z * FOCAL;
+                    const float s = sy < 50 ? -1.0f : sy > H - 20 ? 1.0f : 0.0f;  // the HUD covers the top
+                    if (s != 0) {
+                        const float cx = float(W) / 2 + 92, cy = s < 0 ? 96.0f : float(H) - 60;
+                        const P2 tri[3] = {{cx, cy + s * 9}, {cx - 9, cy - s * 5}, {cx + 9, cy - s * 5}};
+                        fill_poly(fb, tri, 3, hex(0xFFD24A), true);
+                    }
+                }
             }
         }
         first = false;
