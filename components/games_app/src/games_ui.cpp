@@ -74,6 +74,25 @@ const Info INFO[games::GAME_COUNT] = {
         "Tilt to fly: away climbs, back dives, to the side banks  ·  shake for a gust",
         {0xFFE9A8, 0x3A8CFF, 0x8FD8FF, 0x061428, 0x1E3A5A, 0x0A1828}
     },
+    {
+        "Jellystorm", "Hold back the glowing swarm, wave after wave.", "Drag to move  ·  it fires by itself  ·  tap for a pulse bomb",
+        "Tilt to move  ·  it fires by itself  ·  shake for a pulse bomb",
+        "Tilt to move  ·  it fires by itself  ·  shake for a pulse bomb",
+        {0xFFB0E8, 0xE0409A, 0xFF6EC7, 0x2A0618, 0x3A1430, 0x1A0812}
+    },
+    {
+        "Lunar Flip", "A moonbase pinball table: light the lanes, drop the targets.",
+        "Hold the left or right half for the flippers  ·  tap to launch",
+        "Hold the left or right half for the flippers  ·  tap to launch  ·  shake to nudge",
+        "Hold the left or right half for the flippers  ·  tap to launch  ·  shake to nudge",
+        {0xD0E4FF, 0x5A7CFF, 0x9AB8FF, 0x0A1430, 0x1E2A50, 0x0C1228}
+    },
+    {
+        "Ridge Rally", "Gravel, pines and hairpins, against the clock.", "Drag to steer, up to speed up, down to brake  ·  tap for a boost",
+        "Tilt to steer, back to speed up, away to brake  ·  shake for a boost",
+        "Tilt to steer, away to speed up, back to brake  ·  shake for a boost",
+        {0xFFC48A, 0xE8501E, 0xFF8040, 0x2A0E04, 0x3A1A0C, 0x1A0A04}
+    },
 };
 constexpr int THUMB = 104, FRAME_MS = 33;
 #ifndef ESP_PLATFORM
@@ -107,6 +126,7 @@ struct Shared {
     uint32_t reset_seq = 0, level_seq = 0;
     int64_t hold_until = 0;  // getting ready: the game waits, and the tilt levels to the board as held
     bool down = false;  // a finger steers
+    bool hold_left = false, hold_right = false;  // fingers on the screen's halves (flippers)
     float pad_x = 0, pad_y = 0;
     int taps = 0;
     // from the game task, for the run reset_seq started
@@ -166,7 +186,7 @@ struct {
     lv_point_t press{};
     int shown_score = -1, shown_fill = -1;
     uint32_t shown_color = 0;
-    char shown_line[40] = "";
+    char shown_line[64] = "";
     bool thumbs_shown = false;
 } G;
 
@@ -259,9 +279,11 @@ float dead_zone(float v)
 // a tap or a second finger, the sub-board's buttons.
 // The board's top tilted back towards the player is up (forward in the
 // maze), in every game; flip: the player's Flip, the other way round.
-games::Input read_input(float dt, bool tilt, bool down, float pad_x, float pad_y, int taps, bool flip)
+games::Input read_input(float dt, bool tilt, bool down, float pad_x, float pad_y, int taps, bool flip, bool hold_left,
+                        bool hold_right)
 {
     games::Input in;
+    in.left = hold_left, in.right = hold_right;
     games_motion_t m{};
     if (tilt && G.hooks.motion && G.hooks.motion(&m)) {
         const float *g = m.gravity;  // the way down: x right, y down, z into the glass
@@ -286,7 +308,7 @@ games::Input read_input(float dt, bool tilt, bool down, float pad_x, float pad_y
         const float mag = sqrtf(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
         T.shake_wait = std::max(0.0f, T.shake_wait - dt);
         if (fabsf(mag - 1) > 0.7f && T.shake_wait <= 0) {
-            in.action = true;
+            in.action = in.shake = true;
             T.shake_wait = 0.8f;
         }
     }
@@ -299,6 +321,7 @@ games::Input read_input(float dt, bool tilt, bool down, float pad_x, float pad_y
     }
     bool left = false, right = false;
     if (G.hooks.board_buttons && G.hooks.board_buttons(&left, &right)) {
+        in.left = in.left || left, in.right = in.right || right;  // the module's buttons are flippers too
         const bool pressed = left || right;
         if (pressed && !T.buttons_last) {
             in.action = true;
@@ -331,7 +354,7 @@ void make_thumbnails()
 bool frame_once()
 {
     int game, taps;
-    bool demo, run, tilt, flip, down, thumbs_wanted;
+    bool demo, run, tilt, flip, down, thumbs_wanted, hold_left, hold_right;
     int64_t hold_until;
     float pad_x, pad_y;
     uint32_t reset_seq, level_seq;
@@ -339,6 +362,7 @@ bool frame_once()
         std::lock_guard<std::mutex> l(T.s.m);
         game = T.s.game, demo = T.s.demo, run = T.s.run, tilt = T.s.tilt, flip = T.s.flip;
         hold_until = T.s.hold_until;
+        hold_left = T.s.hold_left, hold_right = T.s.hold_right;
         reset_seq = T.s.reset_seq, level_seq = T.s.level_seq;
         down = T.s.down, pad_x = T.s.pad_x, pad_y = T.s.pad_y, taps = T.s.taps;
         T.s.taps = 0;
@@ -376,7 +400,9 @@ bool frame_once()
     if (holding) {
         T.level_now = true;
     }
-    const games::Input in = read_input(dt, tilt && !demo, down && !demo, pad_x, pad_y, demo || holding ? 0 : taps, flip);
+    const bool live = !demo && !holding;
+    const games::Input in = read_input(dt, tilt && !demo, down && !demo, pad_x, pad_y, live ? taps : 0, flip, live && hold_left,
+                                       live && hold_right);
     if (!holding) {
         g.step(dt, in);
     }
@@ -748,6 +774,24 @@ void swipe_cb(lv_event_t *)
     }
 }
 
+// Which halves of the screen have a finger on them (flippers): every finger
+// the panel reports, or LVGL's one pointer where only that is known.
+// Called with T.s.m held.
+void holds_from_fingers(bool pointer_down, lv_point_t pointer)
+{
+    lv_point_t pts[2];
+    const int n = touches(pts);
+    bool left = false, right = false;
+    if (n > 0) {
+        for (int i = 0; i < n; ++i) {
+            (pts[i].x < PANEL / 2 ? left : right) = true;
+        }
+    } else if (pointer_down) {
+        (pointer.x < PANEL / 2 ? left : right) = true;
+    }
+    T.s.hold_left = left, T.s.hold_right = right;
+}
+
 // The frame takes the fingers while playing: a drag steers from where it
 // went down; a quick tap or a second finger is the action.
 void frame_touch_cb(lv_event_t *e)
@@ -763,6 +807,7 @@ void frame_touch_cb(lv_event_t *e)
     lv_indev_get_point(indev, &p);
     const lv_event_code_t code = lv_event_get_code(e);
     std::lock_guard<std::mutex> l(T.s.m);
+    holds_from_fingers(code == LV_EVENT_PRESSED || code == LV_EVENT_PRESSING, p);
     if (code == LV_EVENT_PRESSED) {
         G.press = p;
         G.press_at = now_us();
@@ -823,6 +868,15 @@ void tick(lv_timer_t *)
     }
     if (G.mode != Mode::Play) {
         return;
+    }
+    {
+        // fingers come and go between LVGL's events (a second one lifting sends none)
+        lv_point_t pts[2];
+        const int fingers = touches(pts);
+        std::lock_guard<std::mutex> l(T.s.m);
+        if (fingers > 0 || !T.s.down) {
+            holds_from_fingers(false, pts[0]);
+        }
     }
     if (G.ready_until) {  // getting ready: 3, 2, 1
         const int64_t left = G.ready_until - now_us();
@@ -976,10 +1030,16 @@ void build_picker(lv_obj_t *s)
     label(G.picker, "Games", 0, 30, PANEL, TEXT, 32, true, LV_TEXT_ALIGN_CENTER);
     lv_obj_t *back = round_button(G.picker, 56, 32, 48, "back");
     on_click(back, back_cb);
+    // the cards scroll under the title
+    lv_obj_t *list = box(G.picker, 0, 84, PANEL, PANEL - 84);
+    lv_obj_add_flag(list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_style_pad_bottom(list, 40, 0);  // the last card clears the rounded corners
     for (int i = 0; i < games::GAME_COUNT; ++i) {
         const Info &info = INFO[i];
-        const int y = 94 + i * 124;
-        lv_obj_t *card = glass(G.picker, 36, y, 408, 116, 26, info.accent);
+        const int y = 8 + i * 124;
+        lv_obj_t *card = glass(list, 36, y, 408, 116, 26, info.accent);
         lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
         press_fx(card);
         on_click(card, card_cb, i);
@@ -1024,7 +1084,7 @@ void build_title(lv_obj_t *s)
     G.t_hint = label(G.title, "", 60, 414, PANEL - 120, TEXT2, 13, false, LV_TEXT_ALIGN_CENTER);
     wrap_label(G.t_hint);  // two lines at most
     for (int i = 0; i < games::GAME_COUNT; ++i) {
-        G.t_dots[i] = box(G.title, 226 + i * 14, 458, 8, 8, 4);
+        G.t_dots[i] = box(G.title, PANEL / 2 - (games::GAME_COUNT * 14 - 6) / 2 + i * 14, 458, 8, 8, 4);
         lv_obj_set_style_bg_opa(G.t_dots[i], LV_OPA_COVER, 0);
     }
 }

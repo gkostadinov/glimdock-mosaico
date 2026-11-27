@@ -563,13 +563,13 @@ int main(int argc, char **argv)
         games_app_preview_mode(0);
         frames(3);
         save("games-picker", lv_display_get_default());
-        static const char *const names[3] = {"crypt", "starbore", "skyglide"};
-        for (int g = 0; g < 3; ++g) {
+        static const char *const names[6] = {"crypt", "starbore", "skyglide", "jellystorm", "pinball", "rally"};
+        for (int g = 0; g < 6; ++g) {
             games_app_select(g);
-            frames(g == 2 ? 120 : 90);
+            frames(g == 2 || g >= 3 ? 120 : 90);
             save(std::string("games-title-") + names[g], lv_display_get_default());
             games_app_preview_mode(2);
-            frames(g == 0 ? 260 : 200);
+            frames(g == 0 ? 260 : g == 4 ? 300 : 200);
             save(std::string("games-play-") + names[g], lv_display_get_default());
             if (recording) {
                 frames(150, (std::string("games-") + names[g]).c_str());

@@ -32,10 +32,12 @@ wall companion for your homelab and home.
   "All lights off", "Bedroom lights off" or your own steps (Swifty Home lights,
   scenes, plugs and TV, waits, TV remote keys, the board's lights). Made in Web
   settings, on the board or by asking Swifty; starters come from your rooms.
-- **Games**: three retro 3D games. **Ember Crypt**, a lantern-lit crawl through
+- **Games**: six retro 3D games. **Ember Crypt**, a lantern-lit crawl through
   crypts; **Starbore**, a neon tunnel flyer; **Skyglide**, a glider over hills
-  and lakes at golden hour. Play by touch, or tilt the board to steer, turn it
-  to look around and shake it for each game's action. Best scores are kept.
+  and lakes at golden hour; **Jellystorm**, a wave shooter; **Lunar Flip**,
+  pinball; **Ridge Rally**, a gravel rally against the clock. Play by touch, or
+  tilt the board to steer, turn it to look around and shake it for each game's
+  action. Best scores are kept.
 - **Settings**: brightness, haptics, auto-rotate, the panel's corner radius, time
   zone, camera options and **Web settings**.
 

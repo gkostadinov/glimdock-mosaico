@@ -11,7 +11,7 @@
 namespace games {
 
 constexpr int W = 240, H = 240;  // the game's frame
-constexpr int GAME_COUNT = 3;    // 0 Ember Crypt, 1 Starbore, 2 Skyglide
+constexpr int GAME_COUNT = 6;    // 0 Ember Crypt, 1 Starbore, 2 Skyglide, 3 Jellystorm, 4 Lunar Flip, 5 Ridge Rally
 
 // What happened during a step, for sounds and haptics (take_events()).
 enum : uint32_t {
@@ -28,10 +28,12 @@ enum : uint32_t {
 // a turn of the board itself (the gyroscope: radians this step, + right) and
 // the game's one action (a tap, a shake, a sub-board button) for this step.
 // absolute: x and y come from the board's tilt, a position the player holds
-// (level is the middle), rather than a drag's push.
+// (level is the middle), rather than a drag's push. left, right: held down
+// (a finger on that half of the screen, or the Interaction module's button:
+// flippers); shake: the board was shaken (a nudge).
 struct Input {
     float x = 0, y = 0, turn = 0;
-    bool action = false, absolute = false;
+    bool action = false, absolute = false, left = false, right = false, shake = false;
 };
 
 // What the app shows over the frame.
@@ -40,7 +42,7 @@ struct Hud {
     float meter = 1;               // 0..1
     uint32_t meter_color = 0xFFFFFF;
     const char *meter_name = "";   // "Oil", "Shield", "Time"
-    char line[40] = "";            // a short status: "Depth 2 · 3 of 6 shards"
+    char line[64] = "";            // a short status: "Depth 2 · 3 of 6 shards"
 };
 
 class Game {

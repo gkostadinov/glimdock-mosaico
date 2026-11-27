@@ -10,6 +10,9 @@ namespace games {
 std::unique_ptr<Game> make_crypt();
 std::unique_ptr<Game> make_starbore();
 std::unique_ptr<Game> make_skyglide();
+std::unique_ptr<Game> make_jellystorm();
+std::unique_ptr<Game> make_pinball();
+std::unique_ptr<Game> make_rally();
 
 int64_t (*clock_us)() = nullptr;
 
@@ -20,8 +23,14 @@ std::unique_ptr<Game> make_game(int index)
         return make_crypt();
     case 1:
         return make_starbore();
-    default:
+    case 2:
         return make_skyglide();
+    case 3:
+        return make_jellystorm();
+    case 4:
+        return make_pinball();
+    default:
+        return make_rally();
     }
 }
 

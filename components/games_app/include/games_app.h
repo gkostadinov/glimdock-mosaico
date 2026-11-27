@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Games for the ESP-Mosaico shell: three retro 3D games (Ember Crypt, a
-// lantern-lit maze crawl; Starbore, a neon tunnel flyer; Skyglide, a glider
-// over voxel hills), a picker, title screens and best scores kept in NVS.
+// Games for the ESP-Mosaico shell: six retro 3D games on one small engine
+// (Ember Crypt, a lantern-lit maze crawl; Starbore, a neon tunnel flyer;
+// Skyglide, a glider over voxel hills; Jellystorm, a wave shooter; Lunar
+// Flip, pinball; Ridge Rally, a road racer), a picker, title screens and best
+// scores kept in NVS.
 // Played by touch, or by tilting and turning the board (accelerometer and
 // gyroscope), with the Interaction sub-board's buttons and lights when one is
 // fitted. UI calls run on the LVGL task (or with its lock held).
@@ -55,7 +57,8 @@ void games_app_open(lv_obj_t *screen);
 void games_app_set_active(bool active);
 // A game is being played (not paused): the always-on display waits.
 bool games_app_playing(void);
-// Straight to a game's title screen (0 Ember Crypt, 1 Starbore, 2 Skyglide), -1 the picker.
+// Straight to a game's title screen (0 Ember Crypt, 1 Starbore, 2 Skyglide,
+// 3 Jellystorm, 4 Lunar Flip, 5 Ridge Rally), -1 the picker.
 void games_app_select(int game);
 
 #ifdef __cplusplus

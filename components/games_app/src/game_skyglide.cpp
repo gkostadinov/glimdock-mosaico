@@ -9,7 +9,7 @@
 #include <initializer_list>
 #include <vector>
 
-#include "games_common.h"
+#include "games_3d.h"
 
 namespace games {
 namespace {
@@ -44,7 +44,7 @@ public:
         over_ = false;
         score_ = 0;
         events_ = 0;
-        x_ = 40, y_ = 40, heading_ = 0.6f, pitch_ = 0, bank_ = 0, speed_ = 18;
+        x_ = 40, y_ = 40, heading_ = 0.6f, pitch_ = 0, bank_ = 0, speed_ = 18, climb_ = 0;
         alt_ = ground(x_, y_) + 42;
         time_left_ = 40, clock_ = 0, rings_done_ = 0, warn_ = 0, dist_ = 0, gust_ = 0;
         gusts_ = 2, crashed_ = false;
@@ -63,20 +63,17 @@ public:
         dt = std::min(dt, 0.1f);
         clock_ += dt;
         const Input in = demo_ ? autopilot() : input;
-        // bank and pitch follow the stick. Slow, the nose can rise less, smoothly
-        // (a stall that dropped the nose and let it rise again bounced)
-        const float kb = 1 - expf(-dt * 4), kp = 1 - expf(-dt * 3);
+        // An arcade glider: the stick sets how fast it climbs or dives, always.
+        // (Climbing that cost speed, and a slow glider that could not climb,
+        // left hoops out of reach.) Speed only follows for the feel: a dive
+        // is quick, a climb slower; the nose shows the glide's angle.
+        const float kb = 1 - expf(-dt * 4), kv = 1 - expf(-dt * 3);
         bank_ += (in.x * 0.85f - bank_) * kb;
-        // up to ~29 degrees nose up and ~34 down; only a truly slow glider
-        // loses its climb
-        const float climb_limit = clampf((speed_ - 8) / 7, -0.3f, 1) * 0.5f;
-        const float want_pitch = std::min(in.y * (in.y > 0 ? 0.5f : 0.6f), climb_limit);  // up: the nose rises
-        pitch_ += (want_pitch - pitch_) * kp;
-        // energy, kindly: diving speeds up, climbing slows (less than a real
-        // glider would), drag, and a little push so level flight holds its speed
-        // (more speed than this left no time to line up with a hoop)
-        speed_ += (-G * sinf(pitch_) * 0.6f - 0.0016f * speed_ * speed_ + 0.4f) * dt;
-        speed_ = clampf(speed_, 8, 44);
+        const float want_climb = in.y * (in.y > 0 ? 8.0f : 11.0f);
+        climb_ += (want_climb - climb_) * kv;
+        speed_ += (18 - climb_ * 0.7f - speed_) * (1 - expf(-dt * 1.2f));
+        speed_ = clampf(speed_, 10, 32);
+        pitch_ = atan2f(climb_, speed_);
         // the action: a gust lifts for a moment
         if (in.action && gusts_ > 0 && gust_ <= 0) {
             gusts_ -= demo_ ? 0 : 1;  // the title screen's pilot has as many as it needs
@@ -85,10 +82,10 @@ public:
         }
         gust_ = std::max(0.0f, gust_ - dt);
         const float lift = thermal_lift(x_, y_) + (gust_ > 0 ? 10 : 0) + (demo_ ? 1.4f : 0);
-        alt_ += (speed_ * sinf(pitch_) - 0.9f + lift) * dt;
+        alt_ += (climb_ - 0.6f + lift) * dt;
         alt_ = std::min(alt_, 230.0f);
         heading_ += 3.4f * G * tanf(bank_) / speed_ * dt;  // an arcade turn: tight enough for the hoops
-        const float v = speed_ * cosf(pitch_);
+        const float v = speed_;
         x_ += cosf(heading_) * v * dt;
         y_ += sinf(heading_) * v * dt;
         dist_ += v * dt;
@@ -327,13 +324,10 @@ private:
             ahead = std::max(ahead, ground(x_ + cosf(heading_) * d, y_ + sinf(heading_) * d));
         }
         const float clearance = alt_ - ahead;
-        // the glide slope down (or up) to the hoop's middle
+        // the climb (or dive) that meets the hoop's middle on arrival
         const float dist = std::max(10.0f, hypotf(next->x - x_, next->y - y_));
-        const float slope = -asinf(clampf((alt_ - next->alt + 1) / dist, -0.55f, 0.48f));  // the pitch for the glide slope
-        in.y = clampf(slope / (slope > 0 ? 0.5f : 0.6f), -1, 1);
-        if (speed_ < 13 && clearance > 14) {
-            in.y = std::min(in.y, -0.3f);  // nose down for speed
-        }
+        const float rate = (next->alt - alt_) / (dist / speed_) + 0.6f;
+        in.y = clampf(rate / (rate > 0 ? 8.0f : 11.0f), -1, 1);
         if (clearance < 9) {
             in.y = 0.8f;  // pull up
             in.action = clearance < 6;
@@ -352,7 +346,7 @@ private:
     }
 
     Rng rng_;
-    float x_ = 40, y_ = 40, alt_ = 80, heading_ = 0, pitch_ = 0, bank_ = 0, speed_ = 18;
+    float x_ = 40, y_ = 40, alt_ = 80, heading_ = 0, pitch_ = 0, bank_ = 0, speed_ = 18, climb_ = 0;
     float time_left_ = 40, clock_ = 0, warn_ = 0, dist_ = 0, dist_points_ = 0, lift_cue_ = 0;
     float last_x_ = 0, last_y_ = 0, last_h_ = 0, last_alt_ = 0;
     int rings_done_ = 0, gusts_ = 2;
@@ -533,30 +527,35 @@ void Skyglide::render(uint16_t *fb)
         first = false;
     }
     prof_.mark(3);
-    // the glider, from just behind: long white wings, red tips, banking into
-    // its turns (the right wing dips for a right turn)
-    const float bob = sinf(clock_ * 1.7f) * 1.2f;
-    const float cx = float(W) / 2, cy = float(H) * 0.8f + bob - pitch_ * 12;
-    const float roll = bank_ * 0.7f, rc = cosf(roll), rs = sinf(roll);
-    const auto shape = [&](std::initializer_list<P2> local, uint16_t colour) {
-        P2 pts[8];
-        int n = 0;
-        for (const P2 &q : local) {
-            pts[n++] = {cx + q.x * rc - q.y * rs, cy + q.x * rs + q.y * rc};
-        }
-        fill_poly(fb, pts, n, colour, true);
+    // the glider, a mesh of the shared engine seen from just behind, banking
+    // into its turns (the right wing dips for a right turn)
+    static const V3 verts[19] = {
+        {0, 0, 1.1f}, {0, 0.13f, 0.55f}, {-0.11f, 0, 0.3f}, {0.11f, 0, 0.3f}, {0, 0.03f, -1.1f},          // nose, canopy, sides, tail
+        {-2.3f, 0.12f, 0.2f}, {-2.3f, 0.12f, -0.1f}, {2.3f, 0.12f, 0.2f}, {2.3f, 0.12f, -0.1f},            // wing tips
+        {-0.1f, 0.03f, 0.45f}, {-0.1f, 0.03f, -0.16f}, {0.1f, 0.03f, 0.45f}, {0.1f, 0.03f, -0.16f},        // wing roots
+        {0, 0.52f, -1.06f}, {-0.62f, 0.05f, -0.98f}, {0.62f, 0.05f, -0.98f}, {0, -0.1f, 0.2f},             // fin top, tailplane, belly
+        {0, 0.05f, -0.72f}, {0, 0.05f, -0.82f},                                                           // fin and tailplane roots
     };
-    const uint16_t wing = hex(0xF4F4F0), under = hex(0xB8BCC4), tip = hex(0xE0402A);
-    shape({{-62, -1}, {-4, -4}, {-4, 2}, {-61, 2}}, wing);
-    shape({{4, -4}, {62, -1}, {61, 2}, {4, 2}}, wing);
-    shape({{-61, 2}, {-4, 2}, {-4, 3}, {-61, 3}}, under);
-    shape({{4, 2}, {61, 2}, {61, 3}, {4, 3}}, under);
-    shape({{-66, -1}, {-58, -1.5f}, {-58, 2}, {-65, 2}}, tip);
-    shape({{58, -1.5f}, {66, -1}, {65, 2}, {58, 2}}, tip);
-    shape({{-4, 6}, {-3, -13}, {0, -17}, {3, -13}, {4, 6}, {0, 8}}, hex(0xE8E8E4));
-    shape({{-2.5f, -6}, {0, -13}, {2.5f, -6}, {0, -3}}, hex(0x30486A));
-    shape({{-17, 9}, {17, 9}, {16, 11}, {-16, 11}}, wing);
-    shape({{-1.2f, 10}, {-0.8f, -2}, {0.8f, -2}, {1.2f, 10}}, tip);
+    static const uint8_t tris[16][3] = {
+        {9, 5, 6}, {9, 6, 10}, {11, 8, 7}, {11, 12, 8},                     // wings
+        {0, 2, 1}, {0, 1, 3}, {2, 4, 1}, {1, 4, 3}, {0, 16, 2}, {0, 3, 16}, {2, 16, 4}, {3, 4, 16},  // fuselage
+        {17, 13, 4}, {14, 18, 15}, {5, 6, 6}, {7, 8, 8},                    // fin, tailplane (and two unused)
+    };
+    static const uint32_t colors[16] = {0xF4F4F0, 0xF4F4F0, 0xF4F4F0, 0xF4F4F0, 0xEDEDE8, 0xEDEDE8, 0x30486A, 0x30486A,
+                                        0xD8D8D4, 0xD8D8D4, 0xC8C8C4, 0xC8C8C4, 0xE0402A, 0xF4F4F0, 0, 0
+                                       };
+    static const Mesh glider = {verts, 19, tris, colors, 14};
+    Camera view;  // the viewer's own: at the eye, looking ahead
+    view.transposed = true, view.focal = FOCAL;
+    Pose pose;
+    pose.pos = {0, -1.55f + sinf(clock_ * 1.7f) * 0.03f, 3.7f};  // a little below: seen from above
+    pose.roll = -bank_ * 0.75f, pose.pitch = pitch_ * 0.25f;
+    MeshStyle style;
+    style.two_sided = true, style.ambient = 0.55f;
+    draw_mesh(fb, view, glider, pose, style);
+    // red wing tips
+    view.glow_at(fb, pose_point(pose, {-2.26f, 0.12f, 0.05f}), 0.1f, rgb(200, 40, 20), 0.8f, 3);
+    view.glow_at(fb, pose_point(pose, {2.26f, 0.12f, 0.05f}), 0.1f, rgb(200, 40, 20), 0.8f, 3);
     prof_.mark(4);
 }
 

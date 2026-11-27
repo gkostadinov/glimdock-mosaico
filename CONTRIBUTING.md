@@ -66,6 +66,11 @@ What the measurements taught so far:
 - The display sends whole frames behind the panel's scan while LVGL renders
   the next one (`frame_sync.cpp`); a full-screen change reaches ~30 fps, the
   40 MHz QSPI link's limit.
+- **The games share one engine** (`components/games_app/src/games_3d.h`): a
+  camera with near-plane clipping, flat-shaded meshes drawn far faces first,
+  and particles, over the frame and raster helpers of `games_common.h`. A new
+  game draws through it; a ray caster or voxel terrain draws its world only
+  where that is faster, with the engine's meshes on top.
 - **Games are bound by PSRAM bandwidth, not the CPU.** Each game draws a
   240 × 240 frame (three buffers in PSRAM) in its own task, and the frame's
   object doubles it straight into LVGL's buffer while LVGL draws: a 480 × 480
@@ -73,7 +78,7 @@ What the measurements taught so far:
   and the voxel terrain draw column by column into a transposed frame, so
   their writes run along memory, and the voxel map keeps height and colour
   side by side. The 10-second `games:` log line gives each game's drawing time
-  by section; all three run at about 30 fps.
+  by section; all six run at about 30 fps.
 
 ## Checks
 
@@ -99,7 +104,7 @@ The shell registers RPCs on service `0x4744` (18244), callable with
 | 15 | seconds (starts) / none (result) | Time spent in every LVGL timer callback, by address (symbolise with `addr2line`). |
 | 16 | none | Internal and DMA memory (free, largest block, lowest, blocks) and every task whose stack is in internal RAM, with its unused bytes. |
 | 24 | none | Camera facing and why. |
-| 30 | app (`00` launcher … `07` Gallery, `08` Webcam, `09` Interaction, `0A` Calculator, `0B` VPN, `0C` Games), then a Tools tab (`00` torch, `01` level, `02` compass; the old `03`–`05` open Calculator, Interaction and Webcam), a Glimdock page (`00` Systems, `01` Clock, … `0A` Agents) or a game's title screen (`00` Ember Crypt, `01` Starbore, `02` Skyglide, `FF` the picker) | Opens an app. |
+| 30 | app (`00` launcher … `07` Gallery, `08` Webcam, `09` Interaction, `0A` Calculator, `0B` VPN, `0C` Games), then a Tools tab (`00` torch, `01` level, `02` compass; the old `03`–`05` open Calculator, Interaction and Webcam), a Glimdock page (`00` Systems, `01` Clock, … `0A` Agents) or a game's title screen (`00` Ember Crypt … `05` Ridge Rally, `FF` the picker) | Opens an app. |
 | 40 | op `00` status; `01` begin (u32 size), `02` chunk, `03` commit, `04` abort; `05` status from an offset (u32) | The board configuration that `tools/mosaico-config.py` reads and writes. The status is longer than one reply: read it with `05` a page at a time until an empty page. |
 | 41, 42 | text / `01`, `00` | Swifty says something / listens. |
 | 43 | seconds, `01` (encode with no computer watching), rotation ÷ 90 + 1, `02` (YUV420) | A timed USB webcam session that ends by itself. |

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Games**: a new app with three retro 3D games, each with a title screen
+- **Games**: a new app with six retro 3D games, each with a title screen
   where it plays itself, a pause when you leave, and a best score that is kept.
   **Ember Crypt** is a lantern-lit crawl through crypts that grow as you go:
   gather the shards to wake the gate before the oil runs out, and flare the
@@ -10,7 +10,14 @@
   slip through spinning bars, plates and half walls, sweep up orbs for the
   shield, and pulse a gate away when it is too late to dodge. **Skyglide** is a
   glider over hills and lakes at golden hour: thread the hoops for more time,
-  ride the thermals for height, and keep off the ground. Drag a finger to steer
+  ride the thermals for height, and keep off the ground. **Jellystorm** holds
+  back swarms of glowing space jellies, with pearls for bigger guns, a pulse
+  bomb and a mother jelly every fourth wave. **Lunar Flip** is a moonbase
+  pinball table: bumpers, slingshots, lanes that raise the multiplier, drop
+  targets and a ball save; the flippers are the screen's halves (or the
+  Interaction module's buttons) and a shake nudges. **Ridge Rally** is a gravel
+  stage through autumn pines against the clock, with rivals to pass and
+  checkpoints for time. Drag a finger to steer
   and tap for each game's action, or play with Tilt: hold the board the way you
   like during a short countdown, then tilt it to steer (back towards you is up,
   or forward in the crypt, in every game; Flip swaps them), turn it to look

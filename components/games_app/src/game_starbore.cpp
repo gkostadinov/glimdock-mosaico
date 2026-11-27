@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "games_common.h"
+#include "games_3d.h"
 
 namespace games {
 namespace {
@@ -16,35 +16,6 @@ constexpr int N = 12;                       // sides of the bore
 constexpr float R = 2.6f, SEG = 1.6f, FAR = 66, NEAR = 0.12f, F = 128, SHIP_R = 0.32f;
 constexpr int RINGS = int(FAR / SEG) + 4;
 constexpr uint32_t FOG = 0x07021A;
-
-struct V3 {
-    float x, y, z;
-};
-inline V3 operator+(V3 a, V3 b)
-{
-    return {a.x + b.x, a.y + b.y, a.z + b.z};
-}
-inline V3 operator-(V3 a, V3 b)
-{
-    return {a.x - b.x, a.y - b.y, a.z - b.z};
-}
-inline V3 operator*(V3 a, float k)
-{
-    return {a.x * k, a.y * k, a.z * k};
-}
-inline float dot(V3 a, V3 b)
-{
-    return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-inline V3 cross(V3 a, V3 b)
-{
-    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
-}
-inline V3 norm(V3 a)
-{
-    const float l = sqrtf(dot(a, a));
-    return l > 0 ? a * (1 / l) : a;
-}
 
 enum GateType : uint8_t { BAR, PLATE, HALF, CROSS, KINDS };
 struct Gate {
@@ -322,49 +293,6 @@ private:
         return in;
     }
 
-    // camera space
-    V3 to_cam(V3 p) const
-    {
-        const V3 d = p - cam_;
-        return {dot(d, right_), dot(d, up_), dot(d, fwd_)};
-    }
-    static P2 project(V3 c)
-    {
-        return {float(W) / 2 + F * c.x / c.z, float(H) / 2 - F * c.y / c.z};
-    }
-    // A camera-space polygon clipped at the near plane, projected and filled.
-    static void poly(uint16_t *fb, const V3 *v, int n, uint16_t color)
-    {
-        P2 out[12];
-        int m = 0;
-        for (int i = 0; i < n && m < 11; ++i) {
-            const V3 &a = v[i], &b = v[(i + 1) % n];
-            const bool ia = a.z >= NEAR, ib = b.z >= NEAR;
-            if (ia) {
-                out[m++] = project(a);
-            }
-            if (ia != ib) {
-                const float t = (NEAR - a.z) / (b.z - a.z);
-                out[m++] = project({a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, NEAR});
-            }
-        }
-        fill_poly(fb, out, m, color);
-    }
-    static void edge(uint16_t *fb, V3 a, V3 b, uint16_t color)
-    {
-        if (a.z < NEAR && b.z < NEAR) {
-            return;
-        }
-        if (a.z < NEAR) {
-            const float t = (NEAR - a.z) / (b.z - a.z);
-            a = {a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, NEAR};
-        } else if (b.z < NEAR) {
-            const float t = (NEAR - b.z) / (a.z - b.z);
-            b = {b.x + (a.x - b.x) * t, b.y + (a.y - b.y) * t, NEAR};
-        }
-        const P2 p = project(a), q = project(b);
-        line(fb, p.x, p.y, q.x, q.y, color);
-    }
     static int fog_of(float z)
     {
         return int(clampf(z / FAR, 0, 1) * 32);
@@ -381,7 +309,7 @@ private:
     std::vector<Gate> gates_;
     std::vector<Orb> orbs_;
     V3 dust_[36] = {};
-    V3 cam_{}, right_{1, 0, 0}, up_{0, 1, 0}, fwd_{0, 0, 1};
+    Camera cam_;  // the shared engine's (games_3d.h)
     V3 ring_[RINGS][N] = {};
     Profile prof_{{"setup", "panels", "lines", "objects", "ship"}};
 };
@@ -392,19 +320,15 @@ void Starbore::render(uint16_t *fb)
     // the camera rides behind and above the ship, looking down the bore
     const float shake = hurt_ > 0.9f ? (hurt_ - 0.9f) * 0.5f : 0;
     const float zc = z_ - 2.8f;
-    cam_ = center(zc) + V3{ox_ * 0.75f + sinf(time_ * 71) * shake, oy_ * 0.75f + 0.82f + cosf(time_ * 53) * shake, 0};
-    const V3 target = center(z_ + 11) + V3{ox_ * 0.35f, oy_ * 0.35f, 0};
-    fwd_ = norm(target - cam_);
-    V3 r = norm(cross({0, 1, 0}, fwd_)), u = cross(fwd_, r);
-    const float cr = cosf(bank_), sr = sinf(bank_);
-    right_ = r * cr + u * sr;
-    up_ = u * cr - r * sr;
+    const V3 eye = center(zc) + V3{ox_ * 0.75f + sinf(time_ * 71) * shake, oy_ * 0.75f + 0.82f + cosf(time_ * 53) * shake, 0};
+    cam_.focal = F, cam_.near = NEAR;
+    cam_.look_at(eye, center(z_ + 11) + V3{ox_ * 0.35f, oy_ * 0.35f, 0}, bank_);
 
     std::fill_n(fb, W * H, hex(FOG));
     // the light at the end of the bore
-    const V3 end = to_cam(center(z_ + FAR));
+    const V3 end = cam_.to_cam(center(z_ + FAR));
     if (end.z > 1) {
-        const P2 p = project(end);
+        const P2 p = cam_.project(end);
         glow(fb, p.x, p.y, 34, rgb(150, 40, 120), 0);
         glow(fb, p.x, p.y, 12, rgb(255, 180, 220), 0.3f);
     }
@@ -421,7 +345,7 @@ void Starbore::render(uint16_t *fb)
         const V3 c = center(z);
         const float tc = cosf(twist(z)) * R, ts = sinf(twist(z)) * R;
         for (int j = 0; j < N; ++j) {
-            ring_[i][j] = to_cam({c.x + tc * base_c[j] - ts * base_s[j], c.y + ts * base_c[j] + tc * base_s[j], z});
+            ring_[i][j] = cam_.to_cam({c.x + tc * base_c[j] - ts * base_s[j], c.y + ts * base_c[j] + tc * base_s[j], z});
         }
     }
     prof_.mark(0);
@@ -453,17 +377,17 @@ void Starbore::render(uint16_t *fb)
             const float facing = fabsf(dot(nrm, norm(mid)));
             const float near = clampf(1.6f - depth / 14, 0.6f, 1.6f);
             const uint16_t base = shade(alt ? 0x2A1060 : 0x1A0A44, (0.55f + 0.45f * facing) * near);
-            poly(fb, q, 4, mix565(base, hex(FOG), fog));
+            cam_.poly(fb, q, 4, mix565(base, hex(FOG), fog));
         }
         prof_.mark(1);
         // neon edges: along the bore, and a ring every third
         for (int j = 0; j < N; ++j) {
-            edge(fb, ring_[i][j], ring_[i + 1][j], mix565((j & 1) ? hex(0x1A6FA0) : neon_edge, hex(FOG), fog));
+            cam_.edge(fb, ring_[i][j], ring_[i + 1][j], mix565((j & 1) ? hex(0x1A6FA0) : neon_edge, hex(FOG), fog));
         }
         if (kidx % 3 == 0) {
             const uint16_t c = mix565(neon_ring, hex(FOG), fog);
             for (int j = 0; j < N; ++j) {
-                edge(fb, ring_[i][j], ring_[i][(j + 1) % N], c);
+                cam_.edge(fb, ring_[i][j], ring_[i][(j + 1) % N], c);
             }
         }
         prof_.mark(2);
@@ -500,9 +424,9 @@ void Starbore::render(uint16_t *fb)
                 draw_gate(fb, gates_[size_t(things[t].index)]);
             } else if (things[t].kind == 1) {
                 const Orb &o = orbs_[size_t(things[t].index)];
-                const V3 c = to_cam(center(o.z) + V3{o.x, o.y, 0});
+                const V3 c = cam_.to_cam(center(o.z) + V3{o.x, o.y, 0});
                 if (c.z > NEAR + 0.3f) {
-                    const P2 p = project(c);
+                    const P2 p = cam_.project(c);
                     const float rr = std::min(9.0f, F * 0.3f / c.z);
                     const int f = 32 - fog_of(c.z) * 3 / 4;
                     const float pulse = 0.85f + 0.15f * sinf(time_ * 9 + o.z);
@@ -512,18 +436,18 @@ void Starbore::render(uint16_t *fb)
             } else {  // a dust streak, for speed
                 const V3 &d = dust_[things[t].index];
                 const V3 base = center(d.z) + V3{d.x, d.y, 0};
-                const V3 a = to_cam(base), b = to_cam(base + V3{0, 0, 0.25f + speed_ * 0.03f});
+                const V3 a = cam_.to_cam(base), b = cam_.to_cam(base + V3{0, 0, 0.25f + speed_ * 0.03f});
                 if (a.z > NEAR && b.z > NEAR) {
-                    edge(fb, a, b, mix565(hex(0xB8C8FF), hex(FOG), fog_of(a.z)));
+                    cam_.edge(fb, a, b, mix565(hex(0xB8C8FF), hex(FOG), fog_of(a.z)));
                 }
             }
         }
     }
     prof_.mark(3);
     if (burst_ > 0) {  // the shattered gate's flash
-        const V3 c = to_cam(center(burst_z_));
+        const V3 c = cam_.to_cam(center(burst_z_));
         if (c.z > NEAR) {
-            const P2 p = project(c);
+            const P2 p = cam_.project(c);
             const float k = burst_ / 0.5f;
             glow(fb, p.x, p.y, F * R * (1.6f - k) / c.z, scale565(hex(0xFFB060), int(k * 30)), 0);
         }
@@ -543,9 +467,9 @@ void Starbore::draw_gate(uint16_t *fb, const Gate &g)
     const V3 c = center(g.z);
     const float a = g.angle + g.spin * time_;
     const float ca = cosf(a), sa = sinf(a);
-    const int fog = fog_of(to_cam(c).z);
+    const int fog = fog_of(cam_.to_cam(c).z);
     const auto at = [&](float x, float y) {
-        return to_cam({c.x + x, c.y + y, g.z});
+        return cam_.to_cam({c.x + x, c.y + y, g.z});
     };
     const uint16_t rim = mix565(hex(0xFFE070), hex(FOG), fog);
     if (g.type == PLATE) {
@@ -560,11 +484,11 @@ void Starbore::draw_gate(uint16_t *fb, const Gate &g)
             const int j1 = (j + 1) % N;
             const uint16_t col = mix565(hex((j & 1) ? 0x8A1030 : 0x6A0A26), hex(FOG), fog);
             const V3 t1[3] = {outer[j], outer[j1], inner[j1]}, t2[3] = {outer[j], inner[j1], inner[j]};
-            poly(fb, t1, 3, col);
-            poly(fb, t2, 3, col);
+            cam_.poly(fb, t1, 3, col);
+            cam_.poly(fb, t2, 3, col);
         }
         for (int j = 0; j < N; ++j) {
-            edge(fb, inner[j], inner[(j + 1) % N], rim);
+            cam_.edge(fb, inner[j], inner[(j + 1) % N], rim);
         }
         return;
     }
@@ -573,9 +497,9 @@ void Starbore::draw_gate(uint16_t *fb, const Gate &g)
         const V3 q[4] = {at(c0 * L - s0 * w, s0 * L + c0 * w), at(-c0 * L - s0 * w, -s0 * L + c0 * w), at(-c0 * L + s0 * w, -s0 * L - c0 * w),
                          at(c0 * L + s0 * w, s0 * L - c0 * w)
                         };
-        poly(fb, q, 4, mix565(hex(0xFF6418), hex(FOG), fog));
+        cam_.poly(fb, q, 4, mix565(hex(0xFF6418), hex(FOG), fog));
         for (int j = 0; j < 4; ++j) {
-            edge(fb, q[j], q[(j + 1) % 4], rim);
+            cam_.edge(fb, q[j], q[(j + 1) % 4], rim);
         }
     };
     if (g.type == BAR || g.type == CROSS) {
@@ -591,8 +515,8 @@ void Starbore::draw_gate(uint16_t *fb, const Gate &g)
         const float t = a + float(j) * PI / float(N / 2);
         q[j] = at(R * 0.96f * cosf(t), R * 0.96f * sinf(t));
     }
-    poly(fb, q, N / 2 + 1, mix565(hex(0xC81E5A), hex(FOG), fog));
-    edge(fb, q[0], q[N / 2], rim);
+    cam_.poly(fb, q, N / 2 + 1, mix565(hex(0xC81E5A), hex(FOG), fog));
+    cam_.edge(fb, q[0], q[N / 2], rim);
 }
 
 void Starbore::draw_ship(uint16_t *fb)
@@ -601,60 +525,20 @@ void Starbore::draw_ship(uint16_t *fb)
         return;  // blinking while the shield recovers
     }
     // nose, wings, the spine's top, belly and tail; the hull slopes down to the tail
-    static const V3 model[6] = {{0, 0.02f, 1.0f}, {-0.85f, -0.05f, -0.45f}, {0.85f, -0.05f, -0.45f}, {0, 0.34f, -0.12f}, {0, -0.18f, -0.3f}, {0, 0.08f, -0.56f}};
-    static const uint8_t faces[8][3] = {{0, 1, 3}, {0, 3, 2}, {1, 5, 3}, {3, 5, 2}, {0, 4, 1}, {0, 2, 4}, {1, 4, 5}, {2, 5, 4}};
+    static const V3 verts[6] = {{0, 0.02f, 1.0f}, {-0.85f, -0.05f, -0.45f}, {0.85f, -0.05f, -0.45f}, {0, 0.34f, -0.12f}, {0, -0.18f, -0.3f}, {0, 0.08f, -0.56f}};
+    static const uint8_t tris[8][3] = {{0, 1, 3}, {0, 3, 2}, {1, 5, 3}, {3, 5, 2}, {0, 4, 1}, {0, 2, 4}, {1, 4, 5}, {2, 5, 4}};
     static const uint32_t colors[8] = {0xD8E4FA, 0xB8C8E8, 0x8090B8, 0x7080A8, 0x3A4260, 0x3A4260, 0x262C44, 0x262C44};
-    const float roll = -vx_ * 0.16f, pitch = vy_ * 0.05f;
-    const float cr = cosf(roll), sr = sinf(roll), cp = cosf(pitch), sp = sinf(pitch);
-    const V3 pos = center(z_) + V3{ox_, oy_, 0};
-    V3 cam[6];
-    for (int i = 0; i < 6; ++i) {
-        V3 m = model[i];
-        m = {m.x * cr - m.y * sr, m.x * sr + m.y * cr, m.z};
-        m = {m.x, m.y * cp + m.z * sp, -m.y * sp + m.z * cp};
-        cam[i] = to_cam(pos + m * 0.8f);
-    }
-    struct F {
-        float z;
-        int i;
-    } order[8];
-    for (int i = 0; i < 8; ++i) {
-        order[i] = {cam[faces[i][0]].z + cam[faces[i][1]].z + cam[faces[i][2]].z, i};
-    }
-    std::sort(order, order + 8, [](const F & a, const F & b) {
-        return a.z > b.z;
-    });
-    const V3 light = norm({0.4f, 0.9f, -0.3f});
-    V3 middle = {0, 0, 0};
-    for (const V3 &v : cam) {
-        middle = middle + v * (1.0f / 6);
-    }
-    for (const F &f : order) {
-        const V3 &a = cam[faces[f.i][0]], &b = cam[faces[f.i][1]], &c = cam[faces[f.i][2]];
-        // the outward normal (away from the hull's middle); skip faces turned away
-        V3 n = norm(cross(b - a, c - a));
-        const V3 g = (a + b + c) * (1.0f / 3);
-        if (dot(n, g - middle) < 0) {
-            n = n * -1;
-        }
-        if (dot(n, g) >= 0 || a.z < NEAR || b.z < NEAR || c.z < NEAR) {
-            continue;
-        }
-        const float lit = 0.35f + 0.65f * fabsf(dot(n, light));
-        const V3 t[3] = {a, b, c};
-        poly(fb, t, 3, shade(colors[f.i], lit));
-        const uint16_t trim = f.i < 4 ? hex(0xF0F8FF) : hex(0x2EE8FF);
-        edge(fb, a, b, trim);
-        edge(fb, b, c, trim);
-        edge(fb, c, a, trim);
-    }
-    const V3 tail = to_cam(pos + V3{0, 0.06f, -0.46f});
-    if (tail.z > NEAR) {
-        const P2 p = project(tail);
-        const float flick = 0.8f + 0.2f * sinf(time_ * 60);
-        glow(fb, p.x, p.y, 13 * flick, rgb(40, 150, 255), 0);
-        glow(fb, p.x, p.y, 4.5f, rgb(220, 240, 255), 0.6f);
-    }
+    static const Mesh ship = {verts, 6, tris, colors, 8};
+    Pose pose;
+    pose.pos = center(z_) + V3{ox_, oy_, 0};
+    pose.roll = -vx_ * 0.16f, pose.pitch = vy_ * 0.05f, pose.scale = 0.8f;
+    MeshStyle style;
+    style.outline = true, style.trim = hex(0xF0F8FF), style.trim2 = hex(0x2EE8FF), style.split = 4;
+    draw_mesh(fb, cam_, ship, pose, style);
+    const float flick = 0.8f + 0.2f * sinf(time_ * 60);
+    const V3 tail = pose_point(pose, {0, 0.06f, -0.58f});
+    cam_.glow_at(fb, tail, 0.08f * 13 * flick, rgb(40, 150, 255), 0, 13 * flick);
+    cam_.glow_at(fb, tail, 0.03f * 13, rgb(220, 240, 255), 0.6f, 4.5f);
 }
 
 }  // namespace
