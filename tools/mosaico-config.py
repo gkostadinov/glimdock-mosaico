@@ -33,6 +33,9 @@ Swifty) an empty string clears it.
               photos: where the camera keeps its photos, {"share": a
               share's name, "path": a folder in it} (default: the first
               share, "Mosaico Photos").
+              swifty: Swifty's own folder, the only place it writes (notes,
+              lists, schedules), {"share", "path"} (default: the photos
+              share, "Swifty").
 
 The file must be an absolute path, owned by you, with mode 0600. Its contents
 never appear on a command line or in a log: they reach the Mosaico CLI
@@ -62,7 +65,7 @@ SECTIONS = {
     "swifty": ("llm_url", "llm_key", "llm_model", "asr_url", "asr_key", "asr_model", "asr_ca", "search_key"),
     "glimdock": ("endpoint", "token", "setup_token", "ca", "ssid", "password", "private_reader_file"),
     "home": ("hub", "pairing_code"),
-    "files": ("shares", "photos"),
+    "files": ("shares", "photos", "swifty"),
 }
 SHARE_KEYS = ("name", "host", "share", "user", "password", "path")
 TEMPLATE = {
@@ -174,13 +177,14 @@ def load(path: str) -> dict:
                     raise ValueError(f"files.shares: unknown keys {', '.join(bad)}")
                 if any(not isinstance(v, str) for v in x.values()) or not x.get("host") or not x.get("share"):
                     raise ValueError("files.shares: each share needs host and share, all values strings")
-            photos = section.get("photos", {})
-            if (
-                not isinstance(photos, dict)
-                or set(photos) - {"share", "path"}
-                or any(not isinstance(v, str) for v in photos.values())
-            ):
-                raise ValueError('files.photos: expected {"share": "...", "path": "..."}')
+            for key in ("photos", "swifty"):
+                folder = section.get(key, {})
+                if (
+                    not isinstance(folder, dict)
+                    or set(folder) - {"share", "path"}
+                    or any(not isinstance(v, str) for v in folder.values())
+                ):
+                    raise ValueError(f'files.{key}: expected {{"share": "...", "path": "..."}}')
         elif any(not isinstance(v, str) for v in section.values()):
             raise ValueError(f"{name}: values must be strings")
     reader = data.get("glimdock", {}).get("private_reader_file")

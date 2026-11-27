@@ -23,7 +23,8 @@ void files_app_open(lv_obj_t *screen);
 void files_app_set_active(bool active);
 
 // The "files" configuration section: {"shares": [{"name", "host", "share",
-// "user", "password", "path"}], "photos": {"share", "path"}}. Returns null
+// "user", "password", "path"}], "photos": {"share", "path"}, "swifty":
+// {"share", "path"}}. Returns null
 // when saved, else a reason.
 const char *files_app_config_apply(const char *json, size_t length);
 // The shares without their passwords (JSON).
@@ -54,6 +55,13 @@ void files_app_summary(files_summary_t *out);
 // path lists the places. Read gives a text file's start.
 void files_app_tool_list(const char *path, char *out, size_t capacity);
 void files_app_tool_read(const char *path, char *out, size_t capacity);
+// Swifty's own folder ("Swifty" among the places; the "files" section's
+// "swifty": {"share", "path"}, by default the photos share, "Swifty"): the
+// only place it may write. Paths are inside it ("notes/shopping.md", or with
+// "Swifty/" in front). Write replaces the file, or appends to it; text kinds
+// only, 16 KB a write, 256 KB a file. Delete takes a file or an empty folder.
+void files_app_tool_write(const char *path, const char *text, bool append, char *out, size_t capacity);
+void files_app_tool_delete(const char *path, char *out, size_t capacity);
 
 #ifdef __cplusplus
 }

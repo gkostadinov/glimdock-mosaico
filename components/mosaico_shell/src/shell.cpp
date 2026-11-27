@@ -43,6 +43,7 @@
 #include "sdkconfig.h"
 #include "shell_internal.h"
 #include "time_zone.h"
+#include "reminders.h"
 #include "web_settings.h"
 #include "tusb.h"
 
@@ -833,6 +834,19 @@ void read_file(const char *a, char *out, size_t cap)
     files_app_tool_read(path.c_str(), out, cap);
 }
 
+void write_file(const char *a, char *out, size_t cap)
+{
+    JsonDocument d = args(a);
+    const std::string path = d["path"] | "", text = d["text"] | "", mode = d["mode"] | "replace";
+    files_app_tool_write(path.c_str(), text.c_str(), mode == "append", out, cap);
+}
+
+void delete_file(const char *a, char *out, size_t cap)
+{
+    const std::string path = args(a)["path"] | "";
+    files_app_tool_delete(path.c_str(), out, cap);
+}
+
 void level(const char *, char *out, size_t cap)
 {
     float x, y, z;
@@ -927,10 +941,20 @@ void register_all()
                         R"({"type":"object","properties":{"on":{"type":"boolean"}},"required":["on"]})", flashlight);
     swifty_app_add_tool("list_files",
                         "List a folder on the NAS shares or the board (Files). Empty path: the places. Paths start with a place, "
-                        "e.g. Media/Videos or Photos.",
+                        "e.g. Media/Videos or Photos. Swifty is your own folder (notes, lists, schedules).",
                         R"({"type":"object","properties":{"path":{"type":"string"}},"required":[]})", list_files);
     swifty_app_add_tool("read_file", "Read a text file from the NAS shares or the board (its start, a few KB).",
                         R"({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})", read_file);
+    swifty_app_add_tool("write_file",
+                        "Write a text file in your own folder, Swifty, on the NAS (the only place you can write): notes, "
+                        "lists, plans, schedules, in Markdown unless named otherwise. mode replace (default) writes the "
+                        "whole file, so read_file it first when it exists; append adds to its end (a list, a log). The "
+                        "person sees it in Files, Swifty.",
+                        R"({"type":"object","properties":{"path":{"type":"string","description":"Inside your folder, e.g. notes.md or lists/shopping.md"},)"
+                        R"("text":{"type":"string"},"mode":{"type":"string","enum":["replace","append"]}},"required":["path","text"]})",
+                        write_file);
+    swifty_app_add_tool("delete_file", "Delete a file, or an empty folder, in your Swifty folder. Ask first.",
+                        R"({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})", delete_file);
     swifty_app_add_tool("level", "How the board is tilted (the Tools app's level).", R"({"type":"object","properties":{},"required":[]})",
                         level);
     swifty_app_add_tool("interaction_board",
@@ -1364,6 +1388,7 @@ extern "C" esp_err_t mosaico_shell_start(void)
         swifty_app_config_section("home", home_apply, home_status);
         swifty_app_config_section("files", files_app_config_apply, files_app_config_status);
         agent_tools::register_all();
+        reminders_start();
     }
     // Files and Tools: plain black full-panel screens.
     for (lv_obj_t **scr : {

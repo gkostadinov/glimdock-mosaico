@@ -69,11 +69,18 @@ struct Entry {
 
 std::mutex cfg_lock;
 std::vector<Share> shares;
+void make_folders(const std::string &path);  // (Swifty's folder, below)
 // Where the camera keeps its photos: a share (by name) and a folder in it.
 struct PhotoDest {
     std::string share, path;
 } photo_dest;
 constexpr const char *DEFAULT_PHOTO_PATH = "Mosaico Photos";
+// Swifty's own folder, the one place it may write: a share (by name; default
+// the photos share) and a folder in it.
+struct SwiftyDest {
+    std::string share, path;
+} swifty_dest;
+constexpr const char *DEFAULT_SWIFTY_PATH = "Swifty";
 // One SMB connection, used by the Files worker and the camera's uploads.
 std::recursive_mutex smb_lock;
 
@@ -102,10 +109,12 @@ void load_shares()
     for (JsonObjectConst s : arr)
         list.push_back({s["name"] | "", s["host"] | "", s["share"] | "", s["user"] | "", s["password"] | "", s["path"] | ""});
     PhotoDest dest{doc["photos"]["share"] | "", doc["photos"]["path"] | ""};
+    SwiftyDest swifty{doc["swifty"]["share"] | "", doc["swifty"]["path"] | ""};
     std::fill(text.begin(), text.end(), '\0');
     std::lock_guard<std::mutex> g(cfg_lock);
     shares = std::move(list);
     photo_dest = dest;
+    swifty_dest = swifty;
 }
 
 bool jpeg_name(const std::string &n)
@@ -292,6 +301,9 @@ bool list_dir(const Source &src, const std::string &path, std::vector<Entry> &ou
             return false;
         }
         const int64_t t0 = esp_timer_get_time();
+        if (src.writable && src.name == "Swifty" && path.empty()) {
+            make_folders(src.root);  // Swifty's folder: there before anything is written
+        }
         smb2dir *d = smb2_opendir(smb.ctx, smb_path(src, path).c_str());
         ESP_LOGI(TAG, "SMB: opendir \"%s\" %s after %d ms", smb_path(src, path).c_str(), d ? "ok" : smb2_get_error(smb.ctx),
                  int((esp_timer_get_time() - t0) / 1000));
@@ -602,6 +614,38 @@ std::string photo_folder()
     return p;
 }
 
+// Swifty's share: the one named in "swifty", else the photos share.
+int swifty_share()
+{
+    std::string want;
+    {
+        std::lock_guard<std::mutex> g(cfg_lock);
+        want = swifty_dest.share;
+    }
+    if (want.empty()) {
+        return photo_share();
+    }
+    std::lock_guard<std::mutex> g(cfg_lock);
+    for (size_t i = 0; i < shares.size(); ++i)
+        if (want == shares[i].name || want == shares[i].share) {
+            return int(i);
+        }
+    return -1;
+}
+
+std::string swifty_folder()
+{
+    std::lock_guard<std::mutex> g(cfg_lock);
+    std::string p = swifty_dest.path.empty() ? DEFAULT_SWIFTY_PATH : swifty_dest.path;
+    while (!p.empty() && (p.front() == '/' || p.front() == '\\')) {
+        p.erase(p.begin());
+    }
+    while (!p.empty() && (p.back() == '/' || p.back() == '\\')) {
+        p.pop_back();
+    }
+    return p;
+}
+
 bool safe_name(const char *name)
 {
     if (!name || !name[0] || strlen(name) > 64) {
@@ -813,6 +857,18 @@ std::vector<Source> make_sources()
             }
         }
         out.push_back({Kind::Smb, "Photos", "Camera photos \xC2\xB7 \\\\" + host + "\\" + share + "\\" + folder, folder, dest, true});
+    }
+    const int own = swifty_share();
+    if (own >= 0) {
+        const std::string folder = swifty_folder();
+        std::string host, share;
+        {
+            std::lock_guard<std::mutex> g(cfg_lock);
+            if (own < int(shares.size())) {
+                host = shares[size_t(own)].host, share = shares[size_t(own)].share;
+            }
+        }
+        out.push_back({Kind::Smb, "Swifty", "Swifty's notes \xC2\xB7 \\\\" + host + "\\" + share + "\\" + folder, folder, own, true});
     }
     if (mosaico_storage_ready())
         out.push_back({Kind::Local, "This board", mosaico_storage_status(), MOSAICO_STORAGE_ROOT, -1, false});
@@ -1175,8 +1231,8 @@ extern "C" const char *files_app_config_apply(const char *json, size_t length)
         return "expected an object";
     }
     for (JsonPair kv : doc.as<JsonObject>())
-        if (strcmp(kv.key().c_str(), "shares") && strcmp(kv.key().c_str(), "photos")) {
-            return "unknown key (use shares, photos)";
+        if (strcmp(kv.key().c_str(), "shares") && strcmp(kv.key().c_str(), "photos") && strcmp(kv.key().c_str(), "swifty")) {
+            return "unknown key (use shares, photos, swifty)";
         }
     if (!doc["shares"].is<JsonArray>()) {
         return "shares must be a list";
@@ -1197,6 +1253,27 @@ extern "C" const char *files_app_config_apply(const char *json, size_t length)
         }
         clean["photos"]["share"] = doc["photos"]["share"] | "";
         clean["photos"]["path"] = doc["photos"]["path"] | "";
+    }
+    if (!doc["swifty"].isNull()) {
+        if (!doc["swifty"].is<JsonObject>()) {
+            return "swifty must be an object with share and path";
+        }
+        for (JsonPair kv : doc["swifty"].as<JsonObject>()) {
+            if (strcmp(kv.key().c_str(), "share") && strcmp(kv.key().c_str(), "path")) {
+                return "unknown swifty key (use share, path)";
+            }
+            if (!kv.value().is<const char *>()) {
+                return "swifty values must be strings";
+            }
+        }
+        clean["swifty"]["share"] = doc["swifty"]["share"] | "";
+        clean["swifty"]["path"] = doc["swifty"]["path"] | "";
+    } else {
+        std::lock_guard<std::mutex> g(cfg_lock);  // not given: as it was
+        if (!swifty_dest.share.empty() || !swifty_dest.path.empty()) {
+            clean["swifty"]["share"] = swifty_dest.share;
+            clean["swifty"]["path"] = swifty_dest.path;
+        }
     }
     static const char *const KEYS[] = {"name", "host", "share", "user", "password", "path"};
     for (JsonObjectConst s : doc["shares"].as<JsonArrayConst>()) {
@@ -1284,6 +1361,8 @@ extern "C" void files_app_config_status(char *out, size_t capacity)
         std::lock_guard<std::mutex> g(cfg_lock);
         doc["photos"]["share"] = photo_dest.share;
         doc["photos"]["path"] = photo_dest.path.empty() ? DEFAULT_PHOTO_PATH : photo_dest.path;
+        doc["swifty"]["share"] = swifty_dest.share;
+        doc["swifty"]["path"] = swifty_dest.path.empty() ? DEFAULT_SWIFTY_PATH : swifty_dest.path;
     }
     serializeJson(doc, out, capacity);
 }
@@ -1399,4 +1478,240 @@ extern "C" void files_app_tool_read(const char *path, char *out, size_t capacity
         text += "\n[\xE2\x80\xA6 the rest of the file is cut]";
     }
     strlcpy(out, text.c_str(), capacity);
+}
+
+// ---- Swifty's folder: the one place it may write ----------------------------------------------
+namespace {
+constexpr size_t MAX_WRITE = 16 * 1024, MAX_NOTE = 256 * 1024;
+
+// A path inside Swifty's folder from what Swifty names ("notes/shopping.md",
+// or the same with "Swifty/" in front): up to four plain names. A file without
+// an extension becomes Markdown; only text kinds may be written.
+bool swifty_rel(const char *in, bool file, std::string *rel, std::string *error)
+{
+    std::string p = in ? in : "";
+    for (char &c : p)
+        if (c == '\\') {
+            c = '/';
+        }
+    while (!p.empty() && p.front() == '/') {
+        p.erase(p.begin());
+    }
+    while (!p.empty() && p.back() == '/') {
+        p.pop_back();
+    }
+    if (!strncasecmp(p.c_str(), "Swifty/", 7)) {
+        p.erase(0, 7);
+    } else if (!strcasecmp(p.c_str(), "Swifty")) {
+        p.clear();
+    }
+    if (p.empty()) {
+        *error = "Name a file in your folder, e.g. notes.md or lists/shopping.md.";
+        return false;
+    }
+    std::vector<std::string> parts;
+    for (size_t start = 0;;) {
+        const size_t slash = p.find('/', start);
+        parts.push_back(p.substr(start, slash == std::string::npos ? std::string::npos : slash - start));
+        if (slash == std::string::npos) {
+            break;
+        }
+        start = slash + 1;
+    }
+    if (parts.size() > 4) {
+        *error = "Keep to three folders deep.";
+        return false;
+    }
+    for (const std::string &part : parts) {
+        bool ok = !part.empty() && part.size() <= 64 && part[0] != '.' && part.back() != ' ' && part.back() != '.';
+        for (char c : part) {
+            ok &= uint8_t(c) >= 0x20 && !strchr("<>:\"|?*", c);
+        }
+        if (!ok) {
+            *error = "\"" + part + "\" cannot be a file or folder name.";
+            return false;
+        }
+    }
+    if (file) {
+        std::string &name = parts.back();
+        const size_t dot = name.rfind('.');
+        if (dot == std::string::npos) {
+            name += ".md";
+        } else {
+            std::string ext = name.substr(dot + 1);
+            for (char &c : ext) {
+                c = char(tolower(uint8_t(c)));
+            }
+            static const char *const TEXT[] = {"md", "txt", "json", "csv", "ics", "yaml", "yml", "log"};
+            bool ok = false;
+            for (const char *t : TEXT) {
+                ok |= ext == t;
+            }
+            if (!ok) {
+                *error = "Only text files: .md, .txt, .json, .csv, .ics, .yaml or .log.";
+                return false;
+            }
+        }
+    }
+    rel->clear();
+    for (const std::string &part : parts) {
+        *rel = join(*rel, part);
+    }
+    return true;
+}
+
+// Each folder of path, made when missing (smb_lock held).
+void make_folders(const std::string &path)
+{
+    for (size_t slash = path.find('/');; slash = path.find('/', slash + 1)) {
+        const std::string upto = path.substr(0, slash);
+        if (!upto.empty()) {
+            smb2_mkdir(smb.ctx, upto.c_str());  // fails harmlessly when it exists
+        }
+        if (slash == std::string::npos) {
+            break;
+        }
+    }
+}
+
+// Connected to Swifty's share, its folder made (smb_lock held).
+bool swifty_open(std::string *folder, std::string *error)
+{
+    const int share = swifty_share();
+    if (share < 0) {
+        *error = "No NAS share is set up for my folder (Settings, Web settings: Files).";
+        return false;
+    }
+    if (!smb_connect(share, error)) {
+        return false;
+    }
+    *folder = swifty_folder();
+    make_folders(*folder);
+    return true;
+}
+
+bool write_at(smb2fh *fh, const std::string &data, uint64_t at)
+{
+    const uint32_t chunk = std::max<uint32_t>(4096, std::min<uint32_t>(smb2_get_max_write_size(smb.ctx), 64 * 1024));
+    for (size_t sent = 0; sent < data.size();) {
+        const int w = smb2_pwrite(smb.ctx, fh, reinterpret_cast<const uint8_t *>(data.data()) + sent,
+                                  uint32_t(std::min<size_t>(chunk, data.size() - sent)), at + sent);
+        if (w <= 0) {
+            return false;
+        }
+        sent += size_t(w);
+    }
+    return true;
+}
+}  // namespace
+
+extern "C" void files_app_tool_write(const char *path, const char *text, bool append, char *out, size_t capacity)
+{
+    std::string rel, error, folder;
+    const size_t n = text ? strlen(text) : 0;
+    if (!swifty_rel(path, true, &rel, &error)) {
+        strlcpy(out, error.c_str(), capacity);
+        return;
+    }
+    if (n > MAX_WRITE) {
+        strlcpy(out, "That is too much for one write (16 KB at most): split it.", capacity);
+        return;
+    }
+    std::lock_guard<std::recursive_mutex> g(smb_lock);
+    if (!swifty_open(&folder, &error)) {
+        strlcpy(out, error.c_str(), capacity);
+        return;
+    }
+    const std::string full = join(folder, rel), shown = "Swifty/" + rel;
+    const size_t slash = full.rfind('/');
+    if (slash != std::string::npos) {
+        make_folders(full.substr(0, slash));
+    }
+    if (append) {
+        smb2fh *fh = smb2_open(smb.ctx, full.c_str(), O_WRONLY | O_CREAT);
+        if (!fh) {
+            snprintf(out, capacity, "Could not open %s: %s", shown.c_str(), smb2_get_error(smb.ctx));
+            smb_close();
+            return;
+        }
+        struct smb2_stat_64 st = {};
+        smb2_fstat(smb.ctx, fh, &st);
+        const uint64_t at = st.smb2_size;
+        if (at + n > MAX_NOTE) {
+            smb2_close(smb.ctx, fh);
+            snprintf(out, capacity, "%s would grow past 256 KB: start another file.", shown.c_str());
+            return;
+        }
+        std::string data;
+        uint8_t last = '\n';
+        if (at && n && text[0] != '\n' && smb2_pread(smb.ctx, fh, &last, 1, at - 1) == 1 && last != '\n') {
+            data = "\n";  // a new line for what is added
+        }
+        data.append(text, n);
+        const bool ok = write_at(fh, data, at);
+        smb2_close(smb.ctx, fh);
+        if (!ok) {
+            snprintf(out, capacity, "Writing %s failed: %s", shown.c_str(), smb2_get_error(smb.ctx));
+            smb_close();
+            return;
+        }
+        ESP_LOGI(TAG, "Swifty added %u bytes to %s", unsigned(data.size()), full.c_str());
+        snprintf(out, capacity, "Added to %s (now %u bytes).", shown.c_str(), unsigned(at + data.size()));
+        return;
+    }
+    // A whole new text: written beside the file, then put in its place, so
+    // a failed write never leaves half a file.
+    const std::string part = full + ".part";
+    smb2fh *fh = smb2_open(smb.ctx, part.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+    if (!fh) {
+        snprintf(out, capacity, "Could not create %s: %s", shown.c_str(), smb2_get_error(smb.ctx));
+        smb_close();
+        return;
+    }
+    const bool ok = write_at(fh, std::string(text ? text : "", n), 0);
+    smb2_close(smb.ctx, fh);
+    if (!ok) {
+        smb2_unlink(smb.ctx, part.c_str());
+        snprintf(out, capacity, "Writing %s failed: %s", shown.c_str(), smb2_get_error(smb.ctx));
+        smb_close();
+        return;
+    }
+    smb2_unlink(smb.ctx, full.c_str());  // fails harmlessly when the file is new
+    if (smb2_rename(smb.ctx, part.c_str(), full.c_str()) < 0) {
+        snprintf(out, capacity, "Saved as %s.part but could not rename it: %s", shown.c_str(), smb2_get_error(smb.ctx));
+        return;
+    }
+    ESP_LOGI(TAG, "Swifty saved %s (%u bytes)", full.c_str(), unsigned(n));
+    snprintf(out, capacity, "Saved %s (%u bytes).", shown.c_str(), unsigned(n));
+}
+
+extern "C" void files_app_tool_delete(const char *path, char *out, size_t capacity)
+{
+    std::string rel, error, folder;
+    if (!swifty_rel(path, false, &rel, &error)) {
+        strlcpy(out, error.c_str(), capacity);
+        return;
+    }
+    std::lock_guard<std::recursive_mutex> g(smb_lock);
+    if (!swifty_open(&folder, &error)) {
+        strlcpy(out, error.c_str(), capacity);
+        return;
+    }
+    std::string full = join(folder, rel);
+    struct smb2_stat_64 st = {};
+    if (smb2_stat(smb.ctx, full.c_str(), &st) < 0 && rel.find('.') == std::string::npos &&
+            smb2_stat(smb.ctx, (full + ".md").c_str(), &st) == 0) {
+        full += ".md", rel += ".md";  // named without its extension
+    } else if (smb2_stat(smb.ctx, full.c_str(), &st) < 0) {
+        snprintf(out, capacity, "There is no Swifty/%s.", rel.c_str());
+        return;
+    }
+    const bool dir = st.smb2_type == SMB2_TYPE_DIRECTORY;
+    if ((dir ? smb2_rmdir(smb.ctx, full.c_str()) : smb2_unlink(smb.ctx, full.c_str())) < 0) {
+        snprintf(out, capacity, dir ? "Swifty/%s is a folder with files in it: delete them first." : "Could not delete Swifty/%s.",
+                 rel.c_str());
+        return;
+    }
+    ESP_LOGI(TAG, "Swifty deleted %s", full.c_str());
+    snprintf(out, capacity, "Deleted Swifty/%s.", rel.c_str());
 }

@@ -63,6 +63,9 @@ typedef struct {
     bool password, token, setup_token, ca;
 } glimdock_connection_info_t;
 void glimdock_app_connection_info(glimdock_connection_info_t *out);
+// The reminder chime on the speaker (three rising notes, twice), queued:
+// returns at once. Plays whatever Glimdock's own sound setting.
+bool glimdock_app_play_reminder(void);
 
 #ifdef __cplusplus
 }

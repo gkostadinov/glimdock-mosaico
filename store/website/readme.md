@@ -13,7 +13,9 @@ wall companion for your homelab and home.
   music, TV and plugs, paired with a one-time display code.
 - **Swifty**: a voice and text assistant for any OpenAI-compatible model, with
   push-to-talk speech, optional web search, and tools to open apps and control
-  the board (lights, IR TV remote, Interaction module).
+  the board (lights, IR TV remote, Interaction module). It keeps notes, lists
+  and schedules in its own folder on your NAS, and sets reminders that come up
+  over any app with a chime.
 - **Camera** and **Gallery**: viewfinder, filters, photos and NAS sync for the
   camera module, which detects whether it faces front or rear. In the gallery,
   tap a photo to hide the controls, and double-tap or pinch to zoom.

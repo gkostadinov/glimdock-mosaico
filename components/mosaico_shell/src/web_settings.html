@@ -267,7 +267,7 @@ function renderHome() {
 
 function renderFiles() {
   const fs = status.files || { shares: [], photos: {} };
-  const s = sectionBox("Files", "Network shares for Files and the camera's photos");
+  const s = sectionBox("Files", "Network shares for Files, the camera's photos and Swifty's notes");
   const list = el("div");
   s.append(list);
   const shares = [];
@@ -295,17 +295,23 @@ function renderFiles() {
   const add = el("button", { type: "button", className: "small", textContent: "Add a share" });
   add.onclick = () => { addShare(); changed(); };
   s.append(add);
-  const photosShare = el("select");
+  // Where the camera's photos go, and Swifty's own folder (the one place it writes).
+  const photosShare = el("select"), swiftyShare = el("select");
   const photosPath = field("text", "Photos folder", (fs.photos || {}).path, "Mosaico Photos");
+  const swiftyPath = field("text", "Swifty's folder", (fs.swifty || {}).path, "Swifty");
   const pick = el("label", {}, "Camera photos go to", photosShare);
+  const pickSwifty = el("label", {}, "Swifty's notes and lists go to", swiftyShare);
   function refreshPhotos() {
-    const keep = photosShare.value || (fs.photos || {}).share || "";
-    photosShare.replaceChildren(el("option", { value: "", textContent: "The first share" }),
-      ...shares.map(x => x.f.name.value()).filter(Boolean).map(n => el("option", { value: n, textContent: n })));
-    photosShare.value = [...photosShare.options].some(o => o.value === keep) ? keep : "";
+    const names = shares.map(x => x.f.name.value()).filter(Boolean);
+    for (const [select, saved, first] of [[photosShare, fs.photos, "The first share"], [swiftyShare, fs.swifty, "The photos share"]]) {
+      const keep = select.value || (saved || {}).share || "";
+      select.replaceChildren(el("option", { value: "", textContent: first }),
+        ...names.map(n => el("option", { value: n, textContent: n })));
+      select.value = [...select.options].some(o => o.value === keep) ? keep : "";
+    }
   }
   refreshPhotos();
-  s.append(el("div", { className: "grid" }, pick, photosPath.box));
+  s.append(el("div", { className: "grid" }, pick, photosPath.box, pickSwifty, swiftyPath.box));
   const { button } = actions(s, "Save", async say => {
     const out = shares.map(({ f }) => {
       const o = {};
@@ -313,7 +319,8 @@ function renderFiles() {
       if (f.password.changed()) o.password = f.password.value();
       return o;
     });
-    const change = { shares: out, photos: { share: photosShare.value, path: photosPath.value() } };
+    const change = { shares: out, photos: { share: photosShare.value, path: photosPath.value() },
+      swifty: { share: swiftyShare.value, path: swiftyPath.value() } };
     if (await saveSection("files", change, say)) await reload();
   });
   s.addEventListener("input", () => { changed(); refreshPhotos(); });
