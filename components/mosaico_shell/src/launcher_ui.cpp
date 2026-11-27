@@ -319,7 +319,7 @@ void update_widget(int slot)
             if (*c != '*' && *c != '`' && *c != '#') {
                 plain += *c == '\n' ? ' ' : *c;
             }
-        set_text(w.line1, plain.empty() ? (ui.swifty.configured ? "Hold the AI key and ask me anything." : "Set me up with mosaico-config.py.")
+        set_text(w.line1, plain.empty() ? (ui.swifty.configured ? "Hold the AI key and ask me anything." : "Set me up in Settings, Web settings.")
                  : plain.c_str());
         set_text(w.title, ui.swifty.listening ? "Listening\xE2\x80\xA6" : ui.swifty.busy ? "Thinking\xE2\x80\xA6" : "Swifty");
         break;

@@ -712,7 +712,7 @@ void start_listening()
         return;
     }
     if (!config().asr_ready()) {
-        add_note("Speech isn't set up yet. Load my settings with tools/mosaico-config.py.");
+        add_note("Speech isn't set up yet. Add a speech server in Settings, Web settings.");
         shoot(Shot::Confused);
         return;
     }
@@ -954,7 +954,7 @@ void new_chat(lv_event_t *)
 void refresh_hint()
 {
     const Config c = config();
-    lv_label_set_text(U.empty_hint, !c.llm_ready() ? "Load my settings with tools/mosaico-config.py to start."
+    lv_label_set_text(U.empty_hint, !c.llm_ready() ? "Set me up first: Settings, Web settings, then open the page it shows on a phone or computer."
                       : c.asr_ready() ? "Hold the mic or the AI key and ask me anything. Tap the camera to show me something."
                       : "Type to me, or tap the camera to show me something.");
 }

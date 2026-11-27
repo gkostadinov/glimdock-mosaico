@@ -937,7 +937,7 @@ void render()
             row(y, s.kind == Kind::Smb ? "nas" : i == 0 ? "image" : "folder", s.name.c_str(), s.detail, int(i));
         }
         if (U.sources.size() <= 2) {
-            lv_obj_t *n = label(U.list, "Add network shares with tools/mosaico-config.py (\"files\" section).", 10, y + 6,
+            lv_obj_t *n = label(U.list, "Add network shares in Settings, Web settings: open the page it shows on a phone or computer.", 10, y + 6,
                                 384, TEXT3, 14);
             wrap_label(n);
         }
