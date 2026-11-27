@@ -5,6 +5,8 @@
 // macOS never configured the camera with a bulk one). A task sends the latest
 // pushed frame whenever the computer has the stream open. Stopping uninstalls
 // it and starts ESP-Iris again.
+// The same device is also a USB microphone (UAC2, 48 kHz mono, 16-bit): the
+// board's microphone, read only while the computer has its stream open.
 // The descriptors follow Espressif's usb_device_uvc (Apache-2.0), which itself
 // cannot be used here: it adds its own TinyUSB configuration and descriptor
 // callbacks, which clash with ESP-Iris's esp_tinyusb.
@@ -12,10 +14,16 @@
 
 #include <string.h>
 
+#include <math.h>
+
 #include <algorithm>
 #include <atomic>
 #include <mutex>
 
+#include "board_mic.h"
+#include "bsp/esp_mosaico.h"
+#include "esp_attr.h"
+#include "esp_codec_dev.h"
 #include "esp_heap_caps.h"
 #include "esp_iris.h"
 #include "esp_log.h"
@@ -33,7 +41,7 @@ namespace {
 constexpr int RING = 10;  // control requests kept for the report
 const char *TAG = "webcam";
 constexpr uint8_t EP_IN = 0x81;
-constexpr uint8_t STR_CAMERA = 4;
+constexpr uint8_t STR_CAMERA = 4, STR_MIC = 5;
 constexpr size_t MAX_FRAME = 512 * 1024;  // a 720p JPEG with room to spare
 
 #define WEBCAM_CLOCK_HZ 27000000
@@ -73,13 +81,63 @@ constexpr int FRAMES = sizeof(FRAME_W) / sizeof(*FRAME_W);
                                             VIDEO_COLOR_COEF_SMPTE170M),                                                     \
         TUD_VIDEO_DESC_STD_VS(1, 1, 1, STR_CAMERA), TUD_VIDEO_DESC_EP_ISO(EP_IN, _epsize, 1)
 
-constexpr size_t CONFIG_LEN = TUD_CONFIG_DESC_LEN + WEBCAM_DESC_LEN;
+// The microphone: an audio function (control interface 2, streaming
+// interface 3) after the camera's two. One clock (48 kHz, fixed), the
+// microphone terminal, a feature unit (the computer's input level and mute)
+// and the USB streaming terminal; 1 ms packets on an asynchronous
+// isochronous endpoint (TinyUSB sends 47 to 49 samples a packet as its
+// buffer drifts, see CFG_TUD_AUDIO_EP_IN_FLOW_CONTROL).
+#define MIC_ITF 2
+#define MIC_EP_IN 0x82
+#define MIC_RATE 48000
+#define MIC_CLOCK 0x04
+#define MIC_TERMINAL 0x01
+#define MIC_FEATURE 0x02
+#define MIC_USB_TERMINAL 0x03
+#define MIC_PACKET CFG_TUD_AUDIO_FUNC_1_EP_IN_SZ_MAX
+static_assert(MIC_PACKET >= (MIC_RATE / 1000 + 1) * 2, "a 1 ms packet with one sample over");
+
+#define MIC_DESC_LEN                                                                                                     \
+    (TUD_AUDIO20_DESC_IAD_LEN + TUD_AUDIO20_DESC_STD_AC_LEN + TUD_AUDIO20_DESC_CS_AC_LEN + TUD_AUDIO20_DESC_CLK_SRC_LEN + \
+     TUD_AUDIO20_DESC_INPUT_TERM_LEN + TUD_AUDIO20_DESC_OUTPUT_TERM_LEN + TUD_AUDIO20_DESC_FEATURE_UNIT_LEN(1) +          \
+     2 * TUD_AUDIO20_DESC_STD_AS_LEN + TUD_AUDIO20_DESC_CS_AS_INT_LEN + TUD_AUDIO20_DESC_TYPE_I_FORMAT_LEN +              \
+     TUD_AUDIO20_DESC_STD_AS_ISO_EP_LEN + TUD_AUDIO20_DESC_CS_AS_ISO_EP_LEN)
+
+// _interval: 1 ms (high speed counts 2^(n-1) microframes, full speed frames).
+#define MIC_DESC(_interval)                                                                                              \
+    TUD_AUDIO20_DESC_IAD(MIC_ITF, 2, STR_MIC), TUD_AUDIO20_DESC_STD_AC(MIC_ITF, 0, STR_MIC),                             \
+        TUD_AUDIO20_DESC_CS_AC(0x0200, AUDIO20_FUNC_MICROPHONE,                                                          \
+                               TUD_AUDIO20_DESC_CLK_SRC_LEN + TUD_AUDIO20_DESC_INPUT_TERM_LEN +                          \
+                                   TUD_AUDIO20_DESC_OUTPUT_TERM_LEN + TUD_AUDIO20_DESC_FEATURE_UNIT_LEN(1),              \
+                               0),                                                                                       \
+        TUD_AUDIO20_DESC_CLK_SRC(MIC_CLOCK, AUDIO20_CLOCK_SOURCE_ATT_INT_FIX_CLK,                                        \
+                                 AUDIO20_CTRL_R << AUDIO20_CLOCK_SOURCE_CTRL_CLK_FRQ_POS, MIC_TERMINAL, 0),              \
+        TUD_AUDIO20_DESC_INPUT_TERM(MIC_TERMINAL, AUDIO_TERM_TYPE_IN_GENERIC_MIC, MIC_USB_TERMINAL, MIC_CLOCK, 1,         \
+                                    AUDIO20_CHANNEL_CONFIG_NON_PREDEFINED, 0, 0, 0),                                     \
+        TUD_AUDIO20_DESC_OUTPUT_TERM(MIC_USB_TERMINAL, AUDIO_TERM_TYPE_USB_STREAMING, MIC_TERMINAL, MIC_FEATURE,          \
+                                     MIC_CLOCK, 0, 0),                                                                   \
+        TUD_AUDIO20_DESC_FEATURE_UNIT(MIC_FEATURE, MIC_TERMINAL, 0,                                                      \
+                                      AUDIO20_CTRL_RW << AUDIO20_FEATURE_UNIT_CTRL_MUTE_POS |                            \
+                                          AUDIO20_CTRL_RW << AUDIO20_FEATURE_UNIT_CTRL_VOLUME_POS,                       \
+                                      0),                                                                                \
+        TUD_AUDIO20_DESC_STD_AS_INT(MIC_ITF + 1, 0, 0, 0), TUD_AUDIO20_DESC_STD_AS_INT(MIC_ITF + 1, 1, 1, 0),             \
+        TUD_AUDIO20_DESC_CS_AS_INT(MIC_USB_TERMINAL, AUDIO20_CTRL_NONE, AUDIO20_FORMAT_TYPE_I,                           \
+                                   AUDIO20_DATA_FORMAT_TYPE_I_PCM, 1, AUDIO20_CHANNEL_CONFIG_NON_PREDEFINED, 0),         \
+        TUD_AUDIO20_DESC_TYPE_I_FORMAT(2, 16),                                                                           \
+        TUD_AUDIO20_DESC_STD_AS_ISO_EP(MIC_EP_IN,                                                                        \
+                                       (uint8_t)((uint8_t)TUSB_XFER_ISOCHRONOUS | (uint8_t)TUSB_ISO_EP_ATT_ASYNCHRONOUS | \
+                                                 (uint8_t)TUSB_ISO_EP_ATT_DATA),                                         \
+                                       MIC_PACKET, _interval),                                                           \
+        TUD_AUDIO20_DESC_CS_AS_ISO_EP(AUDIO20_CS_AS_ISO_DATA_EP_ATT_NON_MAX_PACKETS_OK, AUDIO20_CTRL_NONE,               \
+                                      AUDIO20_CS_AS_ISO_DATA_EP_LOCK_DELAY_UNIT_UNDEFINED, 0)
+
+constexpr size_t CONFIG_LEN = TUD_CONFIG_DESC_LEN + WEBCAM_DESC_LEN + MIC_DESC_LEN;
 
 const tusb_desc_device_t DEVICE = {
     .bLength = sizeof(tusb_desc_device_t),
     .bDescriptorType = TUSB_DESC_DEVICE,
     .bcdUSB = 0x0200,
-    // An Interface Association Descriptor groups the video interfaces.
+    // Interface Association Descriptors group the video and the audio interfaces.
     .bDeviceClass = TUSB_CLASS_MISC,
     .bDeviceSubClass = MISC_SUBCLASS_COMMON,
     .bDeviceProtocol = MISC_PROTOCOL_IAD,
@@ -96,13 +154,13 @@ const tusb_desc_device_t DEVICE = {
     .bNumConfigurations = 1,
 };
 
-const uint8_t HS_CONFIG[] = {TUD_CONFIG_DESCRIPTOR(1, 2, 0, CONFIG_LEN, 0x80, 100), WEBCAM_DESC(1024)};
-const uint8_t FS_CONFIG[] = {TUD_CONFIG_DESCRIPTOR(1, 2, 0, CONFIG_LEN, 0x80, 100), WEBCAM_DESC(1023)};
-static_assert(sizeof(HS_CONFIG) == CONFIG_LEN, "webcam configuration descriptor length");
+const uint8_t HS_CONFIG[] = {TUD_CONFIG_DESCRIPTOR(1, 4, 0, CONFIG_LEN, 0x80, 100), WEBCAM_DESC(1024), MIC_DESC(4)};
+const uint8_t FS_CONFIG[] = {TUD_CONFIG_DESCRIPTOR(1, 4, 0, CONFIG_LEN, 0x80, 100), WEBCAM_DESC(1023), MIC_DESC(1)};
+static_assert(sizeof(HS_CONFIG) == CONFIG_LEN && sizeof(FS_CONFIG) == CONFIG_LEN, "webcam configuration descriptor length");
 
 char serial[13];
 const char LANGID[] = {0x09, 0x04};
-const char *STRINGS[] = {LANGID, "Glimdock", "ESP-Mosaico Camera", serial, "ESP-Mosaico Camera"};
+const char *STRINGS[] = {LANGID, "Glimdock", "ESP-Mosaico Camera", serial, "ESP-Mosaico Camera", "ESP-Mosaico Microphone"};
 
 std::atomic<bool> active{false}, stopping{false}, owns_usb{false};
 std::mutex frame_lock;
@@ -131,6 +189,11 @@ struct {
     Req ring[RING] = {};
     std::atomic<int> requests{0}, xfers{0}, suspends{0}, resumes{0};
     int64_t last_suspend = -1, last_resume = -1;
+    // The microphone: streams the computer opened, reads, failed reads, times
+    // Swifty had it, bytes the buffer had no room for, packets sent and of
+    // them empty (nothing buffered), the loudest sample on each I2S slot.
+    std::atomic<int> mic_opens{0}, mic_reads{0}, mic_fail{0}, mic_waits{0}, mic_dropped{0}, mic_packets{0}, mic_empty{0};
+    std::atomic<int> mic_peak_l{0}, mic_peak_r{0};
     // Is TinyUSB's task alive: a call queued to it every 100 ms, how many ran
     // and the longest wait.
     std::atomic<int> pings{0}, pongs{0};
@@ -182,6 +245,9 @@ bool video_xfer(uint8_t rhport, uint8_t ep, xfer_result_t result, uint32_t bytes
 // SET_CONFIGURATION, and the camera never shows up).
 uint16_t video_open(uint8_t rhport, tusb_desc_interface_t const *itf, uint16_t max_len)
 {
+    if (itf->bInterfaceClass != TUSB_CLASS_VIDEO) {
+        return 0;  // the microphone's: TinyUSB's audio driver
+    }
     ++R.opens;
     R.open_class = uint32_t(itf->bInterfaceClass) << 16 | uint32_t(itf->bInterfaceSubClass) << 8 | itf->bInterfaceProtocol;
     R.open_max_len = max_len;
@@ -202,6 +268,149 @@ const usbd_class_driver_t VIDEO_DRIVER = {
 };
 std::atomic<bool> installing{false};
 
+// ---- microphone -------------------------------------------------------------------------
+// Read while the computer has the stream open (alternate setting 1): the
+// codec at the speaker's format (48 kHz, two 16-bit slots), so a chime
+// during a call does not reformat it; the left slot is the microphone.
+namespace mic {
+constexpr int FRAMES = 240;  // one I2S DMA buffer: 5 ms
+constexpr int16_t VOLUME_MIN = -30 * 256, VOLUME_MAX = 20 * 256;  // 1/256 dB
+std::atomic<bool> wanted{false}, muted{false};
+std::atomic<int16_t> volume{0};
+std::atomic<int32_t> gain{4096};  // volume as a 4.12 factor
+TaskHandle_t task = nullptr;
+
+void want(bool on)
+{
+    wanted = on;
+    if (TaskHandle_t t = task) {
+        xTaskNotifyGive(t);
+    }
+}
+
+void set_volume(int16_t v)
+{
+    v = std::clamp(v, VOLUME_MIN, VOLUME_MAX);
+    volume = v;
+    gain = int32_t(lroundf(4096.f * powf(10.f, v / 256.f / 20.f)));
+}
+
+// Up to n bytes into TinyUSB's buffer (never more than it has room for: its
+// reader is the endpoint's interrupt).
+void put(const void *data, uint16_t n)
+{
+    tu_fifo_t *ff = tud_audio_get_ep_in_ff();
+    if (!ff) {
+        return;
+    }
+    const uint16_t room = tu_fifo_remaining(ff) & ~1u;
+    if (n > room) {
+        R.mic_dropped += n - room;
+        n = room;
+    }
+    if (n) {
+        tud_audio_write(data, n);
+    }
+}
+
+void silence(uint16_t n)
+{
+    static const int16_t zero[FRAMES] = {};
+    while (n) {
+        const uint16_t k = std::min<uint16_t>(n, sizeof(zero));
+        put(zero, k);
+        n -= k;
+    }
+}
+
+void task_main(void *)
+{
+    esp_codec_dev_handle_t dev = nullptr;
+    bool open = false;
+    // After opening: reads still settling (the ADC's power-up thump, full
+    // scale for ~100 ms, goes out as silence), then samples of fade-in.
+    int settle = 0, ramp = 0;
+    constexpr int SETTLE_READS = 30, RAMP = 480;  // 150 ms, 10 ms
+    int16_t pcm[FRAMES * 2], out[FRAMES];
+    while (!stopping) {
+        if (!wanted || !tud_mounted()) {
+            if (open) {
+                esp_codec_dev_close(dev);
+                board_mic_release("webcam");
+                open = false;
+                ESP_LOGI(TAG, "microphone closed");
+            }
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200));
+            continue;
+        }
+        if (!open) {
+            if (!board_mic_claim("webcam")) {  // Swifty is listening: silence until it is done
+                ++R.mic_waits;
+                silence(MIC_RATE / 100 * 2);
+                vTaskDelay(1);  // 10 ms
+                continue;
+            }
+            dev = bsp_audio_codec_microphone_init();
+            esp_codec_dev_sample_info_t format = {};
+            format.bits_per_sample = 16;
+            format.channel = 2;
+            format.sample_rate = MIC_RATE;
+            if (!dev || esp_codec_dev_open(dev, &format) != ESP_CODEC_DEV_OK) {
+                board_mic_release("webcam");
+                ++R.mic_fail;
+                ESP_LOGW(TAG, "microphone unavailable");
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+                continue;
+            }
+            esp_codec_dev_set_in_gain(dev, 30.0f);  // as Swifty's speech
+            open = true;
+            settle = SETTLE_READS, ramp = 0;
+            ++R.mic_opens;
+            // Start half full: the reads come in 5 ms steps, the packets every 1 ms.
+            silence(tud_audio_get_ep_in_fifo_threshold() & ~1u);
+            ESP_LOGI(TAG, "microphone streaming to the computer");
+        }
+        if (esp_codec_dev_read(dev, pcm, sizeof(pcm)) != ESP_CODEC_DEV_OK) {
+            ++R.mic_fail;
+            vTaskDelay(1);
+            continue;
+        }
+        ++R.mic_reads;
+        if (settle > 0) {
+            --settle;
+            silence(sizeof(out));
+            continue;
+        }
+        const int32_t g = muted ? 0 : gain.load();
+        int peak_l = 0, peak_r = 0;
+        for (int i = 0; i < FRAMES; ++i) {
+            const int32_t l = pcm[2 * i], r = pcm[2 * i + 1];
+            peak_l = std::max(peak_l, int(abs(l)));
+            peak_r = std::max(peak_r, int(abs(r)));
+            int32_t v = (l * g) >> 12;
+            if (ramp < RAMP) {
+                v = v * ramp++ / RAMP;
+            }
+            out[i] = int16_t(std::clamp<int32_t>(v, -32768, 32767));
+        }
+        if (peak_l > R.mic_peak_l) {  // after settling: what the computer gets
+            R.mic_peak_l = peak_l;
+        }
+        if (peak_r > R.mic_peak_r) {
+            R.mic_peak_r = peak_r;
+        }
+        put(out, sizeof(out));
+    }
+    if (open) {
+        esp_codec_dev_close(dev);
+        board_mic_release("webcam");
+    }
+    task = nullptr;
+    vTaskDelay(pdMS_TO_TICKS(20));  // a USB callback that read the handle just before may still notify it
+    vTaskDeleteWithCaps(nullptr);   // its stack is in PSRAM
+}
+}  // namespace mic
+
 void usb_event(tinyusb_event_t *event, void *)
 {
     if (event->id == TINYUSB_EVENT_ATTACHED) {
@@ -211,6 +420,7 @@ void usb_event(tinyusb_event_t *event, void *)
         }
     } else if (event->id == TINYUSB_EVENT_DETACHED) {
         ++R.unmounts;
+        mic::want(false);
     } else if (event->id == TINYUSB_EVENT_SUSPENDED) {
         ++R.suspends;
         R.last_suspend = session_ms();
@@ -310,6 +520,95 @@ extern "C" int tud_video_commit_cb(uint_fast8_t, uint_fast8_t, video_probe_and_c
     return VIDEO_ERROR_NONE;
 }
 
+// The microphone's stream: alternate setting 1 of its streaming interface is
+// open, 0 closed (TinyUSB empties its buffer then).
+extern "C" bool tud_audio_set_itf_cb(uint8_t, tusb_control_request_t const *rq)
+{
+    if (tu_u16_low(rq->wIndex) == MIC_ITF + 1 && tu_u16_low(rq->wValue) == 1) {
+        mic::want(true);
+    }
+    return true;
+}
+
+extern "C" bool tud_audio_set_itf_close_ep_cb(uint8_t, tusb_control_request_t const *rq)
+{
+    if (tu_u16_low(rq->wIndex) == MIC_ITF + 1) {
+        mic::want(false);
+    }
+    return true;
+}
+
+// From the endpoint's interrupt: a packet went out (n bytes; 0 when nothing
+// was buffered).
+extern "C" IRAM_ATTR bool tud_audio_tx_done_isr(uint8_t, uint16_t n, uint8_t, uint8_t, uint8_t)
+{
+    ++R.mic_packets;
+    if (!n) {
+        ++R.mic_empty;
+    }
+    return true;
+}
+
+// The computer asks: the clock's rate (and that it is valid), the input
+// level and mute. Anything else stalls ("not here").
+extern "C" bool tud_audio_get_req_entity_cb(uint8_t rhport, tusb_control_request_t const *rq)
+{
+    const uint8_t channel = tu_u16_low(rq->wValue), control = tu_u16_high(rq->wValue);
+    const uint8_t entity = tu_u16_high(rq->wIndex);
+    if (entity == MIC_CLOCK && control == AUDIO20_CS_CTRL_SAM_FREQ) {
+        if (rq->bRequest == AUDIO20_CS_REQ_CUR) {
+            // Through the driver's buffer: it takes the rate from this reply.
+            uint32_t rate = MIC_RATE;
+            return tud_audio_buffer_and_schedule_control_xfer(rhport, rq, &rate, sizeof(rate));
+        }
+        if (rq->bRequest == AUDIO20_CS_REQ_RANGE) {
+            audio20_control_range_4_n_t(1) range = {};
+            range.wNumSubRanges = 1;
+            range.subrange[0].bMin = range.subrange[0].bMax = MIC_RATE;
+            range.subrange[0].bRes = 0;
+            return tud_audio_buffer_and_schedule_control_xfer(rhport, rq, &range, sizeof(range));
+        }
+    } else if (entity == MIC_CLOCK && control == AUDIO20_CS_CTRL_CLK_VALID && rq->bRequest == AUDIO20_CS_REQ_CUR) {
+        uint8_t valid = 1;
+        return tud_audio_buffer_and_schedule_control_xfer(rhport, rq, &valid, sizeof(valid));
+    } else if (entity == MIC_FEATURE && channel == 0) {
+        if (control == AUDIO20_FU_CTRL_MUTE && rq->bRequest == AUDIO20_CS_REQ_CUR) {
+            uint8_t muted = mic::muted;
+            return tud_audio_buffer_and_schedule_control_xfer(rhport, rq, &muted, sizeof(muted));
+        }
+        if (control == AUDIO20_FU_CTRL_VOLUME && rq->bRequest == AUDIO20_CS_REQ_CUR) {
+            int16_t volume = mic::volume;
+            return tud_audio_buffer_and_schedule_control_xfer(rhport, rq, &volume, sizeof(volume));
+        }
+        if (control == AUDIO20_FU_CTRL_VOLUME && rq->bRequest == AUDIO20_CS_REQ_RANGE) {
+            audio20_control_range_2_n_t(1) range = {};
+            range.wNumSubRanges = 1;
+            range.subrange[0].bMin = mic::VOLUME_MIN;
+            range.subrange[0].bMax = mic::VOLUME_MAX;
+            range.subrange[0].bRes = 256;  // 1 dB
+            return tud_audio_buffer_and_schedule_control_xfer(rhport, rq, &range, sizeof(range));
+        }
+    }
+    return false;
+}
+
+extern "C" bool tud_audio_set_req_entity_cb(uint8_t, tusb_control_request_t const *rq, uint8_t *data)
+{
+    const uint8_t channel = tu_u16_low(rq->wValue), control = tu_u16_high(rq->wValue);
+    if (tu_u16_high(rq->wIndex) != MIC_FEATURE || channel != 0 || rq->bRequest != AUDIO20_CS_REQ_CUR) {
+        return false;
+    }
+    if (control == AUDIO20_FU_CTRL_MUTE && rq->wLength >= 1) {
+        mic::muted = data[0] != 0;
+        return true;
+    }
+    if (control == AUDIO20_FU_CTRL_VOLUME && rq->wLength >= 2) {
+        mic::set_volume(int16_t(tu_unaligned_read16(data)));
+        return true;
+    }
+    return false;
+}
+
 extern "C" esp_err_t usb_webcam_start(void)
 {
     std::lock_guard<std::mutex> g(switch_lock);
@@ -348,6 +647,9 @@ extern "C" esp_err_t usb_webcam_start(void)
     R.last_suspend = R.last_resume = -1;
     R.ping_worst = 0;
     R.last_frame_index = R.last_interval = 0;
+    R.mic_opens = R.mic_reads = R.mic_fail = R.mic_waits = R.mic_dropped = R.mic_packets = R.mic_empty = 0;
+    R.mic_peak_l = R.mic_peak_r = 0;
+    mic::wanted = false;
     tinyusb_config_t cfg = TINYUSB_DEFAULT_CONFIG(usb_event, nullptr);
     cfg.descriptor.device = &DEVICE;
     cfg.descriptor.string = STRINGS;
@@ -372,7 +674,11 @@ extern "C" esp_err_t usb_webcam_start(void)
     stopping = false;
     active = true;
     xTaskCreatePinnedToCoreWithCaps(stream_task, "webcam", 4096, nullptr, 4, &streamer, 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    ESP_LOGI(TAG, "USB webcam on: MJPEG %dx%d or %dx%d", FRAME_W[0], FRAME_H[0], FRAME_W[1], FRAME_H[1]);
+    // Above the stream task: a late read empties the computer's audio first.
+    xTaskCreatePinnedToCoreWithCaps(mic::task_main, "webcam-mic", 4096, nullptr, 5, &mic::task, 1,
+                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ESP_LOGI(TAG, "USB webcam on: MJPEG %dx%d or %dx%d, microphone %d Hz", FRAME_W[0], FRAME_H[0], FRAME_W[1], FRAME_H[1],
+             MIC_RATE);
     return ESP_OK;
 }
 
@@ -383,7 +689,10 @@ extern "C" esp_err_t usb_webcam_stop(void)
         return ESP_OK;
     }
     stopping = true;
-    for (int i = 0; i < 100 && streamer; ++i) {
+    if (TaskHandle_t t = mic::task) {
+        xTaskNotifyGive(t);
+    }
+    for (int i = 0; i < 100 && (streamer || mic::task); ++i) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     active = false;
@@ -460,13 +769,18 @@ extern "C" void usb_webcam_report(char *out, size_t cap)
     int n = snprintf(out, cap,
                      "configured at %lld ms (attached %d, detached %d); streaming at %lld ms; commits %d (frame %lu, "
                      "interval %lu); frames pushed %d, sent %d, refused %d; open x%d -> %d; suspends %d (last %lld ms), "
-                     "resumes %d (last %lld ms); TinyUSB task pings %d/%d, worst %lld ms%s%lld; xfers %d; %d requests:",
+                     "resumes %d (last %lld ms); TinyUSB task pings %d/%d, worst %lld ms%s%lld; xfers %d; mic: opened %d, "
+                     "reads %d, failed %d, waited %d, dropped %d B, packets %d (empty %d), peak L %d R %d, volume %d/256 dB%s; "
+                     "%d requests:",
                      (long long)R.mounted_at, R.mounts.load(), R.unmounts.load(), (long long)R.streaming_at,
                      R.commits.load(), (unsigned long)R.last_frame_index, (unsigned long)R.last_interval,
                      R.pushed.load(), R.sent.load(), R.xfer_fail.load(), R.opens, R.open_result, R.suspends.load(),
                      (long long)R.last_suspend, R.resumes.load(), (long long)R.last_resume, R.pongs.load(),
                      R.pings.load(), (long long)(R.ping_worst / 1000), stuck ? ", STUCK for ms " : "",
-                     (long long)(stuck ? stuck : 0), R.xfers.load(), R.requests.load());
+                     (long long)(stuck ? stuck : 0), R.xfers.load(), R.mic_opens.load(), R.mic_reads.load(),
+                     R.mic_fail.load(), R.mic_waits.load(), R.mic_dropped.load(), R.mic_packets.load(), R.mic_empty.load(),
+                     R.mic_peak_l.load(), R.mic_peak_r.load(), int(mic::volume.load()), mic::muted ? " muted" : "",
+                     R.requests.load());
     const int total = R.requests;
     for (int i = std::max(0, total - RING); i < total && n > 0 && size_t(n) < cap; ++i) {
         const auto &e = R.ring[i % RING];

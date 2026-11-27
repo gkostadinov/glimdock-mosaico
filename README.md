@@ -27,7 +27,7 @@ All of these are rendered from the desktop preview's demo data (`host/media.py`)
 | **Swifty** | Voice and text assistant: any OpenAI-compatible model, push-to-talk speech recognition over WebSocket, optional Tavily web search, and tools to open apps and drive the board (lights, IR TV remote, Interaction board). It keeps notes, lists and schedules in its own folder on the NAS (the only place it may write), and sets reminders that come up over any app with a chime and a buzz, once or every day, weekday or week. |
 | **Camera** | Viewfinder, filters and photos for the camera module; finds front or rear by itself, gallery (tap for the photo alone, double-tap or pinch to zoom), NAS sync. |
 | **Files** | The board's NAND storage and SMB shares, with image and text previews. |
-| **Tools** | Torch, spirit level, compass, calculator, the Interaction module (buttons, PIR, light sensor, LEDs, IR remote) and a USB webcam (UVC, MJPEG 1280 × 720 or 640 × 480; on a Mac, [MosaicoCam](https://github.com/gkostadinov/mosaico-cam) adds filters and upscaling). |
+| **Tools** | Torch, spirit level, compass, calculator, the Interaction module (buttons, PIR, light sensor, LEDs, IR remote) and a USB webcam with its microphone (UVC MJPEG 1280 × 720 or 640 × 480, and a UAC2 48 kHz mic; on a Mac, [MosaicoCam](https://github.com/gkostadinov/mosaico-cam) adds filters, upscaling and voice clean-up). |
 | **Settings** | Brightness, haptics, auto-rotate, the panel's corner radius, time zone, camera options and Web settings (servers and keys from a browser). |
 
 Every app works from the board's own settings; nothing points at a particular
@@ -101,7 +101,7 @@ its public IP address once Wi-Fi is up (and twice a day after that). Pick a time
 zone in Settings to turn that off.
 
 Settings and pairings live in the board's NVS and survive updates. The USB webcam
-sends video only while a computer has it open.
+sends video, and reads its microphone, only while a computer has that stream open.
 
 ## Development
 
@@ -131,7 +131,8 @@ sends video only while a computer has it open.
 | `components/camera_app` | Camera, filters, photos and gallery. |
 | `components/files_app` | NAND and SMB file browser. |
 | `components/tools_app` | Torch, level, compass, calculator, Interaction module, webcam page. |
-| `components/usb_webcam` | USB webcam mode (UVC), taking USB over from ESP-Iris while it runs. |
+| `components/usb_webcam` | USB webcam mode (UVC camera and UAC2 microphone), taking USB over from ESP-Iris while it runs. |
+| `components/board_mic` | Who has the board's one microphone: Swifty's speech or the webcam's USB microphone. |
 | `components/mosaico_storage` | Mounts Vibe Mode's NAND volume read-write without ever formatting it. |
 | `components/app_config` | Reads Vibe Mode's shared Wi-Fi settings. |
 | `components/libsmb2` | libsmb2 6.0.0 (LGPL-2.1) for SMB shares. |

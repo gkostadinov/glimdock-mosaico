@@ -10,6 +10,7 @@
 #include <mutex>
 
 #include "ArduinoJson.h"
+#include "board_mic.h"
 #include "bsp/esp_mosaico.h"
 #include "esp_codec_dev.h"
 #include "esp_crt_bundle.h"
@@ -134,6 +135,7 @@ void mic_task(void *)
         }
     }
     esp_codec_dev_close(S.mic);
+    board_mic_release("swifty");
     xEventGroupSetBits(S.bits, MIC_DONE);
     vTaskDeleteWithCaps(nullptr);
 }
@@ -569,12 +571,18 @@ bool asr_start(const AsrEvents &events)
     if (!S.ring) {
         return false;
     }
+    // The computer may have it (webcam mode's USB microphone).
+    if (!board_mic_claim("swifty")) {
+        ESP_LOGW(TAG, "microphone in use (%s)", board_mic_owner() ? board_mic_owner() : "?");
+        return false;
+    }
     esp_codec_dev_sample_info_t format = {};
     format.bits_per_sample = 16;
     format.channel = 1;
     format.sample_rate = RATE;
     if (esp_codec_dev_open(S.mic, &format) != ESP_CODEC_DEV_OK) {
         ESP_LOGW(TAG, "microphone open failed");
+        board_mic_release("swifty");
         return false;
     }
     esp_codec_dev_set_in_gain(S.mic, 30.0f);

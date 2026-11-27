@@ -90,7 +90,7 @@ The shell registers RPCs on service `0x4744` (18244), callable with
 | 30 | app (`00` launcher … `07` Gallery), then a Tools tab or a Glimdock page (`00` Systems, `01` Clock, … `0A` Agents) | Opens an app. |
 | 41, 42 | text / `01`, `00` | Swifty says something / listens. |
 | 43 | seconds, `01` (encode with no computer watching), rotation ÷ 90 + 1, `02` (YUV420) | A timed USB webcam session that ends by itself. |
-| 44 | none | The last webcam session: USB setup, stream commits, frames, the latest control requests. |
+| 44 | none | The last webcam session: USB setup, stream commits, frames, the microphone (reads, packets, empty packets, peaks, the computer's input level), the latest control requests. |
 | 45 | none | The last webcam session's effect on the board: LVGL loop gaps, CPU windows, time per frame by stage. |
 | 46 | 32-bit offset (little-endian) | The last webcam JPEG, 960 bytes at a time. |
 | 47 | `01` held / `00` released / `02` a real press (down, then held 300 ms later) / `03` a touch | As the AI key: opens Swifty when needed and talks. The log times each step (Swifty shown, microphone open, connection, recognition). |

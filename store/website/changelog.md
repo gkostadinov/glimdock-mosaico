@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Webcam microphone**: in webcam mode the board is also a USB microphone
+  ("ESP-Mosaico Microphone", 48 kHz), so calls get its voice along with its
+  picture. The computer's input level and mute work; Swifty waits while the
+  computer uses it.
+
 ## 1.1.0
 
 - **Web settings**: switch it on in Settings to set servers, keys and shares

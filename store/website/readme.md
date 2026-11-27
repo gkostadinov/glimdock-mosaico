@@ -22,7 +22,7 @@ wall companion for your homelab and home.
 - **Files**: the board's storage and SMB shares, with image and text previews.
 - **Tools**: torch, spirit level, compass, calculator, the Interaction module and
   a **USB webcam** mode (1280 × 720 or 640 × 480 MJPEG, upright whichever way the
-  board is held, with the flash as a light). On a Mac,
+  board is held, with the flash as a light, plus its microphone). On a Mac,
   [MosaicoCam](https://github.com/gkostadinov/mosaico-cam) adds live filters and
   4K upscaling and passes it on to FaceTime, Zoom and the like.
 - **Settings**: brightness, haptics, auto-rotate, the panel's corner radius, time

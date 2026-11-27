@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "board_mic.h"
 #include "camera_app.h"
 #include "esp_iris.h"
 #include "esp_crt_bundle.h"
@@ -730,7 +731,9 @@ void start_listening()
     const bool started = asr_start(ev);
     ESP_LOGI(TAG, "listening: microphone open in %lld ms", (long long)((esp_timer_get_time() - t0) / 1000));
     if (!started) {
-        add_note("The microphone isn't available right now.");
+        const char *owner = board_mic_owner();
+        add_note(owner && !strcmp(owner, "webcam") ? "The computer is using the microphone (webcam mode)."
+                 : "The microphone isn't available right now.");
         shoot(Shot::Sorry);
         return;
     }
