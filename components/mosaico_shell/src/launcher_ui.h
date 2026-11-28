@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Launcher: the home screen (pages of app icons and shortcut tiles, two
-// widgets on the first page, editable like a phone's), Settings, and the corner
-// calibration overlay. Pure LVGL, shared by the device shell and the host
-// preview. Every call runs on the LVGL task (or with its lock held).
+// Launcher: the home screen (pages of app icons, shortcut tiles and widgets,
+// editable like a phone's: launcher_layout.h, launcher_widgets.h), Settings,
+// and the corner calibration overlay. Pure LVGL, shared by the device shell and
+// the host preview. Every call runs on the LVGL task (or with its lock held).
 #pragma once
 
 #include <stddef.h>
@@ -44,7 +44,9 @@ struct LauncherHooks {
     void (*brightness)(int percent, bool save);  // live while dragging; save on release
     void (*haptics)(bool enabled);
     void (*auto_rotate)(bool enabled);
-    void (*save_widgets)(int left, int right);  // the home screen's two widget kinds
+    // Unused since widgets moved into the layout (its version 2); kept so the
+    // hooks keep their order. The two kinds it saved still migrate (below).
+    void (*save_widgets)(int left, int right);
     void (*time_zone)(int step);                // Settings: the next (+1) or previous (-1) time zone choice
     void (*camera_auto)(bool enabled);          // Settings: the camera's automatic front/rear
     void (*web_settings)(bool on);              // Settings: the web settings server
@@ -61,8 +63,11 @@ struct LauncherHooks {
 };
 
 // portrait: a still of Swifty (unused; may be null).
-// widgets: the two widget kinds (see launcher_ui.cpp), -1 for the defaults.
 // layout: the text save_layout last gave (null or "" for the default layout).
+// left_widget, right_widget: the first page's two widget kinds as firmware
+// 1.2 saved them (launcher_widgets.h's first six, -1 for the defaults). Read
+// only when layout is from before widgets were items: they become its first
+// two items, so the home screen looks as it did, and it is saved migrated.
 lv_obj_t *launcher_ui_build(const LauncherHooks &hooks, int radius, int brightness, bool haptics, bool auto_rotate,
                             const lv_image_dsc_t *portrait, int left_widget = -1, int right_widget = -1,
                             const char *layout = nullptr);
@@ -74,18 +79,32 @@ void launcher_ui_entered(ShellApp app);
 void launcher_ui_calibration(bool visible, int radius);
 // Shows a home page (0 the first) at once, or Settings for 6 and up.
 void launcher_ui_show_page(int index);
-// The AI key on the launcher, one level at a time: a widget picker, the hidden
-// apps' sheet, editing, Settings, then a later page goes to the first. False
-// when there is nothing to go back from.
+// The AI key on the launcher, one level at a time: the weather's place, the
+// widget gallery, the hidden apps' sheet, editing, Settings, then a later page
+// goes to the first. False when there is nothing to go back from.
 bool launcher_ui_back();
-// Editing the home screen: jiggling icons, drag to move, − to hide, Done.
+// Editing the home screen: jiggling items, drag to move, − to hide (an app)
+// or remove (a widget), + for widgets, Done.
 void launcher_ui_edit(bool on);
-// The hidden apps' sheet (also opened from Settings and while editing).
+// The hidden apps' sheet (also opened from Settings and the widget gallery).
 void launcher_ui_hidden_apps(bool visible);
-// "page 1 of 2, layout glimdock,home,...|webcam,...#hidden" for diagnostics (RPC 53).
+// The widget gallery (+ while editing): a widget onto the page in view.
+void launcher_ui_widgets(bool visible);
+// "page 1 of 2, layout @2,w2:glimdock,glimdock,...|webcam,...#hidden" for diagnostics (RPC 53).
 size_t launcher_ui_layout(char *out, size_t capacity);
-// Replaces the layout (launcher_layout.h's text form; "" the default) and saves it.
+// Replaces the layout (launcher_layout.h's text form; "" the default) and
+// saves it. A text without widgets' "@2" gets the default two widgets first.
 void launcher_ui_set_layout(const char *layout);
+
+// ---- Which apps show (profiles) --------------------------------------------------------
+// The one place that decides it: visible(app key) false hides that app's icon
+// and the widgets that show it (launcher_widgets::Info::app: Glimdock's, Home's
+// lights and music, Swifty's), keeping their places for when it shows again.
+// Settings always shows. nullptr shows every app. Call again whenever the
+// predicate's answers change (another profile); on the LVGL task.
+void launcher_ui_set_app_filter(bool (*visible)(const char *app_key));
+// What the filter says now (true for Settings, unknown keys, and no filter).
+bool launcher_ui_app_visible(const char *app_key);
 
 // ---- Shortcut tiles ------------------------------------------------------------------
 // A tile on the home screen that runs an action instead of opening an app. The

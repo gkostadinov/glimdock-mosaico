@@ -57,6 +57,9 @@ add_executable(mosaico-preview
     "${IDEA}/components/mosaico_shell/src/launcher_ui.cpp"
     "${IDEA}/components/mosaico_shell/src/launcher_apps.cpp"
     "${IDEA}/components/mosaico_shell/src/launcher_layout.cpp"
+    "${IDEA}/components/mosaico_shell/src/launcher_widgets.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/weather_host.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/reminders_host.cpp"
     "${IDEA}/components/mosaico_ui/src/mui.cpp"
     "${IDEA}/components/mosaico_ui/src/keyboard.cpp"
     "${IDEA}/components/glimdock_port/src/glimdock_summary.cpp"
@@ -99,3 +102,8 @@ target_compile_definitions(mosaico-preview PRIVATE
     ARDUINOJSON_ENABLE_ARDUINO_STRING=0 ARDUINOJSON_ENABLE_ARDUINO_STREAM=0)
 find_package(Threads REQUIRED)
 target_link_libraries(mosaico-preview PRIVATE lvgl Threads::Threads)
+
+# Host tests for the home screen's layout: its text, the grid's packing and
+# the migration from before widgets were items (run build-host/launcher-layout-test).
+add_executable(launcher-layout-test launcher_layout_test.cpp "${IDEA}/components/mosaico_shell/src/launcher_layout.cpp")
+target_include_directories(launcher-layout-test PRIVATE "${IDEA}/components/mosaico_shell/src")

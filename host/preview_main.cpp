@@ -25,6 +25,8 @@
 #include "wifi_settings.h"
 #include "tools_app.h"
 #include "vpn_app.h"
+#include "weather.h"
+void weather_host_demo(int which);  // weather_host.cpp: which made-up forecast shows
 #include "games_app.h"
 // games_ui.cpp: the preview's synchronous frames and screens
 extern "C" void games_app_preview_frame(void);
@@ -327,6 +329,82 @@ const lv_image_dsc_t *swifty_portrait(int size)
     return &dsc;
 }
 
+// The home screen's widgets: one moved by drag, one added from the gallery,
+// the new kinds on two pages, the weather's states, and its Settings.
+void render_widgets(LauncherStatus &status, const glimdock_summary_t &glim, const home_summary_t &home,
+                    const camera_summary_t &camera, const swifty_summary_t &swifty, const files_summary_t &files)
+{
+    lv_display_t *display = lv_display_get_default();
+    const auto refresh = [&] {
+        launcher_ui_update(status, glim, home, camera, swifty, files);
+    };
+    // Hold the Lights widget: editing, and it follows the finger down among the icons.
+    launcher_ui_show_page(0);
+    gesture({342, 112}, {150, 262}, 600, 300, false);
+    save("launcher-widget-drag", display);
+    finger.down = false;
+    run_for(500);
+    print_layout("lights moved");
+    save("launcher-widget-moved", display);
+    // + then a whole row's weather: onto the first page from this one with room.
+    tap({74, 25});
+    tap({305, 90});  // Whole row
+    run_for(300);
+    tap({143, 440});  // Weather
+    run_for(600);
+    print_layout("weather added");
+    save("launcher-widget-added", display);
+    // A tap on a widget while editing: what it shows, its size, or remove it.
+    launcher_ui_show_page(0);
+    tap({138, 112});
+    save("launcher-widget-change", display);
+    launcher_ui_back();
+    tap({384, 25});  // Done
+    run_for(400);
+    // The new kinds, set as RPC 53 sets a layout: the first page, and widgets on page 2.
+    launcher_ui_set_layout("@2,w4:weather,w2:calendar,w2:reminder,glimdock,home,swifty,settings"
+                           "|w2:network,w2:battery,w4:clock,camera,gallery,files,tools"
+                           "|webcam,interaction,calculator,vpn,games");
+    refresh();
+    launcher_ui_show_page(0);
+    save("launcher-widgets", display);
+    launcher_ui_show_page(1);
+    save("launcher-widgets-page-2", display);
+    print_layout("widgets");
+    // The weather: both sizes, then rain by day, offline since an older forecast,
+    // none yet, and in Fahrenheit.
+    launcher_ui_set_layout("@2,w4:weather,w2:weather~1,w2:glimdock,glimdock,home,swifty,settings"
+                           "|camera,gallery,files,tools,webcam,interaction,calculator,vpn,games");
+    const std::pair<int, const char *> states[] = {{0, "launcher-weather"}, {3, "launcher-weather-rain"},
+        {1, "launcher-weather-offline"}, {2, "launcher-weather-locating"}
+    };
+    launcher_ui_show_page(0);
+    for (const auto &[demo, name] : states) {
+        weather_host_demo(demo);
+        refresh();
+        save(name, display);
+    }
+    weather_host_demo(0);
+    weather_set_fahrenheit(true);
+    refresh();
+    save("launcher-weather-fahrenheit", display);
+    // Settings' Weather card (at the bottom), and its place.
+    launcher_ui_show_page(6);
+    if (lv_obj_t *s = scroller(lv_display_get_screen_active(display))) {
+        lv_obj_scroll_by(s, 0, -lv_obj_get_scroll_bottom(s), LV_ANIM_OFF);
+    }
+    save("launcher-settings-weather", display);
+    weather_set_fahrenheit(false);
+    tap({240, 378});
+    save("launcher-weather-place", display);
+    launcher_ui_back();
+    launcher_ui_back();
+    launcher_ui_set_layout("");
+    refresh();
+    launcher_ui_show_page(0);
+    print_layout("widgets reset");
+}
+
 void render_launcher(int radius)
 {
     lv_display_t *display = lv_display_get_default();
@@ -428,7 +506,9 @@ void render_launcher(int radius)
     run_for(300);
     save("launcher-edit-hidden", display);
     print_layout("gallery hidden");
-    tap({74, 25});
+    tap({74, 25});  // + : the widget gallery, and the hidden apps behind it
+    save("launcher-widget-gallery", display);
+    tap({361, 36});
     save("launcher-hidden-apps", display);
     tap({90, 148});
     print_layout("gallery back");
@@ -449,6 +529,7 @@ void render_launcher(int radius)
     launcher_shortcut_remove("sc:movie");
     launcher_ui_show_page(0);
     print_layout("reset");
+    render_widgets(status, glim, home, camera, swifty, files);
     if (recording) {
         launcher_ui_entered(ShellApp::Launcher);
         record("launcher", 60, 33);
