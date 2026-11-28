@@ -91,6 +91,16 @@ pre-commit run --all-files
 The project hooks run the ESP-Mosaico toolkit's checks from the workspace
 (`../../submodule/esp-mosaico-utils`).
 
+Skyglide's and Ridge Rally's difficulty curves have a simulation on the
+computer (fixed seeds, scripted input, each game's own pilot playing real
+runs): after changing either game's tuning, check that a run still gets
+through the gentle start, lasts a few minutes and can end each way.
+
+```sh
+cmake -S components/games_app/host_test -B build-host/games-sim -DCMAKE_BUILD_TYPE=Release
+cmake --build build-host/games-sim && build-host/games-sim/games-sim
+```
+
 ## Diagnostics over ESP-Iris
 
 The shell registers RPCs on service `0x4744` (18244), callable with

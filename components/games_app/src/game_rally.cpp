@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Ridge Rally: a gravel stage through autumn pines at sunset, against the
 // clock. The road is made as you drive (curves and hills), the car slides on
-// gravel and slows off the road, rivals are there to pass, and checkpoints
-// buy time. A shake (or a tap) is a short boost. Everything is drawn with the
-// shared engine: the road's quads, the pines, rocks, arches and cars as meshes,
-// the dust as particles.
+// gravel and slows off the road, and rivals are there to pass. Every
+// checkpoint starts a new stage: less time added, more and sharper bends,
+// then puddles that slide the car, rocks and fallen logs. Driving off the
+// road and every knock damage the car (a checkpoint mends a little); a wreck,
+// or the clock running out, ends the run. A shake (or a tap) is a short
+// boost. Everything is drawn with the shared engine: the road's quads, the
+// pines, rocks, logs, arches and cars as meshes, the dust as particles.
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -19,7 +23,55 @@ namespace {
 constexpr float SEG_L = 2.0f, HALF = 3.2f;  // a road segment's length; half the road's width
 constexpr int AHEAD = 88, CHECK_EVERY = 230;
 constexpr float V_ROAD = 34, V_OFF = 15;
+constexpr float CAR = 0.27f;                // the car's half width, in road half widths
+constexpr float CARRY = 8;                  // seconds the clock carries past a checkpoint, at most
+constexpr float CLOCK_FULL = 33;            // the time meter's full scale
 constexpr uint32_t HAZE = 0xE8A07A, SKY_TOP = 0x3A2A6A;
+
+enum Hazard : uint8_t { NONE, PUDDLE, ROCK, LOG };
+
+// What a stage asks of the driver. Stage 1 is the gentle start; the curve is
+// tuned (games_sim) so a good driver lasts a few minutes, not for ever.
+struct Tuning {
+    float straight;          // the chance a stretch is straight
+    float bend_lo, bend_hi;  // a bend's sharpness (heading change a segment)
+    float hairpin;           // the chance a bend is a hairpin
+    int len_lo, len_hi;      // a stretch's length, in segments
+    float hazard_gap;        // segments from one hazard to the next, on average (0: none)
+    int kinds;               // puddles; and rocks; and logs
+    float allowance;         // seconds a checkpoint adds
+    float rival_v;           // the rivals' best speed
+};
+
+Tuning tuning(int stage)
+{
+    const float d = float(std::clamp(stage, 1, 12) - 1);
+    Tuning t;
+    t.straight = std::max(0.12f, 0.38f - 0.03f * d);
+    t.bend_lo = 0.015f + 0.002f * d, t.bend_hi = std::min(0.085f, 0.045f + 0.005f * d);
+    t.hairpin = d < 3 ? 0 : std::min(0.3f, 0.1f + 0.03f * (d - 3));
+    t.len_lo = std::max(10, 20 - int(d)), t.len_hi = std::max(30, 60 - 3 * int(d));
+    t.hazard_gap = d < 1 ? 0 : std::max(16.0f, 70 - 8 * (d - 1));
+    t.kinds = std::min(3, int(d));
+    t.allowance = std::max(15.0f, 25 - 1.2f * (d - 1));
+    t.rival_v = std::min(30.0f, 25 + 0.5f * d);
+    return t;
+}
+
+// What a new stage brings, for the HUD.
+const char *stage_news(int stage)
+{
+    switch (stage) {
+    case 2:
+        return "puddles";
+    case 3:
+        return "rocks on the road";
+    case 4:
+        return "fallen logs, hairpins";
+    default:
+        return "less time, tighter bends";
+    }
+}
 
 struct Segment {
     V3 c;          // the road's middle at the segment's start
@@ -28,6 +80,9 @@ struct Segment {
     int index;      // from the stage's start
     uint8_t left, right;  // what stands beside it: 0 nothing, 1 a pine, 2 a rock
     float lpos, rpos;     // how far out (road half-widths)
+    Hazard hazard;        // what lies on it
+    bool struck;          // hit or passed: it counts once
+    float hpos;           // where across (road half-widths; a log: the side it lies on)
 };
 
 // a rally car: a wedge of a hatchback (body, glass) and four dark wheels
@@ -75,6 +130,22 @@ const uint32_t LEAVES[3][2] = {{0xE8782A, 0xB04A18}, {0xC83A20, 0x8A2410}, {0x3A
 const V3 ROCK_V[6] = {{-0.9f, 0, -0.6f}, {0.9f, 0, -0.7f}, {1.0f, 0, 0.6f}, {-0.8f, 0, 0.7f}, {-0.2f, 1.0f, 0.1f}, {0.3f, 0.8f, -0.1f}};
 const uint8_t ROCK_T[6][3] = {{0, 1, 5}, {0, 5, 4}, {1, 2, 5}, {2, 3, 4}, {2, 4, 5}, {3, 0, 4}};
 const uint32_t ROCK_C[6] = {0x8A8078, 0x7A7068, 0x9A9088, 0x6A6058, 0xA8A098, 0x807870};
+constexpr float ROCK_SCALE = 0.75f, ROCK_R = 0.21f;  // a rock on the road, and its half width (road half widths)
+// a fallen log across half the road: a long box, its cut ends pale
+constexpr float LOG_LEN = 1.3f;  // from the middle of the road past its edge (road half widths)
+const V3 LOG_V[8] = {
+    {-2.08f, 0, -0.3f}, {2.08f, 0, -0.3f}, {2.08f, 0, 0.3f}, {-2.08f, 0, 0.3f},
+    {-2.08f, 0.55f, -0.3f}, {2.08f, 0.55f, -0.3f}, {2.08f, 0.55f, 0.3f}, {-2.08f, 0.55f, 0.3f},
+};
+const uint8_t LOG_T[12][3] = {
+    {4, 5, 6}, {4, 6, 7},  // top
+    {0, 1, 5}, {0, 5, 4}, {3, 7, 6}, {3, 6, 2},  // sides
+    {0, 4, 7}, {0, 7, 3}, {1, 2, 6}, {1, 6, 5},  // the cut ends
+    {0, 3, 2}, {0, 2, 1},  // underneath
+};
+const uint32_t LOG_C[12] = {0x9A6A3A, 0x9A6A3A, 0x7A4E28, 0x7A4E28, 0x7A4E28, 0x7A4E28,
+                            0xE0B47A, 0xE0B47A, 0xE0B47A, 0xE0B47A, 0x3A2414, 0x3A2414
+                           };
 
 struct Rival {
     float s, d, v;
@@ -98,15 +169,19 @@ public:
     void reset(uint32_t seed, bool demo) override
     {
         rng_ = Rng(seed);
+        fx_rng_ = Rng(seed ^ 0x5A5Au);
         demo_ = demo, over_ = false, score_ = 0, events_ = 0;
         road_.clear();
-        made_ = 0, bend_ = 0, bend_left_ = 0, hill_phase_ = rng_.range(0, TAU);
+        made_ = 0, bend_ = 0, bend_left_ = 0, bend_side_ = 1, next_hazard_ = 0, puddle_left_ = 0;
+        hill_phase_ = rng_.range(0, TAU);
         add_segment({0, 0, 0}, 0);
         while (int(road_.size()) < AHEAD + 20) {
             grow();
         }
-        s_ = 2, d_ = 0, vd_ = 0, v_ = 0, slip_ = 0, time_left_ = 45, clock_ = 0, boost_ = 0, boosts_ = 3, bump_ = 0;
-        checkpoints_ = 0, passed_ = 0, metres_ = 0;
+        stage_ = 1, tune_ = tuning(1);
+        s_ = 2, d_ = 0, vd_ = 0, v_ = 0, slip_ = 0, time_left_ = 28, clock_ = 0, boost_ = 0, boosts_ = 3, bump_ = 0;
+        slide_ = 0, damage_ = 0, smoke_ = 0, points_ = 0, callout_t_ = 0;
+        checkpoints_ = 0, passed_ = 0, clean_ = true;
         rivals_.clear();
         for (int i = 0; i < 5; ++i) {
             rivals_.push_back({18.0f + float(i) * 40, rng_.range(-0.5f, 0.5f), rng_.range(20, 27), 1 + i % 3});
@@ -121,77 +196,98 @@ public:
         }
         dt = std::min(dt, 0.1f);
         clock_ += dt;
-        const Input in = demo_ ? autopilot() : input;
+        callout_t_ = std::max(0.0f, callout_t_ - dt);
+        const Input in = demo_ || bot_ ? autopilot() : input;
         const Segment &here = seg_at(s_);
         const bool off = fabsf(d_) > 1.05f;
-        // throttle and brake: cruising by itself, faster held back, slower pushed
+        // throttle and brake: cruising by itself, faster held back, slower
+        // pushed; a damaged car is slower
         if (in.action && boosts_ > 0 && boost_ <= 0) {
             --boosts_;
             boost_ = 2.5f;
             events_ |= EV_POWER;
         }
         boost_ = std::max(0.0f, boost_ - dt);
-        const float top = (off ? V_OFF : V_ROAD) * (boost_ > 0 ? 1.35f : 1.0f);
+        const float top = (off ? V_OFF : V_ROAD) * (boost_ > 0 ? 1.35f : 1.0f) * (1 - 0.18f * damage_);
         const float want = in.y < -0.15f ? 0 : top * (0.78f + 0.22f * clampf(in.y, 0, 1));
         const float rate = want < v_ ? (in.y < -0.15f ? 28.0f : off ? 22.0f : 6.0f) : 12.0f;
         v_ += clampf(want - v_, -rate * dt, rate * dt);
-        // steering on gravel: the car slides, the bend pushes it wide
-        const float grip = off ? 2.5f : 4.2f;
+        // steering on gravel: the car slides, the bend pushes it wide, a puddle more so
+        slide_ = std::max(0.0f, slide_ - dt);
+        const float grip = off ? 2.5f : slide_ > 0 ? 1.4f : 4.2f;
         const float push = here.curve / SEG_L * v_ * v_ * 0.11f;
         vd_ += (in.x * 3.6f * clampf(v_ / 18, 0, 1) - push) * dt;
         vd_ *= expf(-dt * grip);
         d_ += vd_ * dt;
         slip_ += (vd_ * 0.18f - slip_) * (1 - expf(-dt * 6));
-        if (fabsf(d_) > 2.2f) {  // into the trees: a thump and a stop
+        if (fabsf(d_) > 2.2f) {  // into the trees: a thump, a stop and a dent
             d_ = d_ > 0 ? 2.2f : -2.2f;
             vd_ = -vd_ * 0.3f;
-            v_ *= 0.4f;
             if (bump_ <= 0) {
-                events_ |= EV_HIT;
+                hurt(0.06f + 0.006f * v_);
                 bump_ = 1;
             }
+            v_ *= 0.4f;
+        }
+        if (off && v_ > 4) {  // rough ground: the car takes a beating
+            hurt(0.035f * clampf(v_ / V_OFF, 0, 1) * dt, false);
         }
         bump_ = std::max(0.0f, bump_ - dt);
+        const float s0 = s_;
         s_ += v_ * dt / SEG_L;
-        metres_ += v_ * dt;
-        score_ = int(metres_ * 0.5f) + checkpoints_ * 500 + passed_ * 150;
+        hazards(s0);
+        // points: distance, more each stage; a slide through a bend
+        points_ += v_ * dt * 0.5f * (1 + 0.25f * float(stage_ - 1));
+        if (!off && v_ > 22 && fabsf(slip_) > 0.22f) {
+            points_ += 40.0f * float(stage_) * dt;
+        }
+        const int whole = int(points_);
+        score_ += whole, points_ -= float(whole);
         if (off && v_ > 6) {
             Segment p = seg_at(s_);
             const V3 at = car_world(p) + V3{0, 0.3f, 0};
-            dust_.burst(at, 2, 1.5f, hex(0xC8A070), 0.8f, 0.5f, rng_, {0, 1.2f, 0});
+            dust_.burst(at, 2, 1.5f, hex(0xC8A070), 0.8f, 0.5f, fx_rng_, {0, 1.2f, 0});
         } else if (v_ > 20 && fabsf(slip_) > 0.2f) {
             const V3 at = car_world(seg_at(s_)) + V3{0, 0.2f, 0};
-            dust_.burst(at, 1, 1, hex(0xB08860), 0.6f, 0.4f, rng_, {0, 1, 0});
+            dust_.burst(at, 1, 1, hex(0xB08860), 0.6f, 0.4f, fx_rng_, {0, 1, 0});
+        }
+        smoke_ -= dt;
+        if (damage_ > 0.5f && smoke_ <= 0) {  // a damaged car smokes
+            dust_.burst(car_world(seg_at(s_)) + V3{0, 0.9f, 0}, 1, 0.6f, hex(0x5A5450), 1.2f, 0.7f, fx_rng_, {0, 2.2f, 0});
+            smoke_ = 0.25f - 0.15f * damage_;
         }
         dust_.step(dt, {0, 0.6f, 0});
         // rivals: driven, passed, bumped
         for (Rival &r : rivals_) {
             const float before = r.s - s_;
-            r.s += r.v * dt / SEG_L;
+            // one just behind holds back (it never brakes for a bend, and
+            // being hit from behind, unseen, is no fault of the driver's)
+            const float ahead = before * SEG_L;
+            const float v = ahead < 0 && ahead > -12 && fabsf(r.d - d_) < 0.6f ? std::min(r.v, v_ * 0.9f) : r.v;
+            r.s += v * dt / SEG_L;
             r.d += (sinf(r.s * 0.05f) * 0.45f - r.d) * (1 - expf(-dt));
             const float gap = (r.s - s_) * SEG_L;
             if (before > 0 && r.s - s_ <= 0) {
                 ++passed_;
+                score_ += 150 * stage_;
                 events_ |= EV_PICKUP;
             }
-            if (fabsf(gap) < 3.2f && fabsf(r.d - d_) < 0.42f && bump_ <= 0) {
+            if (gap > -1.5f && gap < 3.2f && fabsf(r.d - d_) < 0.42f && bump_ <= 0) {
                 v_ *= 0.55f;
                 vd_ += (d_ > r.d ? 1.5f : -1.5f);
-                events_ |= EV_HIT;
+                hurt(0.06f);
                 bump_ = 1;
             }
             if (gap < -30) {  // far behind: it comes round again ahead
                 r.s = s_ + float(AHEAD) * 0.8f + rng_.range(0, 20);
-                r.v = rng_.range(19, 27) + float(checkpoints_);
+                r.v = rng_.range(tune_.rival_v - 7, tune_.rival_v);
                 r.paint = 1 + rng_.below(3);
             }
         }
-        // checkpoints buy time
+        // a checkpoint: the next stage, time added, the car mended a little
         const int seg = int(s_);
         if (seg / CHECK_EVERY > checkpoints_) {
-            ++checkpoints_;
-            time_left_ += std::max(14.0f, 26 - float(checkpoints_) * 1.5f);
-            events_ |= EV_LEVEL;
+            checkpoint();
         }
         while (!road_.empty() && road_.front().index < seg - 6) {
             road_.pop_front();
@@ -201,14 +297,16 @@ public:
         }
         time_left_ -= demo_ ? 0 : dt;
         warn_ -= dt;
-        if (time_left_ < 8 && warn_ <= 0) {
+        if (!demo_ && (time_left_ < 8 || damage_ > 0.75f) && warn_ <= 0) {
             events_ |= EV_WARN;
             warn_ = 2;
         }
-        if (time_left_ <= 0) {
+        if (damage_ >= 1) {
+            damage_ = 1;
+            end("Wrecked");
+        } else if (time_left_ <= 0) {
             time_left_ = 0;
-            over_ = true;
-            events_ |= EV_OVER;
+            end("Out of time");
         }
     }
 
@@ -217,14 +315,22 @@ public:
     void hud(Hud *h) const override
     {
         h->score = score_;
-        h->meter = time_left_ / 60;
+        h->meter = time_left_ / CLOCK_FULL;
         h->meter_color = time_left_ < 8 ? 0xFF5A3C : 0xFFB066;
         h->meter_name = "Time";
-        snprintf(h->line, sizeof(h->line), "%d km/h · stage %d · %d %s", int(v_ * 4.2f), checkpoints_ + 1, boosts_, boosts_ == 1 ? "boost" : "boosts");
+        h->meter2 = 1 - damage_;
+        h->meter2_color = damage_ > 0.75f ? 0xFF4A3A : damage_ > 0.5f ? 0xFFC040 : 0x8ADC6A;
+        h->meter2_name = "Car";
+        h->stage = stage_;
+        if (callout_t_ > 0) {
+            snprintf(h->line, sizeof(h->line), "%s", callout_);
+        } else {
+            snprintf(h->line, sizeof(h->line), "Stage %d · %d km/h · %d %s", stage_, int(v_ * 4.2f), boosts_, boosts_ == 1 ? "boost" : "boosts");
+        }
     }
     const char *ending() const override
     {
-        return "Out of time";
+        return ending_;
     }
     void profile(char *out, int capacity) override
     {
@@ -232,6 +338,105 @@ public:
     }
 
 private:
+    void say(const char *format, ...)
+    {
+        va_list args;
+        va_start(args, format);
+        vsnprintf(callout_, sizeof(callout_), format, args);
+        va_end(args);
+        callout_t_ = 1.8f;
+    }
+
+    void end(const char *why)
+    {
+        over_ = true;
+        events_ |= EV_OVER;
+        snprintf(ending_, sizeof(ending_), "%s on stage %d", why, stage_);
+    }
+
+    // Damage: a knock (a buzz), or rough ground a little at a time. The title
+    // screen's car takes none.
+    void hurt(float amount, bool knock = true)
+    {
+        if (knock) {
+            events_ |= EV_HIT;
+        }
+        if (demo_) {
+            return;
+        }
+        damage_ = std::min(1.0f, damage_ + amount);
+        clean_ = false;
+    }
+
+    void checkpoint()
+    {
+        ++checkpoints_;
+        const int done = stage_;
+        if (!demo_) {
+            score_ += (500 + 25 * int(time_left_)) * done + (clean_ ? 300 * done : 0);
+        }
+        stage_ = demo_ ? std::min(3, checkpoints_ + 1) : checkpoints_ + 1;
+        tune_ = tuning(stage_);
+        time_left_ = std::min(CARRY, time_left_) + tune_.allowance;
+        damage_ = std::max(0.0f, damage_ - 0.2f);
+        if (checkpoints_ % 2 == 0 && boosts_ < 3) {
+            ++boosts_;
+        }
+        events_ |= EV_LEVEL;
+        say(clean_ ? "Clean! +%d s · stage %d · %s" : "Checkpoint +%d s · stage %d · %s", int(tune_.allowance), stage_, stage_news(stage_));
+        clean_ = true;
+    }
+
+    // What lies on the road: a rock or a log hit (or passed close: points),
+    // a puddle that slides the car.
+    void hazards(float s0)
+    {
+        for (Segment &g : road_) {
+            if (float(g.index) > s_ + 1) {
+                break;
+            }
+            if (!g.hazard || g.struck) {
+                continue;
+            }
+            if (g.hazard == PUDDLE) {
+                if (int(s_) == g.index && fabsf(d_ - g.hpos) < 0.45f + CAR) {
+                    g.struck = true;
+                    if (slide_ < 0.3f) {
+                        vd_ += (fx_rng_.f() < 0.5f ? -1.0f : 1.0f) * fx_rng_.range(1.0f, 2.0f) * clampf(v_ / 30, 0.3f, 1.2f);
+                        v_ *= 0.9f;
+                    }
+                    slide_ = 0.9f;
+                    dust_.burst(car_world(seg_at(s_)) + V3{0, 0.2f, 0}, 6, 3, hex(0x9AB4D0), 0.5f, 0.5f, fx_rng_, {0, 2, 0});
+                }
+                continue;
+            }
+            const float at = float(g.index) + 0.5f;
+            if (s0 >= at || s_ < at) {
+                continue;
+            }
+            g.struck = true;
+            float gap;
+            if (g.hazard == ROCK) {
+                gap = fabsf(d_ - g.hpos) - (CAR + ROCK_R);
+            } else {
+                const float lo = g.hpos > 0 ? 0 : -LOG_LEN, hi = g.hpos > 0 ? LOG_LEN : 0;
+                gap = std::max(lo - (d_ + CAR), (d_ - CAR) - hi);
+            }
+            if (gap < 0) {
+                hurt((g.hazard == ROCK ? 0.2f : 0.15f) + 0.004f * v_);
+                vd_ += d_ > g.hpos ? 1.8f : -1.8f;
+                v_ *= g.hazard == ROCK ? 0.35f : 0.4f;
+                bump_ = 1;
+                dust_.burst(car_world(seg_at(s_)) + V3{0, 0.5f, 0}, 10, 4, hex(g.hazard == ROCK ? 0x9A9088 : 0xB08050), 0.7f, 0.5f, fx_rng_,
+                {0, 1.5f, 0});
+            } else if (gap < 0.3f && !demo_) {
+                const int points = 100 * stage_;
+                score_ += points;
+                say("Close shave +%d", points);
+            }
+        }
+    }
+
     void add_segment(V3 c, float heading)
     {
         Segment g{};
@@ -239,15 +444,26 @@ private:
         road_.push_back(g);
     }
 
-    // The road goes on: straights and bends of random length and sharpness,
-    // rolling hills, pines and rocks beside it.
+    // The road goes on: straights and bends of random length and sharpness
+    // (more, sharper and shorter each stage, and hairpins), rolling hills,
+    // pines and rocks beside it, and, from stage 2, what lies on it.
     void grow()
     {
+        const int stage = 1 + made_ / CHECK_EVERY;
+        const Tuning t = tuning(demo_ ? std::min(stage, 3) : stage);
         Segment &last = road_.back();
         if (bend_left_ <= 0) {
-            const bool straight = rng_.f() < 0.35f;
-            bend_ = straight ? 0 : rng_.range(0.015f, 0.05f) * (rng_.f() < 0.5f ? -1 : 1) * std::min(1.4f, 1 + float(made_) / 4000);
-            bend_left_ = 20 + rng_.below(40);
+            if (rng_.f() < t.straight) {
+                bend_ = 0;
+                bend_left_ = t.len_lo + rng_.below(t.len_hi - t.len_lo);
+            } else {
+                // mostly the other way from the last bend: a road that keeps
+                // turning one way loops back over itself
+                bend_side_ = rng_.f() < 0.7f ? -bend_side_ : bend_side_;
+                const bool hairpin = rng_.f() < t.hairpin;
+                bend_ = (hairpin ? rng_.range(0.08f, 0.11f) : rng_.range(t.bend_lo, t.bend_hi)) * float(bend_side_);
+                bend_left_ = hairpin ? 14 + rng_.below(10) : t.len_lo + rng_.below(t.len_hi - t.len_lo);
+            }
         }
         --bend_left_;
         last.curve = bend_;
@@ -262,6 +478,23 @@ private:
         g.right = (r >> 13) % 3 == 0 ? uint8_t(1 + ((r >> 19) % 4 == 0)) : 0;
         g.lpos = 1.8f + float((r >> 21) % 100) / 100 * 3.5f;
         g.rpos = 1.8f + float((r >> 25) % 100) / 100 * 3.5f;
+        // hazards: none just after a checkpoint's arch or right before one
+        const int within = g.index % CHECK_EVERY;
+        if (puddle_left_ > 0) {  // a puddle is three segments long
+            --puddle_left_;
+            g.hazard = PUDDLE, g.hpos = road_.back().hpos;
+        } else if (t.hazard_gap > 0 && g.index >= next_hazard_ && within > 16 && within < CHECK_EVERY - 6) {
+            g.hazard = Hazard(1 + rng_.below(t.kinds));
+            if (g.hazard == PUDDLE) {
+                g.hpos = rng_.range(-0.5f, 0.5f);
+                puddle_left_ = 2;
+            } else if (g.hazard == ROCK) {
+                g.hpos = rng_.range(-0.7f, 0.7f);
+            } else {
+                g.hpos = rng_.f() < 0.5f ? -1.0f : 1.0f;
+            }
+            next_hazard_ = g.index + int(t.hazard_gap * rng_.range(0.6f, 1.4f));
+        }
         road_.push_back(g);
     }
 
@@ -286,28 +519,77 @@ private:
         return p.c + right_of(p.heading) * (d_ * HALF);
     }
 
-    // For the title screen: along the middle, braking for sharp bends.
+    // The title screen's driver (and the tests'): round what lies on the
+    // road and the rivals, braking for the sharpest bend coming up.
     Input autopilot() const
     {
         Input in;
         in.absolute = true;
-        const Segment &ahead = seg_at(s_ + 6);
-        in.x = clampf(-d_ * 1.2f + ahead.curve * 22 - vd_ * 0.3f, -1, 1);
-        in.y = fabsf(ahead.curve) > 0.04f && v_ > 26 ? -0.5f : 0.6f;
-        for (const Rival &r : rivals_) {  // round a rival ahead
-            const float gap = (r.s - s_) * SEG_L;
-            if (gap > 0 && gap < 14 && fabsf(r.d - d_) < 0.6f) {
-                in.x = clampf(in.x + (d_ > r.d ? 0.8f : -0.8f), -1, 1);
+        float sharp = 0;
+        for (int k = 2; k <= 18; ++k) {
+            sharp = std::max(sharp, fabsf(seg_at(s_ + float(k)).curve));
+        }
+        const float safe = sqrtf(3.0f / std::max(1e-4f, sharp / SEG_L * 0.11f));  // where the bend pushes as hard as the tyres hold
+        // where to be across the road: the place nearest the middle (and
+        // where the car is) that is clear of what lies ahead and the rivals
+        // (nearer ones count for more: the car needs a second and a half to cross the road)
+        struct Span {
+            float lo, hi, weight;
+        } blocked[8];
+        int n = 0;
+        for (const Segment &g : road_) {
+            if (float(g.index) > s_ + 44 || n == 8) {
+                break;
+            }
+            if (float(g.index) + 1 < s_ || !g.hazard || g.struck) {
+                continue;
+            }
+            const float m = 0.12f, weight = 10 - 8 * clampf((float(g.index) - s_) / 44, 0, 1);  // to spare
+            if (g.hazard == LOG) {
+                blocked[n++] = g.hpos > 0 ? Span{-CAR - m, LOG_LEN + CAR, weight} : Span{-LOG_LEN - CAR, CAR + m, weight};
+            } else {
+                const float w = (g.hazard == ROCK ? ROCK_R : 0.45f) + CAR + m;
+                blocked[n++] = {g.hpos - w, g.hpos + w, weight};
             }
         }
+        for (const Rival &r : rivals_) {
+            const float gap = (r.s - s_) * SEG_L;
+            if (gap > -2 && gap < 30 && n < 8) {
+                blocked[n++] = {r.d - 0.58f, r.d + 0.58f, 10 - 8 * clampf(gap / 30, 0, 1)};
+            }
+        }
+        float target = d_, best = 1e9f;
+        for (int i = -9; i <= 9; ++i) {
+            const float t = float(i) * 0.1f;
+            float cost = fabsf(t) * 0.3f + fabsf(t - d_) * 0.5f;
+            for (int k = 0; k < n; ++k) {
+                cost += t > blocked[k].lo && t < blocked[k].hi ? blocked[k].weight : 0;
+            }
+            if (cost < best) {
+                best = cost, target = t;
+            }
+        }
+        const Segment &here = seg_at(s_);
+        const float push = here.curve / SEG_L * v_ * v_ * 0.11f, authority = 3.6f * clampf(v_ / 18, 0.2f, 1);
+        in.x = clampf((target - d_) * 2.5f - vd_ * 0.5f + push / authority, -1, 1);
+        // and slower again to move across in a bend: the bend takes the grip
+        const float bend = std::max(fabsf(here.curve), fabsf(seg_at(s_ + 6).curve));
+        const float room = fabsf(target - d_) > 0.25f ? sqrtf(1.6f / std::max(1e-4f, bend / SEG_L * 0.11f)) : 1e9f;
+        in.y = v_ > std::min(safe, room) + 1 ? -0.6f : bot_ ? 1.0f : 0.6f;
+        in.action = bot_ && time_left_ < 10 && sharp < 0.03f;
         return in;
     }
 
-    Rng rng_;
+    Rng rng_, fx_rng_;
     std::deque<Segment> road_;
-    int made_ = 0, bend_left_ = 0, checkpoints_ = 0, passed_ = 0, boosts_ = 3;
+    int made_ = 0, bend_left_ = 0, bend_side_ = 1, next_hazard_ = 0, puddle_left_ = 0;
+    int stage_ = 1, checkpoints_ = 0, passed_ = 0, boosts_ = 3;
+    Tuning tune_ = tuning(1);
     float bend_ = 0, hill_phase_ = 0;
-    float s_ = 2, d_ = 0, vd_ = 0, v_ = 0, slip_ = 0, time_left_ = 45, clock_ = 0, boost_ = 0, bump_ = 0, warn_ = 0, metres_ = 0;
+    float s_ = 2, d_ = 0, vd_ = 0, v_ = 0, slip_ = 0, time_left_ = 28, clock_ = 0, boost_ = 0, bump_ = 0, warn_ = 0;
+    float slide_ = 0, damage_ = 0, smoke_ = 0, points_ = 0, callout_t_ = 0;
+    bool clean_ = true;  // no damage since the last checkpoint
+    char callout_[64] = "", ending_[48] = "";
     std::vector<Rival> rivals_;
     Particles dust_;
     Camera cam_;
@@ -371,6 +653,31 @@ void Rally::render(uint16_t *fb)
             cam_.edge_world(fb, r, r + V3{0, 3.4f, 0}, hex(0xF0F0F0));
             const V3 banner[4] = {l + V3{0, 3.4f, 0}, r + V3{0, 3.4f, 0}, r + V3{0, 2.6f, 0}, l + V3{0, 2.6f, 0}};
             cam_.poly_world(fb, banner, 4, mix565(hex(0xE8301E), hex(HAZE), fog));
+        }
+        if (a.hazard == PUDDLE && dist < 70) {  // dark water with the sky in it
+            const float w0 = (a.hpos - 0.45f) * HALF, w1 = (a.hpos + 0.45f) * HALF, lift = 0.03f;
+            const V3 q[4] = {a.c + ra * w0 + V3{0, lift, 0}, a.c + ra * w1 + V3{0, lift, 0}, b.c + rb * w1 + V3{0, lift, 0}, b.c + rb * w0 + V3{0, lift, 0}};
+            cam_.poly_world(fb, q, 4, mix565(hex(0x3A4A66), hex(HAZE), fog));
+            const float m0 = (a.hpos - 0.12f) * HALF, m1 = (a.hpos + 0.2f) * HALF;
+            const V3 glint[4] = {a.c + ra * m0 + V3{0, lift, 0}, a.c + ra * m1 + V3{0, lift, 0}, b.c + rb * m1 + V3{0, lift, 0}, b.c + rb * m0 + V3{0, lift, 0}};
+            cam_.poly_world(fb, glint, 4, mix565(hex(0x8A9AC0), hex(HAZE), fog));
+        }
+        if ((a.hazard == ROCK || a.hazard == LOG) && dist < 70) {
+            Pose pose;
+            const V3 fwd_a{sinf(a.heading), 0, cosf(a.heading)};
+            MeshStyle style;
+            style.ambient = 0.5f;
+            if (a.hazard == ROCK) {
+                pose.pos = a.c + ra * (a.hpos * HALF) + fwd_a * (SEG_L / 2);
+                pose.yaw = float(a.index) * 1.3f, pose.scale = ROCK_SCALE;
+                const Mesh rock = {ROCK_V, 6, ROCK_T, ROCK_C, 6};
+                draw_mesh(fb, cam_, rock, pose, style);
+            } else {
+                pose.pos = a.c + ra * (a.hpos * LOG_LEN / 2 * HALF) + fwd_a * (SEG_L / 2);
+                pose.yaw = a.heading + (a.hpos > 0 ? 0.08f : -0.08f);
+                const Mesh log = {LOG_V, 8, LOG_T, LOG_C, 12};
+                draw_mesh(fb, cam_, log, pose, style);
+            }
         }
         if (dist < 50) {
             for (int side = 0; side < 2; ++side) {
