@@ -41,6 +41,7 @@ extern "C" void games_app_preview_best(int game, uint32_t score);
 namespace home {
 void home_preview_open(int);
 void home_preview_theme(int);
+void home_preview_pages(const std::function<void(const char *)> &save);
 }
 extern std::string home_fixture_dir;
 
@@ -777,6 +778,9 @@ int main(int argc, char **argv)
         home::home_preview_open(2);
         save("light-home", display);
         home::home_preview_theme(1);
+        home::home_preview_pages([&](const char *name) {
+            save(name, display);
+        });
     }
     return 0;
 }
