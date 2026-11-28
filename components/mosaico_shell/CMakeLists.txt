@@ -9,6 +9,7 @@ endif()
 
 idf_component_register(
     SRCS "src/shell.cpp" "src/launcher_ui.cpp" "src/launcher_apps.cpp" "src/launcher_layout.cpp" "src/screenshot.cpp" "src/haptics.cpp" "src/boot_stage.c" "src/orientation.cpp" "src/perf.cpp" "src/frame_sync.cpp" "src/time_zone.cpp" "src/web_settings.cpp" "src/reminders.cpp" "src/always_on.cpp" "src/shortcuts.cpp" "src/board_wifi.cpp" "src/wifi_settings.cpp"
+         "src/shortcuts_program.cpp" "src/shortcuts_ui.cpp" "src/shortcuts_policy.cpp"
     INCLUDE_DIRS "include"
     # display_clock.h: Glimdock's time-zone rules, shared with the launcher.
     PRIV_INCLUDE_DIRS "src" "${GLIMDOCK_FIRMWARE_DIR}/src"

@@ -9,6 +9,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "lvgl.h"
 
@@ -60,6 +61,20 @@ bool tools_board_ir(const char *key, int address, int command, char *out, size_t
 void tools_board_game(bool on);
 bool tools_board_buttons(bool *left, bool *right);
 void tools_board_flash(uint32_t rgb);
+
+// The Interaction sub-board for shortcuts (any task). watch: keep looking for
+// the board and reading it while shortcuts start on its motion or buttons.
+// inputs: its state, with counts of presses and motion that only go up (a
+// press between two looks still counts; they start again at 0 when the board
+// is found). wait_ms: how long to wait for a board not found yet. False: none.
+typedef struct {
+    bool left, right, motion;
+    int light;             // 0-100, relative; -1 unknown
+    int32_t motion_age_s;  // since the last motion; -1 none seen
+    uint32_t left_presses, right_presses, motions;
+} tools_board_inputs_t;
+void tools_board_watch(bool on);
+bool tools_board_inputs(tools_board_inputs_t *out, int wait_ms);
 
 #ifdef __cplusplus
 }

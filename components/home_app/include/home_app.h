@@ -88,4 +88,12 @@ bool home_app_run(const char *verb, const char *target, const char *value, bool 
 // "name","lights"}],"lights":[{"target","name","color"}],"plugs":[...],
 // "scenes":[{"id","name"}],"tv":"name","speaker":"name"}.
 std::string home_app_choices_json();
+// For shortcuts' conditions and triggers (LVGL task): each device and its
+// reading as JSON, [{"target","name","room","class","known","on","temp"}]:
+// "on" for what switches, "temp" for what reports a temperature (an air
+// conditioner's indoor reading, a sensor's). "[]" before the hub answers.
+std::string home_app_states_json();
+// Whether a command asks before it runs (the TV's power, Movie): a run that
+// nobody tapped asks on the screen first. False when Home cannot tell.
+bool home_app_asks_first(const char *verb, const char *target, const char *value);
 #endif

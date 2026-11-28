@@ -98,3 +98,13 @@ target_compile_definitions(mosaico-preview PRIVATE
     ARDUINOJSON_ENABLE_ARDUINO_STRING=0 ARDUINOJSON_ENABLE_ARDUINO_STREAM=0)
 find_package(Threads REQUIRED)
 target_link_libraries(mosaico-preview PRIVATE lvgl Threads::Threads)
+
+# The shortcuts' screens over a stand-in engine, and the host tests of their
+# programs (run build-host/shortcuts-test).
+target_sources(mosaico-preview PRIVATE
+    "${IDEA}/components/mosaico_shell/src/shortcuts_ui.cpp"
+    "${IDEA}/components/mosaico_shell/src/shortcuts_program.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/shortcuts_host.cpp")
+add_executable(shortcuts-test shortcuts_test.cpp "${IDEA}/components/mosaico_shell/src/shortcuts_program.cpp")
+target_include_directories(shortcuts-test PRIVATE "${IDEA}/components/mosaico_shell/src" "${ARDUINOJSON}")
+target_compile_definitions(shortcuts-test PRIVATE ARDUINOJSON_ENABLE_ARDUINO_STRING=0 ARDUINOJSON_ENABLE_ARDUINO_STREAM=0)

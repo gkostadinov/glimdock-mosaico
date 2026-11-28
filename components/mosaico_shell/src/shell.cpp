@@ -1741,6 +1741,11 @@ extern "C" esp_err_t mosaico_shell_start(void)
             camera_app_start(shell.camera_screen);
             return camera_app_torch(on);
         };
+        sh.battery = [](bool *charging) {
+            read_battery();
+            *charging = battery.charging;
+            return battery.pct;
+        };
         shortcuts_start(sh);
     }
     lv_indev_t *touch = bsp_display_get_input_dev();
