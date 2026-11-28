@@ -142,6 +142,10 @@ servers only when they lie inside it; devices on the VPN reach Web settings at
 the tunnel's address when the server forwards between its peers and the
 board's AllowedIPs cover theirs.
 
+`tools/asr-stream-test.py` streams speech to the realtime ASR endpoint as
+Swifty does (5, 15, 30, 60 s, optionally after the connection waited open),
+to see where a server ends sessions; `--mock` tries it on a local server.
+
 The VPN needs `CONFIG_ESP_NETIF_BRIDGE_EN=y` (in `sdkconfig.defaults`; see
 the note there). A build directory made before it keeps its own
 `build/sdkconfig`: delete that file, or set the option in menuconfig, or the
