@@ -29,17 +29,17 @@ All of these are rendered from the desktop preview's demo data (`host/media.py`)
 | App | What it does |
 | --- | --- |
 | **Glimdock** | Homelab dashboard for a [Glimdock](https://github.com/gkostadinov/glimdock) collector: hosts, services, alerts, operations and the Kordlet agent chat. |
-| **Home** | Wall display for a self-hosted [Swifty Home](https://github.com/gkostadinov/swifty-home) hub: rooms, lights, music, TV and plugs, paired with a one-time display code. |
-| **Swifty** | Voice and text assistant: any OpenAI-compatible model, push-to-talk speech recognition over WebSocket, optional Tavily web search, and tools to open apps and drive the board (lights, IR TV remote, Interaction board). It keeps notes, lists and schedules in its own folder on the NAS (the only place it may write), and sets reminders that come up over any app with a chime and a buzz, once or every day, weekday or week. |
-| **Camera** | Viewfinder, filters and photos for the camera module; finds front or rear by itself, gallery (tap for the photo alone, double-tap or pinch to zoom), NAS sync. |
+| **Home** | Wall display for a self-hosted [Swifty Home](https://github.com/gkostadinov/swifty-home) hub: rooms, lights and scenes, music, TV, switches, air conditioning (power, temperature, mode, fan), the 3D printer, the pet feeder and litter box, and any other device the hub lists, paired with a one-time display code. What a display may see and control is the hub's choice. |
+| **Swifty** | Voice and text assistant: any OpenAI-compatible model, push-to-talk speech recognition over WebSocket (dictations of up to five minutes, which carry on through a dropped connection), optional Tavily web search, and tools to open apps and drive the board (lights, IR TV remote, Interaction board), make shortcuts, and read and message your [Paseo](https://paseo.sh) agents. A developer mode, for profiles allowed it, answers with code. It keeps notes, lists and schedules in its own folder on the NAS (the only place it may write), and sets reminders that come up over any app with a chime and a buzz, once or every day, weekday or week. |
+| **Camera** | Viewfinder, filters and photos for the camera module; finds front or rear by itself, gallery (tap for the photo alone, double-tap or pinch to zoom), NAS sync. The same camera signs people in to their profile by face, on the board. |
 | **Files** | The board's NAND storage and SMB shares, with image and text previews. |
 | **Tools** | Torch, spirit level and compass. |
 | **Webcam** | The board as a USB webcam with its microphone (UVC MJPEG 1280 × 720 or 640 × 480, and a UAC2 48 kHz mic; on a Mac, [MosaicoCam](https://github.com/gkostadinov/mosaico-cam) adds filters, upscaling and voice clean-up). |
 | **Interaction** | The Interaction module: its buttons, PIR motion, light sensor, six LEDs and an IR remote for the TV. |
 | **Calculator** | A four-function calculator. |
 | **VPN** | A WireGuard client: while it is on, all of the board's internet traffic, DNS included, goes through your WireGuard server. A big switch, the connection's state in plain words, its address, last handshake and traffic, and connect at start-up. |
-| **Games** | Six retro 3D games drawn in software on one small engine, each with a title screen where it plays itself and a best score: **Ember Crypt**, a lantern-lit crawl through ray-cast crypts (gather the shards, keep the ember fed, flare the wisps away); **Starbore**, a flat-shaded neon tunnel flyer (thread the gates, sweep up orbs, pulse a gate away); **Skyglide**, a glider over voxel hills at golden hour (thread the hoops, ride the thermals); **Jellystorm**, a wave shooter against swarms of glowing space jellies (pearls for bigger guns, a pulse bomb, a mother jelly every fourth wave); **Lunar Flip**, a moonbase pinball table (bumpers, slingshots, lanes that raise the multiplier, drop targets, a ball save, nudge and tilt); **Ridge Rally**, a gravel stage through autumn pines against the clock (rivals to pass, checkpoints for time, a boost). About 30 frames a second on the board. Played by touch, or by tilting the board (accelerometer; levelled to however it is held during a short countdown, with a Flip switch for up and down), turning it to look around (gyroscope) and shaking it for each game's action; the Interaction module's buttons and lights join in when it is fitted. Short retro sound effects at Glimdock's sound volume. |
-| **Settings** | Wi-Fi (scan, join with a password, hidden networks, forget), brightness, the home screen's hidden apps, the always-on display, haptics, auto-rotate, the panel's corner radius, time zone, camera options and Web settings (servers and keys from a browser). |
+| **Games** | Six retro 3D games drawn in software on one small engine, each with a title screen where it plays itself and a best score: **Ember Crypt**, a lantern-lit crawl through ray-cast crypts (gather the shards, keep the ember fed, flare the wisps away); **Starbore**, a flat-shaded neon tunnel flyer (thread the gates, sweep up orbs, pulse a gate away); **Skyglide**, a glider over voxel hills at golden hour (thread the hoops, keep your lift up, dodge the spires, crosswinds and downdrafts of each new stage); **Jellystorm**, a wave shooter against swarms of glowing space jellies (pearls for bigger guns, a pulse bomb, a mother jelly every fourth wave); **Lunar Flip**, a moonbase pinball table (bumpers, slingshots, lanes that raise the multiplier, drop targets, a ball save, nudge and tilt); **Ridge Rally**, a gravel stage through autumn pines against a clock that tightens at every checkpoint (rivals to pass, puddles, rocks and logs, a car that can be wrecked, a boost). About 30 frames a second on the board. Played by touch, or by tilting the board (accelerometer; levelled to however it is held during a short countdown, with a Flip switch for up and down), turning it to look around (gyroscope) and shaking it for each game's action; the Interaction module's buttons and lights join in when it is fitted. Short retro sound effects at Glimdock's sound volume. |
+| **Settings** | Profiles (who uses the board and what each may do), Wi-Fi (scan, join with a password, hidden networks, forget), weather (a place or the network's location, °C or °F), brightness, the home screen's hidden apps, the always-on display, haptics, auto-rotate, the panel's corner radius, time zone, camera options and Web settings (servers and keys from a browser). |
 
 Every app works from the board's own settings; nothing points at a particular
 server until you configure it.
@@ -57,19 +57,27 @@ server until you configure it.
 ### Home screen
 
 The icons sit on pages, as on a phone: swipe left and right between them, with
-dots at the bottom for the page you are on. The first page has two widgets
-(hold one to choose what it shows) above two rows of icons; the others hold
-three rows of four.
+dots at the bottom for the page you are on. Each page holds rows of four icons,
+and widgets: half a row or a whole row, on any page.
+
+Widgets show Glimdock's load, Home's lights or music, Swifty, the battery, a
+clock, the date, the next reminder, the network (Wi-Fi and the VPN) or the
+**weather**: the temperature, the sky, today's high and low and, as a whole row,
+the next five hours. The weather comes from [Open-Meteo](https://open-meteo.com)
+every 30 minutes for the network's location (the time zone's lookup) or a place
+set in Settings or Web settings, and the last forecast shows at once after a
+restart.
 
 Hold an icon, or an empty spot, to edit the home screen. The icons jiggle, and:
 
-- **Move** an icon by dragging it. The others make room. Hold it at the left or
+- **Move** an icon or a widget by dragging it. The others make room. Hold it at the left or
   right edge to turn the page; an empty page waits at the end for a new one.
   Dropping on a full page moves that page's last icon on to the next.
-- **Hide** an icon with the − at its corner. Settings can't be hidden: it is
-  the way back. The **+** at the top left (or Settings, Home screen) lists the
-  hidden apps; tap one to put it back. **Reset home screen** there restores the
-  original arrangement.
+- **Hide** an icon (or remove a widget) with the − at its corner. Settings
+  can't be hidden: it is the way back. The **+** at the top left opens the
+  widget gallery, and from it the hidden apps; tap one to put it back. Tap a
+  widget while editing to change what it shows or its size. **Reset home
+  screen** (Settings, Home screen) restores the original arrangement.
 - **Done**, or a tap on an empty spot, ends editing.
 
 The arrangement is saved in the board's NVS after every change and survives
@@ -98,37 +106,85 @@ Glimdock keeps its data current and the AI key starts listening at once.
 
 ### Shortcuts
 
-One-tap tiles on the home screen, like Shortcuts on a phone: "All lights off",
-"Bedroom lights off", or your own. A shortcut is a name, an icon, a colour and
-up to ten steps run in order:
+Small programs on the home screen, like Shortcuts on a phone: "All lights off",
+"Evening", or your own. A shortcut is a name, an icon, a colour, its steps and
+what starts it.
 
-- **Swifty Home**: lights on, off or toggled (all of them, a room or one light),
-  brightness, colour, a scene, a plug, the TV or the speaker. Steps that the
-  hub asks to confirm (the TV's power, Movie) are confirmed by the tap.
-- **Wait** up to a minute, a **TV remote** key from the Interaction module's
-  infrared LED, the Interaction module's **lights**, the **screen's
-  brightness**, **open an app**, or the **flashlight**.
+- **Steps**: Swifty Home commands (lights, brightness, colour, scenes, switches,
+  the air conditioning, the TV, the speaker, feeding the pet), a **TV remote**
+  key from the Interaction module's infrared LED, the Interaction module's
+  **lights**, the **screen's brightness**, **open an app**, the
+  **flashlight**, **wait**, **show a message**, **run another shortcut** and
+  **stop**.
+- **Logic**: **if / else if / otherwise** on the time, the day, a device's state
+  or temperature, motion or a button on the Interaction module, the light
+  level, the Wi-Fi, the VPN, the battery or a variable (with and, or, not);
+  **repeat** a number of times or while something holds; **variables** to count
+  with.
+- **Starts**: a tap on its tile, a time on chosen days, every few minutes within
+  hours you choose, sunrise or sunset (for a location set in Web settings), the
+  board starting, motion or a button on the Interaction module, or a Swifty
+  Home device turning on, off or past a temperature. A switch turns a
+  shortcut's automatic starts off.
 
-A tap runs it: the tile shows a spinner, then a tick or a cross, and a toast at
-the foot of the screen says how it went or which step failed (with a buzz, two
-for a failure). The first time Swifty Home answers, starters are made from its
-rooms: "All lights off" and lights off for up to three rooms with lights (the
-living room and a bedroom first). Delete the ones you do not want; they do not
-come back.
+A tap runs it: the tile shows a spinner, then a tick or a cross, and a toast
+says how it went or which step failed. Steps the hub asks to confirm (the TV's
+power, Movie) are confirmed by the tap, and asked on screen when nobody tapped.
+Limits keep a program from running away (steps, loop rounds, two hours, three
+shortcuts deep), and each shortcut keeps a log of its last run.
 
 Make and change them three ways:
 
-- **Web settings**: the Shortcuts section lists them (Run, a dry-run Test,
-  Edit, Delete) and builds steps from your hub's rooms, lights, plugs and
-  scenes.
-- **On the board**: the shortcuts sheet lists them (Run, Test, Delete) and
-  makes the common ones in two taps: lights off, on or toggled for all lights
-  or a room, or a scene.
-- **Swifty**: "make me a shortcut that turns off the bedroom lights" (its tools
-  add, list, run and delete them).
+- **Web settings**: a block editor with nested ifs and repeats, triggers, and a
+  dry-run **Test** that shows each step's log before you save.
+- **On the board**: the shortcuts sheet lists them, shows a shortcut's steps,
+  starts and last run in words, runs, tests and switches them, and makes the
+  common ones in two taps.
+- **Swifty**: "turn off the hall lights at 11 on weeknights" (its tools write,
+  check, test, run and delete them). A shortcut that would start by itself asks
+  you to allow it on the board first.
 
-They are kept on the board (up to 24) and survive restarts and updates. Tiles
-move and hide like apps.
+They are kept on the board (up to 24) and survive restarts and updates; ones
+made by earlier versions carry on as they were. Tiles move and hide like apps.
+
+### Profiles
+
+Profiles decide who uses the board and what each may do. Each profile has its
+apps (hidden, read-only or full; Glimdock hidden for one profile, Home
+read-only for another), what Swifty may do for it (Home, the board's lights and
+remote, web search, shortcuts, Paseo, a developer mode for code), and whether
+it may change the network or the profiles.
+
+- **Sign-in**: none (Guest), a PIN, a face, or both. **Full mode**, which
+  allows the risky things (developer mode, Paseo, and powering machines when
+  the collector offers it), always needs a face *and* a PIN. Faces are matched
+  on the board by the camera module and never leave it; a slight turn of the
+  head keeps a photo out. PINs are stored only as salted hashes, and wrong
+  tries wait longer each time.
+- **Guest** is what the board shows when nobody is signed in: by default Home
+  and Swifty read-only, Tools, the Calculator and Games. The board goes back to
+  it after five minutes unused (two in full mode).
+- **Set them up** in Settings, Profiles (the badge in the status bar switches
+  or locks), or in Web settings. Until a profile exists, the board works as it
+  always has. A forgotten PIN is reset over USB from the computer
+  (`CONTRIBUTING.md`, RPC 54 · 61).
+
+### Paseo agents
+
+Swifty can work with your [Paseo](https://paseo.sh) agents: "what are my agents
+doing?", "what did the homelab agent say?", "tell it to check the NAS disks",
+"run the nightly schedule now". It lists agents and their state, reads an
+agent's latest activity, sends a message to one or starts one in a workspace,
+and lists or runs schedules. Anything that makes an agent act shows a card on
+the board first and happens only on a tap.
+
+Set the daemon's address and password in Web settings (Paseo) or in the
+`swifty` section of the configuration (`paseo_url`, `paseo_token`, and
+`paseo_provider` if Swifty may start new agents). The daemon has to listen on
+the network (`paseo daemon config set daemon.listen ...`) with a password set.
+That password gives full control of the daemon, so reach it over the VPN or
+HTTPS (`paseo_ca` for a private certificate), and allow Paseo only to profiles
+that should have it.
 
 ### VPN
 
@@ -157,10 +213,14 @@ whether each is set, plus the board's own public key, to give the server.
   the traffic, but the address the internet sees stays your home's: the
   tunnel's counters on the app's screen show the traffic going through.
 - **Swifty** can tell the VPN's state and switch it ("turn on the VPN").
+- **A 1280-byte tunnel** (MTU) by default, small enough for phone hotspots and
+  mobile networks; set another in Web settings or as `MTU =` in the file.
+- **Web settings** shows the board's tunnel address as well while the VPN is up.
 - **For now:** IPv4 only (IPv6 entries in the file are skipped; the board has no
   IPv6 internet address of its own), one peer, and either everything
   (`0.0.0.0/0`) or the tunnel's own network: other split-tunnel networks are not
-  routed. `PersistentKeepalive = 25` helps behind NAT.
+  routed. A split tunnel uses the file's DNS servers when they are inside the
+  tunnel's network. `PersistentKeepalive = 25` helps behind NAT.
 
 ## Hardware
 

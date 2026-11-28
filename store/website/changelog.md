@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+- **Profiles**: who uses the board and what each may do. Each profile has its
+  apps (hidden, read-only or full), what Swifty may do for it and whether it may
+  change the network or the profiles; Guest is what the board shows when nobody
+  is signed in. Sign in with a PIN, your face or both; full mode, for the risky
+  things, always needs face and PIN. Faces are recognised on the board by the
+  camera module and never leave it. Until a profile exists, nothing changes.
+- **Widgets** move like icons, on any page, in two sizes, from a widget
+  gallery. New ones: **weather** (Open-Meteo, for the network's location or a
+  place you set), the date, the next reminder and the network.
+- **Shortcuts** became small programs: if / else, repeats, variables, waits and
+  messages, started by a tap, a time, every few minutes, sunrise or sunset, the
+  Interaction module's motion or buttons, or a Home device. Web settings has a
+  block editor with a dry run, and Swifty writes them for you.
+- **Swifty**: dictations of up to five minutes that carry on through a dropped
+  connection, errors that say what went wrong (the server's address, a timeout,
+  a stalled handshake), Paseo agents (read, message, start, schedules), and a
+  developer mode for profiles allowed it.
+- **Home**: feeding the pet, the litter box's clean cycle, the TV's power and
+  Movie work again; switches, air conditioning (power, temperature, mode, fan),
+  the 3D printer and other devices the hub lists.
+- **Games**: Skyglide and Ridge Rally get harder stage by stage, with real ways
+  to lose: lift to keep up, spires, crosswinds and downdrafts in the air; a
+  clock that tightens, puddles, rocks, logs and damage on the road.
+- **VPN**: a 1280-byte tunnel by default (phone hotspots dropped bigger
+  packets), split tunnels use their DNS, and Web settings shows the tunnel
+  address.
+- **The AI key is Back** on the home screen: it closes Wi-Fi, the shortcuts'
+  sheet, editing and Settings one step at a time.
+
 ## 1.2.0
 
 - **Wi-Fi in Settings**: tap the Wi-Fi card to see the networks around you and
