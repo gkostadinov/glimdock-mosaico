@@ -147,11 +147,11 @@ template <typename F> void on_lwip(F f)
     } call{};
     call.f = &f;
     tcpip_api_call(
-        [](struct tcpip_api_call_data *c) -> err_t {
-            (*reinterpret_cast<Call *>(c)->f)();
-            return ERR_OK;
-        },
-        &call.base);
+    [](struct tcpip_api_call_data * c) -> err_t {
+        (*reinterpret_cast<Call *>(c)->f)();
+        return ERR_OK;
+    },
+    &call.base);
 }
 
 // ---- the endpoint's name, over Wi-Fi ------------------------------------------------------------
@@ -273,7 +273,8 @@ uint32_t resolve(const std::string &host, std::string *error)
                 udp_bind_netif(L.pcb, wifi);
                 udp_recv(L.pcb, lookup_recv, nullptr);
                 struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, uint16_t(q.size()), PBUF_RAM);
-                if (p) {
+                if (p)
+                {
                     pbuf_take(p, q.data(), uint16_t(q.size()));
                     sent = udp_sendto_if(L.pcb, p, &server, 53, wifi) == ERR_OK;
                     pbuf_free(p);
@@ -295,7 +296,7 @@ uint32_t resolve(const std::string &host, std::string *error)
         }
     *error = !any_server ? "The network gave no DNS server to find the VPN server with."
              : refused   ? "The VPN server's name (" + host + ") does not exist: check Endpoint."
-                         : "Could not look up the VPN server's name (" + host + "): no answer from DNS.";
+             : "Could not look up the VPN server's name (" + host + "): no answer from DNS.";
     return 0;
 }
 
@@ -328,19 +329,22 @@ bool ours(const ip_addr_t *a)
     return false;
 }
 
-// The tunnel's DNS servers in place (keeping the network's), and the tunnel
-// the default. Returns what it had to put back.
+// The tunnel's DNS servers in place (keeping the network's), and with
+// 0.0.0.0/0 the tunnel the default. Returns what it had to put back.
 const char *claim_routes()
 {
     const char *fixed = nullptr;
-    if (!E.parsed.full || !E.ctx.netif) {
+    if (!E.ctx.netif) {
         return nullptr;
     }
-    if (netif_default != E.ctx.netif) {
+    if (E.parsed.full && netif_default != E.ctx.netif) {
         netif_set_default(E.ctx.netif);
         fixed = "default route";
     }
-    if (!E.parsed.dns.empty()) {
+    // A split tunnel's DNS servers too, when the tunnel reaches them (as
+    // wg-quick sets DNS whatever AllowedIPs are): a name that only the home
+    // network's DNS knows did not resolve on another network.
+    if (dns_through_tunnel(E.parsed)) {
         bool same = true;
         for (int i = 0; i < DNS_MAX_SERVERS; ++i) {
             ip_addr_t want = *IP_ADDR_ANY;
@@ -417,7 +421,8 @@ bool bring_up(std::string *error)
             return;
         }
         err = esp_wireguard_connect(&E.ctx);
-        if (err != ESP_OK) {
+        if (err != ESP_OK)
+        {
             failed = "connect";
             if (E.ctx.netif) {
                 esp_wireguard_disconnect(&E.ctx);
@@ -425,18 +430,25 @@ bool bring_up(std::string *error)
             E.ctx.netif = nullptr;
             return;
         }
-        for (const Net4 &n : E.parsed.allowed) {
+        for (const Net4 &n : E.parsed.allowed)
+        {
             const std::string ip = ip4_text(n.ip), mask = ip4_text(n.prefix ? ~((1u << (32 - n.prefix)) - 1) : 0);
             if (esp_wireguard_add_allowed_ip(&E.ctx, ip.c_str(), mask.c_str()) != ESP_OK) {
                 ESP_LOGW(TAG, "allowed network %s/%d not added", ip.c_str(), n.prefix);
             }
         }
-        // Count what goes through.
         struct netif *wg = E.ctx.netif;
+        // The library makes the interface 1420 bytes (WireGuard's default); a
+        // smaller one keeps the encrypted packets under the path's MTU (see
+        // DEFAULT_MTU). TCP reads it when a connection opens, before any goes
+        // through the tunnel.
+        wg->mtu = E.parsed.mtu;
+        // Count what goes through.
         auto *device = static_cast<struct wireguard_device *>(wg->state);
         E.wg_output = wg->output;
         wg->output = count_output;
-        if (device && device->udp_pcb) {
+        if (device && device->udp_pcb)
+        {
             E.wg_recv = device->udp_pcb->recv;
             E.wg_recv_arg = device->udp_pcb->recv_arg;
             udp_recv(device->udp_pcb, count_recv, nullptr);
@@ -446,15 +458,17 @@ bool bring_up(std::string *error)
     if (failed) {
         ESP_LOGW(TAG, "WireGuard %s: %s", failed, esp_err_to_name(err));
         *error = err == ESP_ERR_NO_MEM || err == ESP_FAIL ? "WireGuard could not start (keys, or out of memory)."
-                                                          : "WireGuard could not start: " + std::string(esp_err_to_name(err)) + ".";
+                 : "WireGuard could not start: " + std::string(esp_err_to_name(err)) + ".";
         return false;
     }
     E.up = true;
     E.answered = false;
     E.started_us = esp_timer_get_time();
     E.last_up_us = 0;
-    ESP_LOGI(TAG, "tunnel up as %s/%d to port %u (%s, DNS %s)", E.address.c_str(), E.parsed.address.prefix, E.parsed.port,
-             E.parsed.full ? "all traffic" : "split", E.parsed.dns.empty() ? "the network's" : "the tunnel's");
+    ESP_LOGI(TAG, "tunnel up as %s/%d to port %u (%s, DNS %s, MTU %u)", E.address.c_str(), E.parsed.address.prefix,
+             E.parsed.port, E.parsed.full ? "all traffic" : "split",
+             dns_through_tunnel(E.parsed) ? "the tunnel's" : E.parsed.dns.empty() ? "the network's" : "the network's (the tunnel's are outside its networks)",
+             unsigned(E.parsed.mtu));
     return true;
 }
 
@@ -489,7 +503,8 @@ void step(uint32_t events)
                                  E.settings.address != shared.settings.address || E.settings.dns != shared.settings.dns ||
                                  E.settings.endpoint != shared.settings.endpoint ||
                                  E.settings.allowed_ips != shared.settings.allowed_ips ||
-                                 E.settings.keepalive != shared.settings.keepalive;
+                                 E.settings.keepalive != shared.settings.keepalive ||
+                                 E.settings.mtu != shared.settings.mtu;
             if (changed) {
                 if (E.up) {
                     shared.lock.unlock();
@@ -520,7 +535,7 @@ void step(uint32_t events)
     }
     if (!E.valid) {
         publish(VPN_NOT_SET_UP, E.settings.empty() ? "No VPN set up yet: add a WireGuard configuration in Web settings."
-                                                   : E.config_error);
+                : E.config_error);
         return;
     }
     const int64_t now = esp_timer_get_time();
@@ -549,7 +564,7 @@ void step(uint32_t events)
         {
             std::lock_guard<std::mutex> g(shared.lock);
             strlcpy(shared.address, E.address.c_str(), sizeof(shared.address));
-            shared.tunnel_dns = E.parsed.full && !E.parsed.dns.empty();
+            shared.tunnel_dns = dns_through_tunnel(E.parsed);
         }
     }
     // Up: watch it.
@@ -562,7 +577,8 @@ void step(uint32_t events)
         if (esp_wireguard_latest_handshake(&E.ctx, &handshake) != ESP_OK) {
             handshake = 0;
         }
-        if (wifi) {
+        if (wifi)
+        {
             fixed = claim_routes();
         }
         rx = E.rx, tx = E.tx;
@@ -606,7 +622,7 @@ void step(uint32_t events)
                 "The VPN server does not answer. Check Endpoint and its port, and that the server has this board's public key.");
     } else if (E.answered && now - E.last_up_us > 3 * 60 * S) {
         publish(VPN_ERROR, "Lost the VPN server: no answer for " + std::to_string(int((now - E.last_up_us) / (60 * S))) +
-                               " min. Still trying.");
+                " min. Still trying.");
     } else {
         publish(VPN_CONNECTING, "");
     }
@@ -696,12 +712,13 @@ void tunnel_route(char *out, size_t capacity)
         char ip[IP4ADDR_STRLEN_MAX];
         if (netif_default) {
             text = std::string("default ") + netif_default->name[0] + netif_default->name[1] + std::to_string(netif_default->num) +
-                   " " + ip4addr_ntoa_r(netif_ip4_addr(netif_default), ip, sizeof(ip));
+            " " + ip4addr_ntoa_r(netif_ip4_addr(netif_default), ip, sizeof(ip));
         } else {
             text = "no default route";
         }
         text += "; DNS";
-        for (int i = 0; i < DNS_MAX_SERVERS; ++i) {
+        for (int i = 0; i < DNS_MAX_SERVERS; ++i)
+        {
             const ip_addr_t *d = dns_getserver(uint8_t(i));
             if (!ip_addr_isany(d) && IP_IS_V4(d)) {
                 text += std::string(" ") + ip4addr_ntoa_r(ip_2_ip4(d), ip, sizeof(ip));

@@ -38,7 +38,7 @@ const Accent &accent_of(const profile_t &p)
     return *PALETTE[p.color % PROFILE_COLORS];
 }
 
-enum class Page : uint8_t { None, Pick, Face, Pin, Intro, List, Edit, Rename };
+enum class Page : uint8_t { None, Pick, Face, Pin, Intro, List, Edit, Rename, Enroll };
 enum class PinFor : uint8_t { SignIn, Set, Setup };
 
 struct {
@@ -469,8 +469,10 @@ void face_done(face_id_match_t match, void *user)
             face_status("Not recognised. Tap to try again", RED);
         }
         break;
+    case FACE_ID_TIMEOUT:  // matched, but the head never moved (face ID's liveness)
+        face_status("Turn your head slightly. Tap to try again", WARN);
+        break;
     case FACE_ID_NO_FACE:
-    case FACE_ID_TIMEOUT:
         face_status("No face seen. Tap to try again", WARN);
         break;
     case FACE_ID_MANY_FACES:
@@ -1175,19 +1177,61 @@ void cap_cb(lv_event_t *e)
     save_target(p, false);
 }
 
+// Enrolment ended (face_id calls this once, on the LVGL task; at once, from
+// face_id_cancel, when the page goes).
 void enroll_done(face_id_result_t result, void *user)
 {
     U.face_running = false;
+    if (result == FACE_ID_CANCELLED || reinterpret_cast<uintptr_t>(user) != U.generation) {
+        return;
+    }
     if (result == FACE_ID_OK) {
         profiles_ui_note("Face added");
-    } else if (result != FACE_ID_CANCELLED) {
-        profiles_ui_note(result == FACE_ID_NO_FACE || result == FACE_ID_TIMEOUT ? "No face seen. Try again."
-                         : result == FACE_ID_MANY_FACES ? "One face at a time. Try again."
-                         : result == FACE_ID_NO_CAMERA ? "Face sign-in needs the camera module" : "Could not add the face");
+        go(Page::Edit);
+        return;
     }
-    if (reinterpret_cast<uintptr_t>(user) == U.generation && U.shown == Page::Edit) {
-        rebuild_keeping_scroll();
+    face_status(result == FACE_ID_NO_FACE ? "No face seen. Tap to try again"
+                : result == FACE_ID_TIMEOUT ? "Not long enough. Tap to try again"
+                : result == FACE_ID_MANY_FACES ? "One face at a time. Tap to try again"
+                : result == FACE_ID_NO_CAMERA ? "Face sign-in needs the camera module"
+                : result == FACE_ID_BUSY ? "The camera is busy. Tap to try again" : "Could not add the face", WARN);
+}
+
+void start_enroll()
+{
+    if (U.face_running) {
+        return;
     }
+    U.face_running = face_id_enroll_start(U.target, enroll_done, reinterpret_cast<void *>(uintptr_t(U.generation)));
+    face_status(U.face_running ? "Look at the camera and turn your head slowly" : "The camera is busy. Tap to try again",
+                U.face_running ? TEXT2 : WARN);
+}
+
+// Adding a face: the live picture, and face ID's own hints in it.
+void enroll_page()
+{
+    lv_obj_t *pg = frame(Page::Enroll);
+    profile_t p{};
+    profiles_get(U.target, &p);
+    centered(pg, "Add a face", 34, TEXT, 22, true);
+    centered(pg, p.name, 64, TEXT2, 15, true);
+    constexpr int SIZE = 236, X = (PANEL - SIZE) / 2, Y = 98;
+    if (!face_id_preview_create(pg, X, Y, SIZE)) {
+        lv_obj_t *c = box(pg, X, Y, SIZE, SIZE, LV_RADIUS_CIRCLE);
+        lv_obj_set_style_bg_color(c, lv_color_hex(CARD), 0);
+        lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+        icon(c, "person", SIZE / 4, SIZE / 4, SIZE / 2, TEXT3, 3.0f);
+    }
+    lv_obj_t *tap = box(pg, X, Y, SIZE, SIZE, LV_RADIUS_CIRCLE);
+    on(tap, [](lv_event_t *) {
+        start_enroll();
+    });
+    U.status = centered(pg, "", 346, TEXT2, 15, true, 320);
+    lv_obj_t *cancel = field_button(pg, (PANEL - 140) / 2, 384, 140, 44, "Cancel", 16, TEXT2);
+    on(cancel, [](lv_event_t *) {
+        go(Page::Edit);
+    });
+    start_enroll();
 }
 
 void edit_page()
@@ -1260,11 +1304,7 @@ void edit_page()
                                     !face ? "No camera" : enrolled ? "Redo face" : "Add face", 15, face ? TEXT : TEXT3);
         if (face) {
             on(fb, [](lv_event_t *) {
-                if (U.face_running) {
-                    return;
-                }
-                U.face_running = face_id_enroll_start(U.target, enroll_done, reinterpret_cast<void *>(uintptr_t(U.generation)));
-                profiles_ui_note(U.face_running ? "Look at the camera\xE2\x80\xA6" : "The camera is busy");
+                go(Page::Enroll);
             });
         }
         char state[80];
@@ -1428,6 +1468,7 @@ void show(Page page)
     case Page::List: list_page(); break;
     case Page::Edit: edit_page(); break;
     case Page::Rename: rename_page(); break;
+    case Page::Enroll: enroll_page(); break;
     case Page::None: break;
     }
 }
@@ -1550,7 +1591,8 @@ bool profiles_ui_back()
         break;
     case Page::Edit:
     case Page::Rename:
-        show(U.shown == Page::Rename ? Page::Edit : Page::List);
+    case Page::Enroll:
+        show(U.shown == Page::Edit ? Page::List : Page::Edit);
         break;
     default:
         profiles_ui_close();
@@ -1643,10 +1685,11 @@ void profiles_ui_refresh()
         break;
     case Page::Edit:
     case Page::Rename:
+    case Page::Enroll:
         // Locked meanwhile (or no longer a manager): the editor closes.
         if (!manage()) {
             profiles_ui_close();
-        } else {
+        } else if (U.shown == Page::Edit) {
             rebuild_keeping_scroll();
         }
         break;

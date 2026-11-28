@@ -31,6 +31,7 @@
 #include "profiles_glue.h"
 #include "shortcuts.h"
 #include "swifty_app.h"
+#include "vpn_app.h"
 
 extern const char page_start[] asm("_binary_web_settings_html_start");
 extern const char page_end[] asm("_binary_web_settings_html_end");
@@ -409,9 +410,18 @@ void web_settings_stop(const char *note)
 
 void web_settings_info(WebSettingsInfo *out)
 {
+    // The server answers on every interface: with the VPN up, devices on the
+    // VPN reach it at the tunnel's address (the Wi-Fi one is private to the
+    // network the board is on).
+    vpn_summary_t vpn;
+    vpn_app_summary(&vpn);
     std::lock_guard<std::mutex> g(lock);
     out->running = W.server != nullptr;
-    strlcpy(out->url, out->running ? W.url : "", sizeof(out->url));
+    if (out->running && vpn.state == VPN_CONNECTED && vpn.address[0]) {
+        snprintf(out->url, sizeof(out->url), "%s  (VPN: %s)", W.url, vpn.address);
+    } else {
+        strlcpy(out->url, out->running ? W.url : "", sizeof(out->url));
+    }
     strlcpy(out->code, out->running ? W.code : "", sizeof(out->code));
     strlcpy(out->note, W.note, sizeof(out->note));
 }

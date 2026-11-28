@@ -54,7 +54,7 @@ public:
         uint32_t last_ok = 0;
     } status;
     // Latest good responses. Replaced (never mutated) on the UI thread.
-    DocPtr devices, rooms, scenes, me, state;
+    DocPtr devices, rooms, scenes, me, state, catalog_doc;
     std::map<std::string, std::string> catalog;  // action id -> flow
 
     void start();
@@ -81,10 +81,17 @@ public:
     void execute(const std::string &action, const std::string &target, JsonDocument params, RunHandler done);
     void prepare(const std::string &action, const std::string &target, JsonDocument params, RunHandler done);
     void confirm(const DocPtr &prepared, RunHandler done);
+    // The catalog lists only what this display may run (the hub's policy for a
+    // family member), each action with the targets it may aim it at now.
     bool can(const std::string &action) const
     {
         return catalog.count(action) != 0;
     }
+    bool can(const std::string &action, const std::string &target) const;
+    // An integer parameter's range or an enum's words, as the catalog states
+    // them; false or empty when the catalog does not say.
+    bool int_range(const std::string &action, const char *param, int &lo, int &hi) const;
+    std::vector<std::string> enum_values(const std::string &action, const char *param) const;
     std::string flow(const std::string &action) const;
     static std::string error_message(int code, const DocPtr &doc, const std::string &error);
 
@@ -103,6 +110,8 @@ private:
     size_t body_hash_ = 0;
     std::map<std::string, size_t> seen_;
     bool fresh(const std::string &what);
+    JsonObjectConst catalog_entry(const std::string &action) const;
+    JsonObjectConst catalog_param(const std::string &action, const char *param) const;
     std::map<uint32_t, Handler> pending_;
     struct Timer {
         uint32_t at;

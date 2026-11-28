@@ -454,19 +454,20 @@ const ToolRule RULES[] = {
     {"interaction_board", int(ShellApp::Interaction), R, -1},
     {"board_lights", -1, 0, PROFILE_CAP_BOARD_CONTROL},
     {"tv_remote", -1, 0, PROFILE_CAP_BOARD_CONTROL},
-    {"set_time_zone", PROFILE_APP_SETTINGS, F, -1},
     {"take_photo", int(ShellApp::Camera), F, -1},
     {"show_photo", int(ShellApp::Gallery), R, -1},
     {"web_search", -1, 0, PROFILE_CAP_WEB_SEARCH},
     {"list_shortcuts", -1, 0, PROFILE_CAP_SHORTCUTS_RUN},
-    {"run_shortcut", -1, 0, PROFILE_CAP_SHORTCUTS_RUN},
+    {"get_shortcut", -1, 0, PROFILE_CAP_SHORTCUTS_RUN},
+    {"run_shortcut", -1, 0, PROFILE_CAP_SHORTCUTS_RUN},  // each action is checked as it runs (shortcuts_policy.cpp)
     {"add_shortcut", -1, 0, PROFILE_CAP_SHORTCUTS_EDIT},
+    {"enable_shortcut", -1, 0, PROFILE_CAP_SHORTCUTS_EDIT},
     {"delete_shortcut", -1, 0, PROFILE_CAP_SHORTCUTS_EDIT},
 };
 // Tools that change nothing: all a read-only Swifty offers.
 const char *const READS[] = {"open_app", "device_status", "get_time", "level", "glimdock", "home_state", "home_status",
                              "vpn", "list_files", "read_file", "interaction_board", "show_photo", "web_search",
-                             "list_shortcuts", "list_reminders", "paseo_list_agents", "paseo_read", "paseo_workspaces",
+                             "list_shortcuts", "get_shortcut", "list_reminders", "paseo_list_agents", "paseo_read", "paseo_workspaces",
                              "paseo_schedules"
                             };
 // Families by prefix: Paseo's agents; machines once the collector can act.
@@ -518,6 +519,9 @@ void profiles_describe(char *out, size_t cap)
     std::string hidden, read;
     for (int i = 0; i < LAUNCHER_APP_COUNT && i < PROFILE_APPS; ++i) {
         const LauncherApp &a = LAUNCHER_APPS[i];
+        if (a.keep) {
+            continue;  // Settings shows for everyone
+        }
         const profile_access_t acc = profiles_app_access(slot_of(a));
         std::string &list = acc == PROFILE_ACCESS_HIDDEN ? hidden : read;
         if (acc != PROFILE_ACCESS_FULL) {
@@ -604,6 +608,9 @@ void profiles_glue_start(void (*apply_fn)())
     int n = 0;
     for (int i = 0; i < LAUNCHER_APP_COUNT && i < PROFILE_APPS; ++i) {
         const LauncherApp &a = LAUNCHER_APPS[i];
+        if (a.keep) {
+            continue;  // Settings: always on the home screen (the way back)
+        }
         const int slot = slot_of(a);
         // Read-only means something in Glimdock, Home and Swifty (its tools).
         const bool read_only = slot == int(ShellApp::Glimdock) || slot == int(ShellApp::Home) || slot == int(ShellApp::Swifty);

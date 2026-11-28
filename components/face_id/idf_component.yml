@@ -1,0 +1,6 @@
+dependencies:
+  # ESP-DL's two-stage face detector (MSR + MNP, five landmarks) and its
+  # MobileFaceNet embedding model. Both list the ESP32-S31 and build it with
+  # the ESP32-P4 model files and kernels; they pull esp-dl ~3.3.14 themselves.
+  espressif/human_face_detect: "~0.5.2"
+  espressif/human_face_recognition: "~0.3.3"

@@ -91,6 +91,21 @@ pre-commit run --all-files
 The project hooks run the ESP-Mosaico toolkit's checks from the workspace
 (`../../submodule/esp-mosaico-utils`).
 
+Skyglide's and Ridge Rally's difficulty curves have a simulation on the
+computer (fixed seeds, scripted input, each game's own pilot playing real
+runs): after changing either game's tuning, check that a run still gets
+through the gentle start, lasts a few minutes and can end each way.
+
+```sh
+cmake -S components/games_app/host_test -B build-host/games-sim -DCMAKE_BUILD_TYPE=Release
+cmake --build build-host/games-sim && build-host/games-sim/games-sim
+```
+
+The shortcuts' programs (`shortcuts_program.cpp`: the format 1 migration,
+checks, the interpreter's conditions, loops and limits, schedules) have host
+tests: `host/render.py` builds `build-host/shortcuts-test`, or see the command
+at the top of `host/shortcuts_test.cpp`.
+
 ## Diagnostics over ESP-Iris
 
 The shell registers RPCs on service `0x4744` (18244), callable with
@@ -115,22 +130,34 @@ The shell registers RPCs on service `0x4744` (18244), callable with
 | 48 | keyframes of 11 bytes, little-endian: ms from the start (u16), fingers down (0–2), then x, y of each finger (i16) | A scripted touch, for testing gestures such as a pinch without a finger on the glass. Points move in a straight line between keyframes with the same fingers; the panel is ignored until the last keyframe. |
 | 49 | none / `01` / `02` / `00` | The always-on display: its state (off, dimmed or showing), timeout, seconds without use, times shown, clock draws and times dimmed (nothing is logged during webcam mode, where it only dims); `01` shows the clock now, `02` dims, `00` wakes the board. |
 | 52 | a URL (`http://` or `https://`) / none | Starts a GET of the URL / its result: HTTP status, time, the default route and DNS servers in use, the start of the body. Where the board's traffic goes, with the VPN on or off. |
-| 55 | none, or JSON text: `{"op":"list"}`, `{"op":"run","id":N,"dry_run":true}`, `{"op":"save","shortcut":{...}}`, `{"op":"delete","id":N}`, `{"op":"starters"}`, `{"op":"editor"}`, `{"op":"dry_run","on":true}` | Shortcuts (`shortcuts.h`): the list with each one's steps and the last run, or a change. `dry_run` on makes every run a dry run (nothing sent to Swifty Home or the Interaction board) until a restart. |
+| 55 | none, or JSON text. Questions: `{"op":"list"}`, `{"op":"get","id":N}` (its program as JSON), `{"op":"log","id":N}` (its last run, step by step; id 0: the last test), `{"op":"next"}` (the next scheduled runs and the location); `"from":K` reads a long answer from byte K. Changes: `{"op":"save","shortcut":{...}}`, `{"op":"delete","id":N}`, `{"op":"run","id":N,"dry_run":true}`, `{"op":"fire","id":N,"as":"time"}` (as a trigger starts it: quiet, asking before what Home asks first; `as` time, every, boot, motion, button, home or sun), `{"op":"stop","id":N}`, `{"op":"test","shortcut":{...}}` (a dry run of one not saved; read it with `log` 0), `{"op":"enable","id":N,"on":false}`, `{"op":"location","lat":L,"lon":L}`, `{"op":"starters"}`, `{"op":"editor"}`, `{"op":"dry_run","on":true}` | Shortcuts (`shortcuts.h`, format in `shortcuts_program.h`): each one's triggers, steps, next run and last run, or a change (`{"reply":"ok"}` or `{"error":...}`). `dry_run` on makes every run a dry run (nothing sent to Swifty Home or the Interaction board, waits skipped) until a restart. Changes run on a helper task; replies are cut at the RPC's 1 KB. |
 
-| 53 | none / `00` / `01` then text / `02` / `03` / `04` / `05` / `06` | The home screen: page, editing and layout (pages split by `\|`, keys by commas, hidden keys after `#`). `00` resets the layout, `01` sets it from the text, `02` and `03` start and end editing, `04` shows the hidden apps, `05` shows Settings and `06` opens Settings > Wi-Fi. The reply comes before the change. |
+| 53 | none / `00` / `01` then text / `02` / `03` / `04` / `05` / `06` | The home screen: page, editing and layout (`@2` first, pages split by `\|`, keys by commas, hidden keys after `#`; a widget's key is `w2:` (half a row) or `w4:` (a whole row) and its kind, such as `w4:weather`; see `launcher_layout.h`). `00` resets the layout, `01` sets it from the text (one without `@2`, from before widgets moved, gets the two default widgets first), `02` and `03` start and end editing, `04` shows the hidden apps, `05` shows Settings and `06` opens Settings > Wi-Fi. The reply comes before the change. |
 | 56 | `00` / `01` / `02` ssid `00` password / `03` ssid | The board's Wi-Fi (`board_wifi.h`) as JSON: the network, whether it is connected, its address and signal, whether it is saved or Vibe Mode's, the last join's result and the networks from the last scan. `01` scans first (read again for the results), `02` joins (no password: the saved one), `03` forgets a saved network. Passwords are never in the reply. |
+| 54 | sub-command byte, then that feature's payload | Carries the newer features' RPCs (`components/iris_ext`): ESP-Iris holds at most 32 handlers and the board uses them all. The rows "54 · N" below are its sub-commands. |
+| 54 · 64 | none / text: `agents`, `workspaces`, `schedules` or `read NAME` | Swifty's Paseo link (`swifty_paseo.h`): the text starts a read-only call to the configured daemon, as Swifty's tools make it (reply `started`, `busy` or `not configured`); none gives the last call's result as JSON: whether Paseo is set up and allowed, its URL, whether a password is set, the time taken and the start of the tool's text. Nothing here sends anything to an agent. |
+| 54 · 63 | none / `01` / `02` then text / `03` then `c` or `f` | Through RPC 54 (`components/iris_ext`), sub-command 63: the weather widget's forecast (`weather.h`) as JSON: its state (`idle`, `locating`, `fetching`, `offline`, `failed`, `no_place`), the place shown and the one set, the temperature, today's high and low and the sky now, when it was updated and the last error. `01` fetches now, `02` sets the place (a city, `latitude,longitude`, or nothing for the network's location), `03` the units. The reply comes before the change. |
+| 54 · 62 | none or `00` / `01` p / `02` [ms, u32 little-endian] / `03` / `04` p / `05` threshold, margin (u16 thousandths), frames (u8), liveness (u8), spread (u16 thousandths) | Face ID (`face_id.h`), for testing from the Mac: the status as JSON (available, camera present, models loaded, embedding length, op and status line, enrolled profiles, tuning, average detect and embed times, and the last result: op, result, profile, similarity, best similarity seen, head-movement spread, frames, ms); `01` enrols profile p (0–15), `02` identifies (0: 10 s), `03` cancels, `04` forgets p, `05` sets and saves the tuning. The reply comes before the change; read again for the result. Never an image, embedding or template. |
 | 54 · 60 | none or `{"op":"list","from":N}`; or JSON: `{"op":"setup","name":"Owner","pin":"2468"}`, `{"op":"save","profile":{"id":N,"name":"Partner","signin":"pin","caps":["home_control"],"apps":{"glimdock":"hidden","home":"full"}}}` (no id: a new one), `{"op":"delete","id":N}`, `{"op":"lock"}`, `{"op":"switch","id":N,"pin":"1357"}`, `{"op":"settings","default":0,"lock_s":300,"elevated_lock_s":120}` | Profiles (`profiles.h`) as JSON, a page at a time (read again from `next`): who is signed in, full mode, whether the camera can sign in, the lock times, and each profile's sign-in, PIN and face (set or not), wrong tries, capabilities (bits in `profile_cap_t`'s order) and apps (one digit per slot, the slot a `ShellApp` value, 31 Settings: 0 hidden, 1 read-only, 2 full). Never a PIN or its hash. A change replies `{"reply":"ok"}` or `{"error":...}`, with a trusted computer's rights but the model's rules: a manager needs a PIN, full mode a face and a PIN (enrolled on the board), one manager stays. `switch` cannot enter full mode: that takes the face at the board. |
 | 54 · 61 | `{"op":"set_pin","id":N,"pin":"135790"}` / `{"op":"unblock","id":N}` / `{"op":"off"}` | Recovery for a forgotten PIN, over USB only (refused over the network, even from a paired computer): a new PIN for a profile (its wrong tries forgotten), the wrong tries forgotten, or every profile and face gone, so the board behaves as before profiles. Anyone with the board on USB can do this, as they could reinstall the firmware. |
 
 While the USB webcam is on, ESP-Iris is stopped: read 44–46 after it ends.
+
+The weather widget's place and units are the `weather` section of the
+configuration (RPC 40, which `tools/mosaico-config.py` drives, and Web
+settings): `{"weather": {"place": "Lisbon", "units": "c"}}`. An empty place
+follows the network's location from the time zone's lookup (ipapi.co, no
+second request); the forecast comes from Open-Meteo (no key) every 30 minutes
+on a task with its stack in PSRAM, and NVS keeps the last one for the next
+boot. The host preview uses made-up weather (`host/weather_host.cpp`).
 
 Profiles (`components/profiles`) gate the apps and Swifty's tools through
 `profiles_can()` and `profiles_app_access()`; with none set up the board
 behaves as it always has. A forgotten PIN is reset with RPC 54 · 61 over USB,
 for example `python mosaico.py iris rpc --project projects/glimdock 18244 54
 --payload-hex` with `3d` (61) followed by the JSON's bytes. The model's host
-tests run with
-`cmake -S components/profiles/test -B build-host/profiles-test && cmake --build build-host/profiles-test && build-host/profiles-test/profiles-test`.
+tests: `host/render.py` builds `build-host/profiles-test`, or on their own
+`cmake -S components/profiles/test -B build-host/profiles-unit && cmake --build build-host/profiles-unit && build-host/profiles-unit/profiles-test`.
 
 The VPN's settings and its switch are the `vpn` section of the configuration
 (RPC 40, which `tools/mosaico-config.py` drives: `{"vpn": {"on": true}}`
@@ -141,6 +168,20 @@ HTTP status, the default route and DNS servers in use and the start of the
 body; a what's-my-IP address gives the public address the board leaves from.
 Never put a real WireGuard key in a log, a screenshot, an issue or the
 repository.
+
+The tunnel's MTU is 1280 unless the configuration sets one (`mtu`, or `MTU =`
+in a pasted .conf): WireGuard's usual 1420 makes encrypted packets of nearly
+1500 bytes, which paths such as a phone hotspot drop, so TLS handshakes and
+pages stalled while small requests worked. lwIP announces and uses a TCP MSS
+of the interface's MTU less 40 bytes. A split tunnel (AllowedIPs without
+`0.0.0.0/0`) routes only the network around its own address, and uses its DNS
+servers only when they lie inside it; devices on the VPN reach Web settings at
+the tunnel's address when the server forwards between its peers and the
+board's AllowedIPs cover theirs.
+
+`tools/asr-stream-test.py` streams speech to the realtime ASR endpoint as
+Swifty does (5, 15, 30, 60 s, optionally after the connection waited open),
+to see where a server ends sessions; `--mock` tries it on a local server.
 
 The VPN needs `CONFIG_ESP_NETIF_BRIDGE_EN=y` (in `sdkconfig.defaults`; see
 the note there). A build directory made before it keeps its own

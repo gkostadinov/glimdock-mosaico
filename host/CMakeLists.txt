@@ -57,10 +57,14 @@ add_executable(mosaico-preview
     "${IDEA}/components/mosaico_shell/src/launcher_ui.cpp"
     "${IDEA}/components/mosaico_shell/src/launcher_apps.cpp"
     "${IDEA}/components/mosaico_shell/src/launcher_layout.cpp"
+    "${IDEA}/components/mosaico_shell/src/launcher_widgets.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/weather_host.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/reminders_host.cpp"
     "${IDEA}/components/mosaico_ui/src/mui.cpp"
     "${IDEA}/components/mosaico_ui/src/keyboard.cpp"
     "${IDEA}/components/glimdock_port/src/glimdock_summary.cpp"
     "${IDEA}/components/swifty_app/src/swifty_figure.cpp"
+    "${IDEA}/components/swifty_app/src/swifty_paseo_ui.cpp"
     "${IDEA}/components/tools_app/src/tools_app.cpp"
     "${IDEA}/components/games_app/src/games_ui.cpp"
     "${IDEA}/components/games_app/src/games_common.cpp"
@@ -76,10 +80,11 @@ add_executable(mosaico-preview
     "${CMAKE_CURRENT_LIST_DIR}/vpn_host.cpp"
     "${IDEA}/components/mosaico_shell/src/wifi_settings.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/board_wifi_host.cpp"
+    "${IDEA}/components/face_id/src/face_preview.cpp"
+    "${IDEA}/components/face_id/host/face_id_host.cpp"
     "${IDEA}/components/mosaico_shell/src/profiles_ui.cpp"
     "${IDEA}/components/profiles/src/profiles.cpp"
     "${IDEA}/components/profiles/src/profiles_platform.cpp"
-    "${IDEA}/components/profiles/src/face_id_weak.c"
     ${font_sources}
     ${HOME_SOURCES})
 target_include_directories(mosaico-preview PRIVATE
@@ -91,6 +96,7 @@ target_include_directories(mosaico-preview PRIVATE
     "${IDEA}/components/mosaico_ui/include"
     "${IDEA}/components/tools_app/include" "${IDEA}/components/files_app/include"
     "${IDEA}/components/vpn_app/include"
+    "${IDEA}/components/face_id/include" "${IDEA}/components/face_id/src"
     "${IDEA}/components/games_app/include" "${IDEA}/components/games_app/src"
     "${IDEA}/components/profiles/include" "${IDEA}/components/profiles/src"
     "${CMAKE_CURRENT_LIST_DIR}/shims"
@@ -103,3 +109,25 @@ target_compile_definitions(mosaico-preview PRIVATE
     ARDUINOJSON_ENABLE_ARDUINO_STRING=0 ARDUINOJSON_ENABLE_ARDUINO_STREAM=0)
 find_package(Threads REQUIRED)
 target_link_libraries(mosaico-preview PRIVATE lvgl Threads::Threads)
+
+# Host tests for the home screen's layout: its text, the grid's packing and
+# the migration from before widgets were items (run build-host/launcher-layout-test).
+add_executable(launcher-layout-test launcher_layout_test.cpp "${IDEA}/components/mosaico_shell/src/launcher_layout.cpp")
+target_include_directories(launcher-layout-test PRIVATE "${IDEA}/components/mosaico_shell/src")
+
+# The shortcuts' screens over a stand-in engine, and the host tests of their
+# programs (run build-host/shortcuts-test).
+target_sources(mosaico-preview PRIVATE
+    "${IDEA}/components/mosaico_shell/src/shortcuts_ui.cpp"
+    "${IDEA}/components/mosaico_shell/src/shortcuts_program.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/shortcuts_host.cpp")
+add_executable(shortcuts-test shortcuts_test.cpp "${IDEA}/components/mosaico_shell/src/shortcuts_program.cpp")
+target_include_directories(shortcuts-test PRIVATE "${IDEA}/components/mosaico_shell/src" "${ARDUINOJSON}")
+target_compile_definitions(shortcuts-test PRIVATE ARDUINOJSON_ENABLE_ARDUINO_STRING=0 ARDUINOJSON_ENABLE_ARDUINO_STREAM=0)
+
+# Host tests for the profiles model: first run, PIN hashing and checks, waits,
+# full mode, the managers' rules, auto-lock, storage (run build-host/profiles-test).
+add_executable(profiles-test "${IDEA}/components/profiles/test/test_profiles.cpp"
+    "${IDEA}/components/profiles/src/profiles.cpp" "${IDEA}/components/profiles/src/profiles_platform.cpp")
+target_include_directories(profiles-test PRIVATE "${IDEA}/components/profiles/include" "${IDEA}/components/profiles/src")
+target_link_libraries(profiles-test PRIVATE Threads::Threads)

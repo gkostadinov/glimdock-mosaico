@@ -18,6 +18,7 @@
 #include "app_config.h"
 #include "boot_stage.h"
 #include "camera_app.h"
+#include "face_id.h"
 #include "files_app.h"
 #include "games_app.h"
 #include "tools_app.h"
@@ -57,6 +58,7 @@
 #include "board_wifi.h"
 #include "wifi_settings.h"
 #include "web_settings.h"
+#include "weather.h"
 #include "tusb.h"
 
 namespace {
@@ -1489,7 +1491,7 @@ static void apply_profile()
     const uint8_t now = profiles_current();
     const bool someone_else = now != applied;
     applied = now;
-    launcher_ui_refilter();
+    launcher_ui_set_app_filter(profiles_key_visible);  // its icons and widgets
     glimdock_app_set_access(profiles_app_access(ShellApp::Glimdock) == PROFILE_ACCESS_READ,
                             profiles_can(PROFILE_CAP_GLIMDOCK_ACTIONS));
     const bool home_read = profiles_app_access(ShellApp::Home) == PROFILE_ACCESS_READ;
@@ -1680,11 +1682,14 @@ extern "C" esp_err_t mosaico_shell_start(void)
             });
         };
         swifty_app_init(&hooks);
+        // Face ID borrows the camera's frames (profiles sign in with it).
+        face_id_init([] { camera_app_start(shell.camera_screen); });
         swifty_app_config_section("glimdock", glimdock_apply, glimdock_status);
         swifty_app_config_section("home", home_apply, home_status);
         swifty_app_config_section("files", files_app_config_apply, files_app_config_status);
         swifty_app_config_section("display", always_on_config_apply, always_on_config_status);
         swifty_app_config_section("vpn", vpn_app_config_apply, vpn_app_config_status);
+        swifty_app_config_section("weather", weather_config_apply, weather_config_status);
         agent_tools::register_all();
         // Only the tools the person signed in may use, and their limits in
         // Swifty's prompt (profiles_glue.cpp); developer mode in full mode.
@@ -1764,8 +1769,8 @@ extern "C" esp_err_t mosaico_shell_start(void)
     shell.home_screen =
         app_screen(&shell.home_frame, home_x, home_y, PANEL - 2 * home_x, PANEL - 2 * home_y, 0x000000);
     shell.home_note = profiles_ui_ribbon(shell.home_screen, "Read-only for this profile");
-    int widgets[2] = {-1, -1};
-    char layout[512] = "";  // the home screen's pages (launcher_layout.h's text)
+    int widgets[2] = {-1, -1};  // firmware 1.2's two widget kinds: migrated into the layout once
+    char layout[1024] = "";     // the home screen's pages (launcher_layout.h's text)
     {
         Preferences p;
         if (p.begin(PREFS, true)) {
@@ -1777,6 +1782,7 @@ extern "C" esp_err_t mosaico_shell_start(void)
             p.end();
         }
     }
+    weather_start();  // its cached forecast for the widgets' first draw
     shell.launcher = launcher_ui_build({shell_show, save_radius, set_brightness, haptics_set_enabled, orientation_set_enabled,
                                         [](int left, int right)
     {
@@ -1833,13 +1839,14 @@ extern "C" esp_err_t mosaico_shell_start(void)
             profiles_ui_note("Wi-Fi settings are not allowed for this profile");
         }
     },
-    profiles_key_visible, decorate_launcher},
+    decorate_launcher},
     shell.radius, shell.brightness, haptics_enabled(), orientation_enabled(),
          swifty_app_portrait(168), widgets[0], widgets[1], layout);
     home_app_set_exit_handler([] { shell_show(ShellApp::Launcher); });
     // Profiles: the lock screen, RPC 54 · 60/61, the auto-lock and Swifty's
     // policy; apply_profile once now for the profile the board starts on.
     profiles_glue_start(apply_profile);
+    launcher_ui_set_app_filter(profiles_key_visible);
     apply_profile();
     web_settings_set_restart(restart_board);  // a save that applies after a restart
     always_on_start({aod::busy, aod::pause, aod::light, aod::brightness, aod::info, aod::no_clock});
@@ -1869,6 +1876,11 @@ extern "C" esp_err_t mosaico_shell_start(void)
         sh.flashlight = [](bool on) {
             camera_app_start(shell.camera_screen);
             return camera_app_torch(on);
+        };
+        sh.battery = [](bool *charging) {
+            read_battery();
+            *charging = battery.charging;
+            return battery.pct;
         };
         shortcuts_start(sh);
     }

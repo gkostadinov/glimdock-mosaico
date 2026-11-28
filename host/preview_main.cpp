@@ -29,12 +29,19 @@
 #include "wifi_settings.h"
 #include "tools_app.h"
 #include "vpn_app.h"
+#include "weather.h"
+void weather_host_demo(int which);  // weather_host.cpp: which made-up forecast shows
 #include "games_app.h"
+#include "shortcuts_internal.h"
+#include "face_id.h"
+extern "C" void face_id_host_status(int status);  // face_id_host.cpp
 // games_ui.cpp: the preview's synchronous frames and screens
 extern "C" void games_app_preview_frame(void);
 extern "C" void games_app_preview_mode(int mode);
 extern "C" void games_app_preview_best(int game, uint32_t score);
+extern "C" float games_app_preview_bot(uint32_t seed, float seconds);
 #include "swifty_figure.h"
+#include "swifty_paseo_ui.h"
 #include "mui.h"
 #include "home_app.h"
 #include "home_hub.h"
@@ -46,6 +53,7 @@ namespace home {
 void home_preview_open(int);
 void home_preview_theme(int);
 void home_preview_toast(const char *);
+void home_preview_pages(const std::function<void(const char *)> &save);
 }
 extern std::string home_fixture_dir;
 
@@ -361,6 +369,9 @@ void render_profiles(lv_display_t *display, lv_obj_t *launcher, const LauncherSt
     int n = 0;
     for (int i = 0; i < LAUNCHER_APP_COUNT; ++i) {
         const LauncherApp &a = LAUNCHER_APPS[i];
+        if (a.keep) {
+            continue;  // Settings always shows
+        }
         const int slot = slot_of(a);
         apps[n++] = {slot, a.name, a.glyph, slot == 1 || slot == 2 || slot == 4};
     }
@@ -442,7 +453,7 @@ void render_profiles(lv_display_t *display, lv_obj_t *launcher, const LauncherSt
     glimdock_summary_t no_glim{};
     no_glim.cpu = no_glim.memory = NAN;
     strcpy(no_glim.status, "Homelab monitor");
-    launcher_ui_refilter();
+    launcher_ui_set_app_filter(preview_visible);
     launcher_ui_update(status, no_glim, home, camera, swifty, files);
     launcher_ui_show_page(0);
     save("launcher-profile-partner", display);
@@ -450,13 +461,13 @@ void render_profiles(lv_display_t *display, lv_obj_t *launcher, const LauncherSt
     save("launcher-profile-partner-2", display);
     // Locked: Guest, Home and Swifty read-only and a few tools.
     profiles_lock();
-    launcher_ui_refilter();
+    launcher_ui_set_app_filter(preview_visible);
     launcher_ui_update(status, no_glim, home, camera, swifty, files);
     launcher_ui_show_page(0);
     save("launcher-profile-guest", display);
     (void)glim;
     profiles_turn_off(PROFILE_BY_TRUSTED);
-    launcher_ui_refilter();
+    launcher_ui_set_app_filter(preview_visible);
     launcher_ui_update(status, glim, home, camera, swifty, files);
     launcher_ui_show_page(0);
 }
@@ -482,12 +493,87 @@ const lv_image_dsc_t *swifty_portrait(int size)
     return &dsc;
 }
 
+// The home screen's widgets: one moved by drag, one added from the gallery,
+// the new kinds on two pages, the weather's states, and its Settings.
+void render_widgets(LauncherStatus &status, const glimdock_summary_t &glim, const home_summary_t &home,
+                    const camera_summary_t &camera, const swifty_summary_t &swifty, const files_summary_t &files)
+{
+    lv_display_t *display = lv_display_get_default();
+    const auto refresh = [&] {
+        launcher_ui_update(status, glim, home, camera, swifty, files);
+    };
+    // Hold the Lights widget: editing, and it follows the finger down among the icons.
+    launcher_ui_show_page(0);
+    gesture({342, 112}, {150, 262}, 600, 300, false);
+    save("launcher-widget-drag", display);
+    finger.down = false;
+    run_for(500);
+    print_layout("lights moved");
+    save("launcher-widget-moved", display);
+    // + then a whole row's weather: onto the first page from this one with room.
+    tap({74, 25});
+    tap({305, 90});  // Whole row
+    run_for(300);
+    tap({143, 440});  // Weather
+    run_for(600);
+    print_layout("weather added");
+    save("launcher-widget-added", display);
+    // A tap on a widget while editing: what it shows, its size, or remove it.
+    launcher_ui_show_page(0);
+    tap({138, 112});
+    save("launcher-widget-change", display);
+    launcher_ui_back();
+    tap({384, 25});  // Done
+    run_for(400);
+    // The new kinds, set as RPC 53 sets a layout: the first page, and widgets on page 2.
+    launcher_ui_set_layout("@2,w4:weather,w2:calendar,w2:reminder,glimdock,home,swifty,settings"
+                           "|w2:network,w2:battery,w4:clock,camera,gallery,files,tools"
+                           "|webcam,interaction,calculator,vpn,games");
+    refresh();
+    launcher_ui_show_page(0);
+    save("launcher-widgets", display);
+    launcher_ui_show_page(1);
+    save("launcher-widgets-page-2", display);
+    print_layout("widgets");
+    // The weather: both sizes, then rain by day, offline since an older forecast,
+    // none yet, and in Fahrenheit.
+    launcher_ui_set_layout("@2,w4:weather,w2:weather~1,w2:glimdock,glimdock,home,swifty,settings"
+                           "|camera,gallery,files,tools,webcam,interaction,calculator,vpn,games");
+    const std::pair<int, const char *> states[] = {{0, "launcher-weather"}, {3, "launcher-weather-rain"},
+        {1, "launcher-weather-offline"}, {2, "launcher-weather-locating"}
+    };
+    launcher_ui_show_page(0);
+    for (const auto &[demo, name] : states) {
+        weather_host_demo(demo);
+        refresh();
+        save(name, display);
+    }
+    weather_host_demo(0);
+    weather_set_fahrenheit(true);
+    refresh();
+    save("launcher-weather-fahrenheit", display);
+    // Settings' Weather card (at the bottom), and its place.
+    launcher_ui_show_page(6);
+    if (lv_obj_t *s = scroller(lv_display_get_screen_active(display))) {
+        lv_obj_scroll_by(s, 0, -lv_obj_get_scroll_bottom(s), LV_ANIM_OFF);
+    }
+    save("launcher-settings-weather", display);
+    weather_set_fahrenheit(false);
+    tap({240, 378});
+    save("launcher-weather-place", display);
+    launcher_ui_back();
+    launcher_ui_back();
+    launcher_ui_set_layout("");
+    refresh();
+    launcher_ui_show_page(0);
+    print_layout("widgets reset");
+}
+
 void render_launcher(int radius)
 {
     lv_display_t *display = lv_display_get_default();
     LauncherHooks hooks{};
     hooks.wifi = wifi_settings_open;  // the Wi-Fi card's chevron
-    hooks.visible = preview_visible;
     hooks.decorate = preview_decorate;
     preview_radius = radius;
     lv_obj_t *launcher = launcher_ui_build(hooks, radius, 80, true, true, swifty_portrait(168));
@@ -586,7 +672,9 @@ void render_launcher(int radius)
     run_for(300);
     save("launcher-edit-hidden", display);
     print_layout("gallery hidden");
-    tap({74, 25});
+    tap({74, 25});  // + : the widget gallery, and the hidden apps behind it
+    save("launcher-widget-gallery", display);
+    tap({361, 36});
     save("launcher-hidden-apps", display);
     tap({90, 148});
     print_layout("gallery back");
@@ -607,6 +695,7 @@ void render_launcher(int radius)
     launcher_shortcut_remove("sc:movie");
     launcher_ui_show_page(0);
     print_layout("reset");
+    render_widgets(status, glim, home, camera, swifty, files);
     if (recording) {
         launcher_ui_entered(ShellApp::Launcher);
         record("launcher", 60, 33);
@@ -661,6 +750,49 @@ void render_launcher(int radius)
     launcher_ui_calibration(false, radius);
 }
 
+// The shortcuts' screens (shortcuts_ui.cpp over host/shortcuts_host.cpp's
+// demo shortcuts): the editor's list, a shortcut's page and its run's log,
+// New, the card that asks before an automation, a message and a toast.
+void render_shortcuts()
+{
+    lv_display_t *display = lv_display_get_default();
+    lv_obj_t *screen = lv_obj_create(nullptr);
+    lv_obj_remove_style_all(screen);
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+    lv_screen_load(screen);
+    shortcuts::ui_editor_open();
+    save("shortcuts-list", display);
+    tap({240, 100 + 76 + 33});  // Evening, the second row
+    run_for(300);
+    save("shortcuts-detail", display);
+    lv_obj_t *s = scroller(lv_layer_top());
+    if (s) {
+        lv_obj_scroll_to_y(s, 2000, LV_ANIM_OFF);
+    }
+    save("shortcuts-detail-log", display);
+    shortcuts::ui_editor_back();
+    tap({240, 100 + 2 * 76 + 33});  // Hall motion: an automation that is off
+    run_for(300);
+    save("shortcuts-automation", display);
+    shortcuts::ui_editor_back();
+    tap({240, 425});  // New shortcut
+    run_for(300);
+    save("shortcuts-new", display);
+    shortcuts::ui_editor_back();
+    shortcuts::ui_editor_back();
+    shortcuts::ui_ask("Evening", "Swifty wants this to run by itself: 15 min before sunset; At 19:30 on weekdays.\n"
+                      "If Desk lamp is off:\n   Living room lights on\nRepeat 3 times:", "Allow", 60, [](bool) {});
+    save("shortcuts-ask", display);
+    tap({128, 72 + 262 + 25});  // Not now
+    run_for(300);
+    shortcuts::ui_message("Hall motion", "Someone is in the hall: the lights stay on for two minutes.", 3, true, false);
+    save("shortcuts-message", display);
+    shortcuts::ui_toast("Movie", "tv", 1, shortcuts::Feedback::Failed, "Step 2: No Interaction board found");
+    save("shortcuts-toast", display);
+    run_for(13000);  // the message and the toast go
+}
+
 }  // namespace
 
 int main(int argc, char **argv)
@@ -688,6 +820,7 @@ int main(int argc, char **argv)
     loadFixture(data, networkState);
     publishedSnapshot = &data;
     render_launcher(radius);
+    render_shortcuts();
     {
         tools_hooks_t th = {};
         th.gravity = [](float * x, float * y, float * z) {
@@ -717,6 +850,35 @@ int main(int argc, char **argv)
             }
         }
         tools_app_set_active(false);
+    }
+    {
+        // Swifty asks before a Paseo agent acts (swifty_paseo_ui.cpp).
+        lv_obj_t *swifty = lv_obj_create(nullptr);
+        lv_obj_remove_style_all(swifty);
+        lv_obj_set_style_bg_color(swifty, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(swifty, LV_OPA_COVER, 0);
+        lv_screen_load(swifty);
+        const swifty::PaseoAsk demos[] = {
+            {
+                "Send to Homelab audit?", "working, active 5 min ago, in homelab (codex)",
+                "Also check the NAS disks' SMART data and tell me which one to replace first.", "Send"
+            },
+            {
+                "Start an agent in Glimdock firmware for the round display?", "codex/gpt-5.4",
+                "Find why the always-on clock drifts by a minute a day, fix it, and write a short note on what changed and how "
+                "you tested it on the board.", "Start"
+            },
+        };
+        const char *const names[] = {"swifty-paseo-confirm", "swifty-paseo-start"};
+        for (int i = 0; i < 2; ++i) {
+            lv_obj_t *ask = swifty::paseo_confirm_card(lv_layer_top(), demos[i], nullptr, nullptr);
+            for (int k = 0; k < 10; ++k) {
+                nativeClock += 60;
+                (lv_timer_handler)();
+            }
+            save(names[i], lv_display_get_default());
+            lv_obj_delete(ask);
+        }
     }
     {
         void vpn_host_demo(bool on);
@@ -781,6 +943,17 @@ int main(int argc, char **argv)
                 games_app_preview_mode(4);
                 frames(3);
                 save("games-over", lv_display_get_default());
+            }
+            if (g == 2 || g == 5) {
+                // Skyglide and Ridge Rally get harder: a late stage of a real
+                // run (played by the game's own pilot) and how that run ends
+                games_app_preview_mode(2);
+                games_app_preview_bot(77, g == 2 ? 165 : 105);
+                frames(12);  // past the new run's fade-in
+                save(std::string("games-late-") + names[g], lv_display_get_default());
+                games_app_preview_bot(77, 900);
+                frames(3);
+                save(std::string("games-end-") + names[g], lv_display_get_default());
             }
         }
         games_app_set_active(false);
@@ -908,6 +1081,22 @@ int main(int argc, char **argv)
             });
         }
     }
+    // Face ID's round preview (a synthetic frame: the host has no camera).
+    {
+        lv_obj_t *screen = lv_obj_create(nullptr);
+        lv_obj_remove_style_all(screen);
+        lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+        lv_screen_load(screen);
+        face_id_preview_create(screen, 90, 90, 300);
+        save("face-id", display);
+        face_id_host_status(8);  // face_core::Status::Recognised
+        save("face-id-recognised", display);
+        face_id_host_status(7);  // Rear: the longest message
+        save("face-id-rear", display);
+        lv_screen_load(lv_obj_create(nullptr));
+        lv_obj_delete(screen);  // the widget's own clean-up runs too
+    }
     // Swifty Home in the inscribed square.
     if (argc > 3) {
         home_fixture_dir = argv[3];
@@ -939,6 +1128,9 @@ int main(int argc, char **argv)
         home::home_preview_open(2);
         save("light-home", display);
         home::home_preview_theme(1);
+        home::home_preview_pages([&](const char *name) {
+            save(name, display);
+        });
         // Read-only for the profile signed in: the shell's ribbon, and the
         // note a tap on a light brings.
         home_app_set_read_only(true);

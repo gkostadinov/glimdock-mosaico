@@ -2,8 +2,8 @@
 // Host tests for the profiles model: first run, PIN hashing and checks, the
 // growing wait, sign-in with face and PIN, full mode, the managers' rules,
 // auto-lock and storage. Build and run:
-//   cmake -S components/profiles/test -B build-host/profiles-test && cmake --build build-host/profiles-test
-//   build-host/profiles-test/profiles-test
+//   cmake -S components/profiles/test -B build-host/profiles-unit && cmake --build build-host/profiles-unit
+//   build-host/profiles-unit/profiles-test (host/render.py builds build-host/profiles-test too)
 #include <stdio.h>
 #include <string.h>
 

@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Configure the ESP-Mosaico's apps (Swifty, Glimdock, Home, Files, the display, the VPN) from one file.
+"""Configure the ESP-Mosaico's apps (Swifty, Glimdock, Home, Files, the display, the VPN, the weather) from one file.
 
   python3 projects/glimdock/tools/mosaico-config.py --config-file FILE
   python3 projects/glimdock/tools/mosaico-config.py --status
   python3 projects/glimdock/tools/mosaico-config.py --template > mosaico.json
 
-FILE is JSON with any of six sections; leave out what you don't want to
+FILE is JSON with any of seven sections; leave out what you don't want to
 change. Within a section a missing key keeps the board's value and (for
 Swifty) an empty string clears it.
 
   "swifty":   llm_url, llm_key, llm_model, asr_url, asr_key, asr_model, asr_ca,
-              search_key (Tavily, for Swifty's web search)
+              search_key (Tavily, for Swifty's web search), and for Swifty's
+              Paseo agents: paseo_url (the daemon, http(s)://host:port),
+              paseo_token (its password), paseo_ca (PEM, for a privately
+              signed https:// daemon), paseo_provider (provider/model for new
+              agents, e.g. codex/gpt-5.4; empty: Swifty starts none).
               Applies at once.
   "glimdock": endpoint, token, setup_token, ca, ssid, password,
               private_reader_file
@@ -43,11 +47,15 @@ Swifty) an empty string clears it.
               (a path, ~ allowed, owned by you, mode 0600) that replaces the
               whole configuration; or the fields private_key, address, dns,
               public_key (the server's), preshared_key, endpoint (host:port),
-              allowed_ips (empty: 0.0.0.0/0, everything) and
-              persistent_keepalive (seconds); auto_connect (true/false:
+              allowed_ips (empty: 0.0.0.0/0, everything),
+              persistent_keepalive (seconds) and mtu (576 to 1420; 0: 1280,
+              the default); auto_connect (true/false:
               connect at start-up); on (true/false: connect or disconnect
               now). Applies at once; --status shows the state and the board's
               public key, never a key.
+  "weather":  the home screen's weather widget. place: a city ("Lisbon",
+              "Springfield, US") or "latitude,longitude"; "" for the
+              network's location. units: "c" or "f". Applies at once.
 
 The file must be an absolute path, owned by you, with mode 0600. Its contents
 never appear on a command line or in a log: they reach the Mosaico CLI
@@ -77,11 +85,25 @@ SERVICE = 0x4744
 METHOD = 40
 CHUNK = 3000
 SECTIONS = {
-    "swifty": ("llm_url", "llm_key", "llm_model", "asr_url", "asr_key", "asr_model", "asr_ca", "search_key"),
+    "swifty": (
+        "llm_url",
+        "llm_key",
+        "llm_model",
+        "asr_url",
+        "asr_key",
+        "asr_model",
+        "asr_ca",
+        "search_key",
+        "paseo_url",
+        "paseo_token",
+        "paseo_ca",
+        "paseo_provider",
+    ),
     "glimdock": ("endpoint", "token", "setup_token", "ca", "ssid", "password", "private_reader_file"),
     "home": ("hub", "pairing_code"),
     "files": ("shares", "photos", "swifty"),
     "display": ("always_on",),
+    "weather": ("place", "units"),
     "vpn": (
         "conf_file",
         "private_key",
@@ -92,6 +114,7 @@ SECTIONS = {
         "endpoint",
         "allowed_ips",
         "persistent_keepalive",
+        "mtu",
         "auto_connect",
         "on",
     ),
@@ -107,6 +130,9 @@ TEMPLATE = {
         "asr_key": "MOSAICO-ASR-KEY",
         "asr_model": "swifty-speech",
         "search_key": "TAVILY-KEY",
+        "paseo_url": "http://PASEO-HOST:6767",
+        "paseo_token": "PASEO-DAEMON-PASSWORD",  # pragma: allowlist secret (a placeholder)
+        "paseo_provider": "",
     },
     "glimdock": {
         "endpoint": "https://COLLECTOR-HOST/api/v1/snapshot",
@@ -141,6 +167,7 @@ TEMPLATE = {
         "photos": {"share": "Media", "path": "Photos"},
     },
     "display": {"always_on": 120},
+    "weather": {"place": "", "units": "c"},
     "vpn": {"conf_file": "~/.config/mosaico/wireguard.conf", "auto_connect": False, "on": True},
 }
 
@@ -230,6 +257,9 @@ def load(path: str) -> dict:
             v = section.get("always_on", 0)
             if isinstance(v, bool) or v not in ALWAYS_ON:
                 raise ValueError(f"display.always_on: seconds, one of {', '.join(map(str, ALWAYS_ON))} (0: off)")
+        elif name == "weather":
+            if not isinstance(section.get("place", ""), str) or section.get("units", "c") not in ("c", "f"):
+                raise ValueError('weather: place a string (a city, "latitude,longitude" or ""), units "c" or "f"')
         elif name == "vpn":
             for key, v in section.items():
                 if key in ("auto_connect", "on"):
@@ -238,6 +268,9 @@ def load(path: str) -> dict:
                 elif key == "persistent_keepalive":
                     if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 65535:
                         raise ValueError("vpn.persistent_keepalive: seconds from 0 (off) to 65535")
+                elif key == "mtu":
+                    if isinstance(v, bool) or not isinstance(v, int) or not (v == 0 or 576 <= v <= 1420):
+                        raise ValueError("vpn.mtu: 576 to 1420 (0: the default, 1280)")
                 elif not isinstance(v, str):
                     raise ValueError(f"vpn.{key}: expected a string")
             conf = section.get("conf_file")
@@ -356,7 +389,7 @@ def main(argv=None) -> int:
         if not reply.startswith("ok"):
             print(f"Configuration not loaded: {reply}", file=sys.stderr)
             return 1
-        for name in ("swifty", "glimdock", "files"):
+        for name in ("swifty", "glimdock", "files", "weather"):
             if name in config:
                 print(f"{name.capitalize()} settings saved.")
         if "vpn" in config:

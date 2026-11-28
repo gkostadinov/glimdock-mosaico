@@ -12,7 +12,10 @@
 
 #include "launcher_apps.h"
 #include "launcher_layout.h"
+#include "launcher_widgets.h"
 #include "mui.h"
+#include "reminders.h"
+#include "weather.h"
 
 namespace launcher_brand {
 #include "launcher_brand.h"
@@ -21,31 +24,76 @@ namespace launcher_brand {
 namespace {
 using namespace mui;
 namespace L = launcher_layout;
+namespace LW = launcher_widgets;
 constexpr int MIN_RADIUS = 0, MAX_RADIUS = 160;
-// Swifty's sky blue (its widget and listening dot); the clock widget's graphite.
+// Swifty's sky blue (its listening dot).
 const Accent SKY = {0x7DF3FF, 0x2B5CF2, 0x35B2FF, 0x041428, 0x12305A, 0x060E1C};
-const Accent GRAPHITE = {0xC9C9CF, 0x5A5A62, 0xB0B0B8, 0x101012, 0x2A2A2E, 0x151517};
 
-// The home screen: a status bar over pages of icons, like a phone's. The first
-// page has two live widgets above two rows of icons; the others three rows.
-// Hold an icon (or the empty page) to edit: the icons jiggle, drag them about
-// (to the edge to turn the page), tap − to hide one. Settings opens as a sheet.
+// The home screen: a status bar over pages of icons and widgets, like a
+// phone's. Hold an icon or a widget (or the empty page) to edit: they jiggle,
+// drag them about (to the edge to turn the page), tap − to hide an app or
+// remove a widget, + for widgets and hidden apps. Settings opens as a sheet.
 constexpr int ICON = 72, PITCH = 100, GRID_X = 40, ROW = 104, TOP = 12, CELL_H = ROW + TOP;
-constexpr int FIRST_Y = 194, PAGE_Y = 64;  // the first row's icon tops: first page, others
-constexpr int DOTS_Y = 426, EDGE = 34;     // page dots; the edge strip that turns the page while dragging
-int cell_x(int slot)
+// A row with a widget in it is taller: the widget's card and a 2 px gap.
+constexpr int TALL = LW::HEIGHT + 2;
+// The first row's top: 52 for icons (as pages always were), 44 with a widget
+// row first or two widget rows (where the first page's widgets always sat).
+constexpr int TOP_Y = 52, TOP_Y_TALL = 44;
+constexpr int MARGIN = 12;              // round a widget's card: room for its − and its lift
+constexpr int DOTS_Y = 426, EDGE = 34;  // page dots; the edge strip that turns the page while dragging
+
+// The rows of a packed page: their tops (and the page's end) and heights.
+struct Rows {
+    int y[L::ROWS + 1];
+    bool tall[L::ROWS];
+};
+Rows rows_of(const L::Grid &g)
 {
-    return GRID_X + (slot % L::COLS) * PITCH;
-}
-int cell_y(int page, int slot)
-{
-    return (page ? PAGE_Y : FIRST_Y) - TOP + (slot / L::COLS) * ROW;
+    Rows r{};
+    int talls = 0;
+    for (bool t : g.tall) {
+        talls += t;
+    }
+    int y = g.tall[0] || talls >= L::MAX_TALL ? TOP_Y_TALL : TOP_Y;
+    for (int i = 0; i < L::ROWS; ++i) {
+        r.y[i] = y;
+        r.tall[i] = g.tall[i];
+        y += g.tall[i] ? TALL : ROW;
+    }
+    r.y[L::ROWS] = y;
+    return r;
 }
 
-// One icon on the home screen: an app or a shortcut tile.
+// Where an item's object goes on its page: an icon's cell (centred in a
+// tall row), or the box round a widget's card.
+lv_point_t spot_xy(const L::Spot &s, const Rows &r)
+{
+    const int row = std::min(s.row, L::ROWS);  // past the page: hidden anyway
+    const bool tall = row < L::ROWS && r.tall[row];
+    if (s.width == 1) {
+        return {GRID_X + s.col * PITCH, r.y[row] + (tall ? (TALL - ROW) / 2 : 0)};
+    }
+    // A card in the right half sits 4 px in: 8 px between two, as the first
+    // page's two widgets always were.
+    return {GRID_X + s.col * PITCH + (s.width == 2 && s.col == 2 ? 4 : 0) - MARGIN, r.y[row] - MARGIN};
+}
+
+// The middle of what shows there: a tile or a card.
+lv_point_t spot_centre(const L::Spot &s, const Rows &r)
+{
+    const lv_point_t p = spot_xy(s, r);
+    if (s.width == 1) {
+        return {p.x + PITCH / 2, p.y + TOP + ICON / 2};
+    }
+    return {p.x + MARGIN + LW::card_width(s.width) / 2, p.y + MARGIN + LW::HEIGHT / 2};
+}
+
+// One item on the home screen: an app, a shortcut tile or a widget.
 struct Cell {
     std::string key;
-    const LauncherApp *app = nullptr;  // or a shortcut
+    const LauncherApp *app = nullptr;  // or a shortcut, or a widget
+    LW::Widget *widget = nullptr;
+    int width = 1;
     lv_obj_t *obj = nullptr, *tile = nullptr, *minus = nullptr, *mark = nullptr;
     lv_timer_t *mark_timer = nullptr;
     float phase = 0;  // its jiggle's
@@ -62,11 +110,11 @@ struct {
     LauncherHooks hooks{};
     int radius = 80, draft = 80;
     lv_obj_t *screen = nullptr, *pager = nullptr, *status = nullptr, *dots = nullptr, *editbar = nullptr,
-              *settings = nullptr, *hidden_sheet = nullptr;
+              *settings = nullptr, *hidden_sheet = nullptr, *gallery = nullptr, *place_sheet = nullptr;
     lv_obj_t *vpn = nullptr, *vpn_text = nullptr;  // the VPN's badge after the Wi-Fi icon
     lv_obj_t *clock = nullptr, *wifi = nullptr, *date = nullptr, *badge = nullptr, *badge_text = nullptr, *swifty_dot = nullptr;
-    lv_obj_t *batt = nullptr, *batt_fill = nullptr, *batt_nub = nullptr, *batt_bolt = nullptr, *picker = nullptr;
-    // The pages and their icons
+    lv_obj_t *batt = nullptr, *batt_fill = nullptr, *batt_nub = nullptr, *batt_bolt = nullptr;
+    // The pages and their items
     std::vector<lv_obj_t *> pages, dot_objs;
     std::vector<std::unique_ptr<Cell>> cells;
     std::vector<Shortcut> shortcuts;
@@ -76,28 +124,25 @@ struct {
     bool built = false, editing = false;
     int page = 0;  // the page in view (its dot lit)
     lv_timer_t *jiggle = nullptr;
-    // A press on an icon, and the icon being dragged
+    // A press on an item, and the item being dragged
     Cell *pressed = nullptr, *drag = nullptr;
+    bool moved = false;  // this press dragged something (its release is no tap)
     lv_point_t press_at{}, grab{};
-    int drag_page = 0, drag_slot = 0, drag_view = 0, edge_dir = 0;
+    int drag_page = 0, drag_index = 0, drag_view = 0, edge_dir = 0;
     uint32_t edge_since = 0, last_turn = 0;
-    // The two widgets: their kind and parts.
-    struct {
-        int kind;
-        lv_obj_t *card, *title, *big, *line1, *line2, *icon, *spark, *dot;
-    } w[2] = {};
-    // The latest data, so a widget changed by the person fills at once.
-    glimdock_summary_t glim{};
-    home_summary_t home_data{};
-    swifty_summary_t swifty{};
-    char clock_text[8] = "--:--", date_text[24] = "";
-    int battery = -1;
-    bool charging = false, have_data = false;
+    // The widget gallery: the widget it changes ("": it adds one), the size chosen.
+    std::string gallery_for;
+    int gallery_width = 2;
+    // The one place that decides which apps show (launcher_ui_set_app_filter).
+    bool (*app_filter)(const char *key) = nullptr;
+    // The latest data, so a widget added or changed fills at once.
+    LW::Data data;
+    bool have_data = false;
     // Settings sheet
     lv_obj_t *s_bright = nullptr, *s_bright_bar = nullptr, *s_radius = nullptr, *s_wifi_dot = nullptr,
               *s_ssid = nullptr, *s_detail = nullptr, *s_wifi_state = nullptr, *s_versions = nullptr, *s_zone = nullptr,
                *s_cam_auto = nullptr, *s_web = nullptr, *s_web_hint = nullptr, *s_web_url = nullptr, *s_web_code = nullptr,
-                *s_aod = nullptr, *s_hidden = nullptr;
+                *s_aod = nullptr, *s_hidden = nullptr, *s_units = nullptr, *s_place = nullptr, *s_weather = nullptr;
     // Corner calibration
     lv_obj_t *calibration = nullptr, *guide = nullptr, *cal_value = nullptr;
 } ui;
@@ -155,16 +200,6 @@ void draw_g(lv_event_t *e)
     lv_draw_image(lv_event_get_layer(e), &d, &area);
 }
 
-uint32_t hsl(float h, float s, float l)
-{
-    h = fmodf(fmodf(h, 360) + 360, 360) / 360;
-    auto f = [&](float n) {
-        const float k = fmodf(n + h * 12, 12), a = s * std::min(l, 1 - l);
-        return l - a * std::max(-1.0f, std::min({k - 3, 9 - k, 1.0f}));
-    };
-    return uint32_t(lroundf(f(0) * 255)) << 16 | uint32_t(lroundf(f(8) * 255)) << 8 | uint32_t(lroundf(f(4) * 255));
-}
-
 // ---- the layout: what each key is -----------------------------------------------------------
 Shortcut *find_shortcut(const std::string &key)
 {
@@ -175,12 +210,31 @@ Shortcut *find_shortcut(const std::string &key)
     return nullptr;
 }
 
+// The one place that decides whether an app shows: the filter set with
+// launcher_ui_set_app_filter (profiles), never for Settings (the way back).
+// A filtered app keeps its place, as do the widgets showing it.
+bool app_visible(const char *key)
+{
+    if (!key || !ui.app_filter) {
+        return true;
+    }
+    const LauncherApp *a = launcher_app(key);
+    return (a && a->keep) || ui.app_filter(key);
+}
+
 L::Kind kind(const std::string &key)
 {
-    if (ui.hooks.visible && !ui.hooks.visible(key.c_str())) {
-        return L::Kind::Pending;  // not for this profile: keeps its place, takes no cell
+    if (L::is_widget(key)) {
+        const int k = LW::kind_of(key);
+        if (k < 0) {
+            return L::Kind::Gone;  // a kind from newer firmware
+        }
+        return app_visible(LW::info(k).app) ? L::Kind::Shown : L::Kind::Pending;
     }
-    if (launcher_app(key.c_str()) || find_shortcut(key)) {
+    if (const LauncherApp *a = launcher_app(key.c_str())) {
+        return app_visible(a->key) ? L::Kind::Shown : L::Kind::Pending;
+    }
+    if (find_shortcut(key)) {
         return L::Kind::Shown;
     }
     return key.compare(0, 3, "sc:") == 0 ? L::Kind::Pending : L::Kind::Gone;
@@ -273,7 +327,7 @@ void glide(lv_obj_t *o, int x, int y, bool animate)
     }
 }
 
-void place(Cell *c, int page, int slot, bool animate)
+void place(Cell *c, int page, const L::Spot &spot, const Rows &rows, bool animate)
 {
     lv_obj_t *p = ui.pages[size_t(page)];
     if (lv_obj_get_parent(c->obj) != p) {
@@ -281,28 +335,41 @@ void place(Cell *c, int page, int slot, bool animate)
         animate = false;
     }
     // Past a full page (while dragging onto it): off to the next page on the drop.
-    set_hidden(c->obj, slot >= L::capacity(page));
-    c->phase = float(slot) * 1.9f;
-    glide(c->obj, cell_x(slot), cell_y(page, slot), animate);
+    set_hidden(c->obj, !spot.fits);
+    c->phase = float(spot.row * L::COLS + spot.col) * 1.9f;
+    const lv_point_t at = spot_xy(spot, rows);
+    glide(c->obj, at.x, at.y, animate);
 }
 
-// A page's icons in their slots; while dragging, without the dragged one and
-// with a gap where it would land.
+// The keys a page shows, in order; while dragging, the dragged one where it
+// would land (on the page under it) or nowhere (on the others).
+std::vector<std::string> page_keys(int page)
+{
+    std::vector<std::string> keys = L::shown(ui.layout.pages[size_t(page)], kind);
+    if (ui.drag) {
+        keys.erase(std::remove(keys.begin(), keys.end(), ui.drag->key), keys.end());
+        if (page == ui.drag_page) {
+            keys.insert(keys.begin() + std::clamp(ui.drag_index, 0, int(keys.size())), ui.drag->key);
+        }
+    }
+    return keys;
+}
+
+// A page's items in their places; while dragging, with a gap the dragged
+// item's shape where it would land.
 void layout_page(int page, bool animate)
 {
     if (page < 0 || page >= int(ui.layout.pages.size())) {
         return;
     }
-    int slot = 0;
-    for (const std::string &key : L::shown(ui.layout.pages[size_t(page)], kind)) {
-        Cell *c = cell(key);
-        if (!c || c == ui.drag) {
-            continue;
+    const std::vector<std::string> keys = page_keys(page);
+    const L::Grid grid = L::pack(keys);
+    const Rows rows = rows_of(grid);
+    for (size_t i = 0; i < keys.size(); ++i) {
+        Cell *c = cell(keys[i]);
+        if (c && c != ui.drag) {
+            place(c, page, grid.spots[i], rows, animate);
         }
-        if (ui.drag && page == ui.drag_page && slot == ui.drag_slot) {
-            ++slot;
-        }
-        place(c, page, slot++, animate);
     }
 }
 
@@ -327,13 +394,23 @@ void page_dots()
         }
         set_bg_color(d, lv_color_hex(i == ui.page ? TEXT : 0x55555B));
     }
-    // One page: no dots.
+    // One page: no dots. Lower under a page filled to its end (two widget rows
+    // and one of icons), clear of the labels.
     set_hidden(ui.dots, n < 2);
+    int bottom = 0;
+    if (ui.page >= 0 && ui.page < int(ui.layout.pages.size())) {
+        const L::Grid g = L::pack(page_keys(ui.page));
+        bottom = rows_of(g).y[g.rows];
+    }
+    const int y = bottom > DOTS_Y - 26 ? DOTS_Y + 8 : DOTS_Y;
+    if (lv_obj_get_style_y(ui.dots, LV_PART_MAIN) != y) {
+        lv_obj_set_y(ui.dots, y);
+    }
 }
 
 void page_events(lv_obj_t *page);
 
-// The page objects to match the layout's pages: icons on a page that goes
+// The page objects to match the layout's pages: items on a page that goes
 // move to the first one (hidden until placed).
 void sync_pages()
 {
@@ -355,16 +432,36 @@ void sync_pages()
     }
 }
 
+Cell *make_cell(const std::string &key);
+void retire_cell(Cell *c);
+
+// A cell for every widget in the layout, and none for the widgets gone from it.
+void sync_widgets()
+{
+    for (size_t i = ui.cells.size(); i-- > 0;) {
+        Cell *c = ui.cells[i].get();
+        if (c->widget && !L::contains(ui.layout, c->key)) {
+            retire_cell(c);
+        }
+    }
+    for (const L::Page &p : ui.layout.pages)
+        for (const std::string &k : p)
+            if (L::is_widget(k) && LW::kind_of(k) >= 0 && !cell(k)) {
+                make_cell(k);
+            }
+}
+
 void apply_layout(bool animate)
 {
     sync_pages();
+    sync_widgets();
     for (auto &c : ui.cells) {
         if (c.get() == ui.drag) {
             continue;
         }
-        int page, slot;
-        if (!L::find(ui.layout, c->key, kind, &page, &slot)) {
-            lv_obj_add_flag(c->obj, LV_OBJ_FLAG_HIDDEN);  // hidden by the person, or pending
+        int page, index;
+        if (!L::find(ui.layout, c->key, kind, &page, &index)) {
+            lv_obj_add_flag(c->obj, LV_OBJ_FLAG_HIDDEN);  // hidden by the person, filtered, or pending
         }
     }
     for (int p = 0; p < int(ui.pages.size()); ++p) {
@@ -455,18 +552,23 @@ void set_editing(bool on)
 
 void lift(Cell *c, bool up)
 {
-    // Grown a little, the way a picked-up icon comes forward.
+    // Grown a little, the way a picked-up icon comes forward. Not a widget:
+    // its card's fill (mui::card_fill) would not grow with it.
+    if (c->widget) {
+        return;
+    }
     lv_obj_set_style_transform_width(c->tile, up ? 6 : 0, 0);
     lv_obj_set_style_transform_height(c->tile, up ? 6 : 0, 0);
 }
 
 void start_drag(Cell *c)
 {
-    int page, slot;
-    if (ui.drag || !L::find(ui.layout, c->key, kind, &page, &slot)) {
+    int page, index;
+    if (ui.drag || !L::find(ui.layout, c->key, kind, &page, &index)) {
         return;
     }
     ui.drag = c;
+    ui.moved = true;
     pager_scrolls(false);
     // Off its page onto the screen, where it can go over every page.
     lv_anim_delete(c->obj, anim_x);
@@ -487,7 +589,7 @@ void start_drag(Cell *c)
     lv_obj_remove_state(c->tile, LV_STATE_PRESSED);
     lift(c, true);
     ui.drag_page = ui.drag_view = page;
-    ui.drag_slot = slot;
+    ui.drag_index = index;
     ui.edge_dir = 0;
 }
 
@@ -496,6 +598,44 @@ void turn_to(int page)
     ui.drag_view = page;
     lv_obj_scroll_to_x(ui.pager, page * PANEL, LV_ANIM_ON);
     tick();
+}
+
+// Where the dragged item would land on page: of every place in the order it
+// could take, the one that puts it nearest to where the finger holds it.
+int nearest_index(int page, lv_point_t centre)
+{
+    Cell *c = ui.drag;
+    std::vector<int> widths;
+    for (const std::string &key : L::shown(ui.layout.pages[size_t(page)], kind))
+        if (key != c->key) {
+            widths.push_back(L::width(key));
+        }
+    int best = ui.drag_index, best_d = INT32_MAX;
+    for (int i = 0; i <= int(widths.size()); ++i) {
+        std::vector<int> trial;
+        trial.reserve(widths.size() + 1);
+        for (int j = 0; j <= int(widths.size()); ++j) {
+            if (j == i) {
+                trial.push_back(c->width);
+            }
+            if (j < int(widths.size())) {
+                trial.push_back(widths[size_t(j)]);
+            }
+        }
+        const L::Grid g = L::pack(trial);
+        const L::Spot &s = g.spots[size_t(i)];
+        if (!s.fits) {
+            continue;
+        }
+        const lv_point_t at = spot_centre(s, rows_of(g));
+        const int dx = at.x - centre.x, dy = at.y - centre.y, d = dx * dx + dy * dy;
+        // Ties keep the place it has (no flicker between two equal ones).
+        if (d < best_d || (d == best_d && page == ui.drag_page && i == ui.drag_index)) {
+            best = i;
+            best_d = d;
+        }
+    }
+    return std::min(best, int(widths.size()));
 }
 
 void drag_move(lv_point_t p)
@@ -517,22 +657,15 @@ void drag_move(lv_point_t p)
         ui.edge_since = ui.last_turn = now;
         turn_to(want);
     }
-    // The slot under the icon's centre, on the page in view.
+    // The middle of what is held: a tile, or a widget's card.
+    const lv_point_t centre = c->widget ? lv_point_t{x + MARGIN + LW::card_width(c->width) / 2, y + MARGIN + LW::HEIGHT / 2}
+                              : lv_point_t{x + PITCH / 2, y + TOP + ICON / 2};
     const int page = ui.drag_view;
-    const int rows = L::capacity(page) / L::COLS;
-    const int cx = x + PITCH / 2, cy = y + TOP + ICON / 2;
-    const int col = std::clamp(int(floorf(float(cx - GRID_X) / PITCH)), 0, L::COLS - 1);
-    const int row = std::clamp(int(floorf(float(cy - cell_y(page, 0)) / ROW)), 0, rows - 1);
-    int count = 0;
-    for (const std::string &key : L::shown(ui.layout.pages[size_t(page)], kind))
-        if (key != c->key) {
-            ++count;
-        }
-    const int slot = std::min(row * L::COLS + col, std::min(count, L::capacity(page) - 1));
-    if (page != ui.drag_page || slot != ui.drag_slot) {
+    const int index = nearest_index(page, centre);
+    if (page != ui.drag_page || index != ui.drag_index) {
         const int was = ui.drag_page;
         ui.drag_page = page;
-        ui.drag_slot = slot;
+        ui.drag_index = index;
         if (was != page) {
             layout_page(was, true);
         }
@@ -544,13 +677,13 @@ void drop()
 {
     Cell *c = ui.drag;
     ui.drag = nullptr;
-    L::move(ui.layout, c->key, ui.drag_page, ui.drag_slot, kind);
+    L::move(ui.layout, c->key, ui.drag_page, ui.drag_index, kind);
     normalize();
     sync_pages();
     lv_obj_update_layout(ui.screen);
     // Back onto its page from where the finger left it, then home.
-    int page = 0, slot = 0;
-    L::find(ui.layout, c->key, kind, &page, &slot);
+    int page = 0, index = 0;
+    L::find(ui.layout, c->key, kind, &page, &index);
     lv_area_t pa;
     lv_obj_get_coords(ui.pages[size_t(page)], &pa);
     const int x = lv_obj_get_style_x(c->obj, LV_PART_MAIN), y = lv_obj_get_style_y(c->obj, LV_PART_MAIN);
@@ -568,15 +701,31 @@ void hide_cb(lv_event_t *e)
     if (!ui.editing || ui.drag) {
         return;
     }
-    L::hide(ui.layout, c->key);
+    if (c->widget) {
+        L::remove(ui.layout, c->key);  // a widget goes; the gallery has it again
+    } else {
+        L::hide(ui.layout, c->key);
+    }
     normalize();
     apply_layout(true);
     save_layout();
 }
 
+void open_gallery(const std::string &replace);
+
 void open_item(Cell *c)
 {
-    if (c->app) {
+    if (c->widget) {
+        const int action = LW::tap_action(LW::kind(c->widget));
+        if (action >= 0) {
+            open_app(action);
+        } else if (action == LW::TAP_WIFI && ui.hooks.wifi) {
+            ui.hooks.wifi();
+        } else if (action == LW::TAP_REFRESH) {
+            weather_refresh();
+            tick();
+        }
+    } else if (c->app) {
         open_app(c->app->open);
     } else if (Shortcut *s = find_shortcut(c->key)) {
         if (s->run) {
@@ -596,8 +745,9 @@ void tile_cb(lv_event_t *e)
     case LV_EVENT_PRESSED:
         ui.pressed = c;
         ui.press_at = p;
+        ui.moved = false;
         if (ui.editing) {
-            pager_scrolls(false);  // a drag moves the icon, not the page
+            pager_scrolls(false);  // a drag moves the item, not the page
         }
         break;
     case LV_EVENT_LONG_PRESSED:
@@ -629,6 +779,8 @@ void tile_cb(lv_event_t *e)
     case LV_EVENT_SHORT_CLICKED:
         if (!ui.editing) {
             open_item(c);
+        } else if (c->widget && !ui.moved) {  // while editing, a tap on a widget changes what it shows
+            open_gallery(c->key);
         }
         break;
     default:
@@ -694,13 +846,42 @@ lv_obj_t *draw_item(lv_obj_t *parent, const std::string &key, lv_obj_t **tile_ou
     return o;
 }
 
+// The − at an item's top-left corner (at (x, y) in its object): while
+// editing it hides an app or removes a widget (not Settings, the way back).
+void add_minus(Cell *c, int x, int y)
+{
+    c->minus = box(c->obj, x, y, 34, 34);
+    lv_obj_t *d = box(c->minus, 4, 4, 26, 26, LV_RADIUS_CIRCLE);
+    lv_obj_set_style_bg_color(d, lv_color_hex(0x4A4A50), 0);
+    lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(d, 2, 0);
+    lv_obj_set_style_border_color(d, lv_color_black(), 0);
+    lv_obj_t *bar = box(d, 7, 11, 12, 3, 1);
+    lv_obj_set_style_bg_color(bar, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    on(c->minus, hide_cb, LV_EVENT_CLICKED, c);
+    set_hidden(c->minus, !ui.editing);
+}
+
 Cell *make_cell(const std::string &key)
 {
     auto owned = std::make_unique<Cell>();
     Cell *c = owned.get();
     c->key = key;
     c->app = launcher_app(key.c_str());
-    c->obj = draw_item(ui.pages[0], key, &c->tile);
+    c->width = L::width(key);
+    if (c->width > 1) {
+        // A widget: its card in a box with room round it for the − and the lift.
+        const int w = LW::card_width(c->width);
+        c->obj = box(ui.pages[0], 0, 0, w + 2 * MARGIN, LW::HEIGHT + 2 * MARGIN);
+        c->widget = LW::create(c->obj, LW::kind_of(key), c->width, MARGIN, MARGIN);
+        c->tile = LW::card(c->widget);
+        if (ui.have_data) {
+            LW::update(c->widget, ui.data);
+        }
+    } else {
+        c->obj = draw_item(ui.pages[0], key, &c->tile);
+    }
     lv_obj_add_flag(c->obj, LV_OBJ_FLAG_HIDDEN);
     press_fx(c->tile);
     lv_obj_add_flag(c->tile, lv_obj_flag_t(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK));
@@ -722,29 +903,30 @@ Cell *make_cell(const std::string &key)
         lv_obj_set_style_bg_opa(ui.swifty_dot, LV_OPA_COVER, 0);
         lv_obj_add_flag(ui.swifty_dot, LV_OBJ_FLAG_HIDDEN);
     }
-    // While editing: − at the tile's corner hides it (not Settings, the way back).
-    if (!(c->app && c->app->keep)) {
-        c->minus = box(c->obj, (PITCH - ICON) / 2 - 12, TOP - 12, 34, 34);
-        lv_obj_t *d = box(c->minus, 4, 4, 26, 26, LV_RADIUS_CIRCLE);
-        lv_obj_set_style_bg_color(d, lv_color_hex(0x4A4A50), 0);
-        lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(d, 2, 0);
-        lv_obj_set_style_border_color(d, lv_color_black(), 0);
-        lv_obj_t *bar = box(d, 7, 11, 12, 3, 1);
-        lv_obj_set_style_bg_color(bar, lv_color_white(), 0);
-        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
-        on(c->minus, hide_cb, LV_EVENT_CLICKED, c);
-        set_hidden(c->minus, !ui.editing);
+    if (c->widget) {
+        add_minus(c, 0, 0);  // on the card's rounded corner, as on a tile's
+    } else if (!(c->app && c->app->keep)) {
+        add_minus(c, (PITCH - ICON) / 2 - 12, TOP - 12);
     }
     ui.cells.push_back(std::move(owned));
     return c;
 }
 
-void delete_cell(const std::string &key)
+void free_cell(Cell *c)
+{
+    if (c->mark_timer) {
+        lv_timer_delete(c->mark_timer);
+    }
+    LW::destroy(c->widget);
+    lv_obj_delete(c->obj);
+    delete c;
+}
+
+// Out of the cells now, deleted after the event in progress (a − is often it).
+void retire_cell(Cell *c)
 {
     for (auto it = ui.cells.begin(); it != ui.cells.end(); ++it) {
-        Cell *c = it->get();
-        if (c->key != key) {
+        if (it->get() != c) {
             continue;
         }
         if (ui.drag == c) {
@@ -754,17 +936,51 @@ void delete_cell(const std::string &key)
         if (ui.pressed == c) {
             ui.pressed = nullptr;
         }
-        if (c->mark_timer) {
-            lv_timer_delete(c->mark_timer);
-        }
-        lv_obj_delete(c->obj);
+        // Onto the screen meanwhile: its page may go before it does.
+        lv_obj_add_flag(c->obj, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_parent(c->obj, ui.screen);
+        lv_async_call([](void *p) {
+            free_cell(static_cast<Cell *>(p));
+        }, it->release());
         ui.cells.erase(it);
         return;
     }
 }
 
+void delete_cell(const std::string &key)
+{
+    if (Cell *c = cell(key)) {
+        retire_cell(c);
+    }
+}
+
+// A fresh home screen: two widgets (Glimdock, Lights) over the apps, as the
+// first page always began.
+L::Layout default_layout()
+{
+    L::Layout l = L::parse("");
+    L::migrate(l, {LW::key_for(LW::GLIMDOCK, 2), LW::key_for(LW::LIGHTS, 2)});
+    return l;
+}
+
 // ---- hidden apps ----------------------------------------------------------------------------
 void open_hidden();
+
+// The hidden apps that could show (not those a filter hides, nor tiles not registered).
+std::vector<std::string> hidden_keys()
+{
+    std::vector<std::string> keys;
+    for (const std::string &k : ui.layout.hidden)
+        if (kind(k) == L::Kind::Shown) {
+            keys.push_back(k);
+        }
+    return keys;
+}
+
+size_t hidden_count()
+{
+    return hidden_keys().size();
+}
 
 void close_hidden()
 {
@@ -799,7 +1015,7 @@ void reset_cb(lv_event_t *e)
         set_text_color(text, lv_color_hex(WARN));
         return;
     }
-    ui.layout = L::Layout{};
+    ui.layout = default_layout();
     normalize();
     apply_layout(false);
     save_layout();
@@ -823,10 +1039,7 @@ void open_hidden()
         close_hidden();
     });
     label(o, "Hidden apps", 112, 18, 0, TEXT, 30, true);
-    ui.sheet_keys = ui.layout.hidden;
-    ui.sheet_keys.erase(std::remove_if(ui.sheet_keys.begin(), ui.sheet_keys.end(), [](const std::string & k) {
-        return ui.hooks.visible && !ui.hooks.visible(k.c_str());
-    }), ui.sheet_keys.end());
+    ui.sheet_keys = hidden_keys();
     const std::vector<std::string> &hidden = ui.sheet_keys;
     if (hidden.empty()) {
         lv_obj_t *t = label(o, "Nothing hidden. Hold an icon on the home screen, then tap \xE2\x88\x92 to hide it.",
@@ -837,7 +1050,7 @@ void open_hidden()
         for (size_t i = 0; i < hidden.size(); ++i) {
             lv_obj_t *tile;
             lv_obj_t *c = draw_item(o, hidden[i], &tile);
-            lv_obj_set_pos(c, cell_x(int(i)), 100 + int(i / L::COLS) * ROW);
+            lv_obj_set_pos(c, GRID_X + int(i % L::COLS) * PITCH, 100 + int(i / L::COLS) * ROW);
             // A + at its corner says what a tap does.
             lv_obj_t *plus = box(c, (PITCH - ICON) / 2 - 8, TOP - 8, 26, 26, LV_RADIUS_CIRCLE);
             lv_obj_set_style_bg_color(plus, lv_color_hex(GREEN.glow), 0);
@@ -874,10 +1087,10 @@ void build_editbar()
     ui.editbar = box(ui.screen, 0, 0, PANEL, 48);
     lv_obj_t *plus = field_button(ui.editbar, 52, 8, 44, 34, "", 16);
     icon(plus, "plus", 10, 5, 24, TEXT, 2.2f);
-    on(plus, [](lv_event_t *) {
-        open_hidden();
+    on(plus, [](lv_event_t *) {  // widgets, and from there the hidden apps
+        open_gallery("");
     });
-    label(ui.editbar, "Drag to move \xC2\xB7 \xE2\x88\x92 hides", 104, 16, 232, TEXT2, 13, true, LV_TEXT_ALIGN_CENTER);
+    label(ui.editbar, "Drag to move \xC2\xB7 + adds widgets", 104, 16, 232, TEXT2, 13, true, LV_TEXT_ALIGN_CENTER);
     lv_obj_t *done = fill_button(ui.editbar, PANEL - 52 - 88, 8, 88, 34, "Done", GREEN, 15);
     on(done, [](lv_event_t *) {
         set_editing(false);
@@ -885,236 +1098,211 @@ void build_editbar()
     lv_obj_add_flag(ui.editbar, LV_OBJ_FLAG_HIDDEN);
 }
 
-// ---- widgets ---------------------------------------------------------------------------------
-// Two slots above the icons; hold one to choose what it shows.
-enum WidgetKind { W_GLIMDOCK, W_LIGHTS, W_MUSIC, W_SWIFTY, W_BATTERY, W_CLOCK, W_KINDS };
-const char *const WIDGET_NAMES[W_KINDS] = {"Glimdock", "Lights", "Music", "Swifty", "Battery", "Clock"};
-const char *const WIDGET_ICONS[W_KINDS] = {"tech", "bulb", "speaker", "mic", "power", "clock"};
-const int WIDGET_APP[W_KINDS] = {int(ShellApp::Glimdock), int(ShellApp::Home), int(ShellApp::Home),
-                                 int(ShellApp::Swifty), -3, -3
-                                };
-constexpr int WX = 40, WY = 44, WW = 196, WH = 136, WGAP = 8;
-
-void update_widget(int slot);
-void open_picker(int slot);
-
-void widget_tap_cb(lv_event_t *e)
+// ---- the widget gallery -----------------------------------------------------------------------
+// Opened by + while editing (to add a widget) or by a tap on a widget while
+// editing (to change what it shows, its size, or remove it).
+void close_gallery()
 {
-    const int slot = int(intptr_t(lv_event_get_user_data(e)));
-    if (ui.editing) {  // while editing, a widget picks what it shows
-        open_picker(slot);
+    if (ui.gallery) {
+        lv_obj_delete_async(ui.gallery);
+    }
+    ui.gallery = nullptr;
+}
+
+// key, or key~1, key~2 ... : one the layout doesn't hold (but `mine`, the
+// widget being changed, may keep its own).
+std::string free_key(const std::string &base, const std::string &mine)
+{
+    for (int n = 0; n < 10; ++n) {
+        const std::string key = n ? base + "~" + std::to_string(n) : base;
+        if (key == mine || !L::contains(ui.layout, key)) {
+            return key;
+        }
+    }
+    return "";
+}
+
+void show_page(int page, bool animate)
+{
+    page = std::clamp(page, 0, int(ui.pages.size()) - 1);
+    lv_obj_scroll_to_x(ui.pager, page * PANEL, animate ? LV_ANIM_ON : LV_ANIM_OFF);
+    ui.page = page;
+    page_dots();
+}
+
+void pick_widget_cb(lv_event_t *e)
+{
+    const int k = int(intptr_t(lv_event_get_user_data(e)));
+    const std::string mine = ui.gallery_for;
+    // Same kind and size as it is: nothing to change.
+    if (!mine.empty() && LW::kind_of(mine) == k && L::width(mine) == ui.gallery_width) {
+        close_gallery();
         return;
     }
-    const int app = WIDGET_APP[ui.w[slot].kind];
-    if (app >= 0) {
-        open_app(app);
+    const std::string key = free_key(LW::key_for(k, ui.gallery_width), mine);
+    if (key.empty()) {
+        return;
     }
-}
-
-void widget_hold_cb(lv_event_t *e)
-{
-    open_picker(int(intptr_t(lv_event_get_user_data(e))));
-}
-
-void build_widget(int slot)
-{
-    auto &w = ui.w[slot];
-    if (w.card) {
-        lv_obj_delete(w.card);
-    }
-    const int kind = w.kind;
-    const Accent &acc = kind == W_GLIMDOCK ? CYAN : kind == W_SWIFTY ? SKY : kind == W_BATTERY ? GREEN
-                        : kind == W_CLOCK ? GRAPHITE : VIOLET;
-    w = {kind, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
-    w.card = glass(ui.pages[0], WX + slot * (WW + WGAP), WY, WW, WH, 26, acc);
-    press_fx(w.card);
-    lv_obj_add_flag(w.card, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(w.card, widget_tap_cb, LV_EVENT_SHORT_CLICKED, reinterpret_cast<void *>(intptr_t(slot)));
-    lv_obj_add_event_cb(w.card, widget_hold_cb, LV_EVENT_LONG_PRESSED, reinterpret_cast<void *>(intptr_t(slot)));
-    if (kind == W_LIGHTS || kind == W_MUSIC || kind == W_BATTERY) {
-        card_fill(w.card, 0, 0xFFD9A0, 0xF3B56A);
-    }
-    if (kind == W_GLIMDOCK) {
-        w.dot = dot(w.card, 16, 18, 9, OFF, false);
-        w.title = label(w.card, "glimdock", 32, 12, 150, TEXT2, 14, true);
+    if (!mine.empty()) {
+        L::replace(ui.layout, mine, key, kind);
     } else {
-        w.icon = icon(w.card, WIDGET_ICONS[kind], 14, 12, 22, TEXT, 1.6f);
-        w.title = label(w.card, WIDGET_NAMES[kind], 42, 13, 140, TEXT2, 14, true);
+        L::unhide(ui.layout, key, ui.page, kind);  // the page in view if it has room
     }
-    if (kind == W_SWIFTY) {
-        w.line1 = label(w.card, "", 16, 42, WW - 30, TEXT, 15, false);
-        lv_label_set_long_mode(w.line1, LV_LABEL_LONG_MODE_DOTS);
-        lv_obj_set_height(w.line1, 82);
-    } else {
-        w.big = label(w.card, "\xE2\x80\x94", 16, 34, WW - 26, TEXT, 34, true);
-        w.line1 = label(w.card, "", 16, 78, WW - 26, TEXT2, 13, true);
-        w.line2 = label(w.card, "", 16, 104, WW - 26, TEXT3, 13, true);
+    close_gallery();
+    normalize();
+    apply_layout(false);
+    save_layout();
+    int page, index;
+    if (L::find(ui.layout, key, kind, &page, &index) && page != ui.page) {
+        show_page(page, true);
     }
-    if (kind == W_GLIMDOCK) {
-        lv_obj_add_flag(w.line2, LV_OBJ_FLAG_HIDDEN);
-        w.spark = spark(w.card, 1, 96, WW - 2, 38, CYAN.glow);
-    }
-    if (ui.have_data) {
-        update_widget(slot);
-    }
+    tick();
 }
 
-// Ink that stays readable over a card's fill.
-void ink(int slot, bool dark)
+void open_gallery(const std::string &replace)
 {
-    auto &w = ui.w[slot];
-    const uint32_t c = 0x2A1A05;
-    if (w.icon) {
-        lv_obj_set_style_line_color(w.icon, lv_color_hex(dark ? c : TEXT), 0);
-    }
-    set_color(w.title, dark ? c : TEXT2);
-    if (w.big) {
-        set_color(w.big, dark ? c : TEXT);
-    }
-    set_color(w.line1, dark ? c : TEXT2);
-    if (w.line2) {
-        set_color(w.line2, dark ? c : TEXT3);
-    }
-}
-
-void update_widget(int slot)
-{
-    auto &w = ui.w[slot];
-    char v[64];
-    switch (w.kind) {
-    case W_GLIMDOCK: {
-        const glimdock_summary_t &g = ui.glim;
-        if (isfinite(g.cpu)) {
-            snprintf(v, sizeof(v), "%d%% CPU", int(lroundf(g.cpu)));
-        } else {
-            strlcpy(v, g.started ? "\xE2\x80\x94" : "Homelab", sizeof(v));
-        }
-        set_text(w.big, v);
-        if (isfinite(g.memory)) {
-            snprintf(v, sizeof(v), "Memory %d%%", int(lroundf(g.memory)));
-        } else {
-            strlcpy(v, g.status, sizeof(v));
-        }
-        set_text(w.line1, v);
-        set_bg_color(w.dot, lv_color_hex(!g.ready ? OFF : g.alerts ? RED : OK));
-        float top = 40;
-        for (int i = 0; i < g.history_count; ++i) {
-            top = std::max(top, g.history[i] * 1.25f);
-        }
-        spark_set(w.spark, g.history, g.history_count, std::min(100.0f, top));
-        break;
-    }
-    case W_LIGHTS: {
-        const home_summary_t &h = ui.home_data;
-        const bool warm = !h.lights || (h.lights_hue >= 20 && h.lights_hue <= 50);
-        const int lp = h.lights && h.lights_on ? h.lights_pct : 0;
-        card_fill_set(w.card, lp, warm ? 0xFFD9A0 : hsl(float(h.lights_hue), 0.85f, 0.76f),
-                      warm ? 0xF3B56A : hsl(float(h.lights_hue), 0.85f, 0.62f));
-        ink(slot, lp > 45);
-        if (!h.paired) {
-            strlcpy(v, h.started ? "Pair" : "Home", sizeof(v));
-        } else if (h.lights && h.lights_on) {
-            snprintf(v, sizeof(v), "%d%%", h.lights_pct);
-        } else {
-            strlcpy(v, h.lights ? "Off" : "\xE2\x80\x94", sizeof(v));
-        }
-        set_text(w.big, v);
-        set_text(w.line1, h.paired ? (h.lights ? h.lights_state : "No lights") : "Open Home to pair");
-        set_text(w.line2, h.tv ? h.tv_name : "");
-        break;
-    }
-    case W_MUSIC: {
-        const home_summary_t &h = ui.home_data;
-        const int vol = h.music && h.volume > 0 ? h.volume : 0;
-        card_fill_set(w.card, vol, VIOLET.glow, VIOLET.glow);
-        ink(slot, false);
-        if (h.music && h.volume >= 0) {
-            snprintf(v, sizeof(v), "%d", h.volume);
-        } else {
-            strlcpy(v, "\xE2\x80\x94", sizeof(v));
-        }
-        set_text(w.big, v);
-        set_text(w.line1, h.music ? h.music_state : h.paired ? "No speaker" : "Open Home to pair");
-        set_text(w.line2, h.music ? "Volume" : "");
-        break;
-    }
-    case W_SWIFTY: {
-        std::string plain;
-        for (const char *c = ui.swifty.last; *c; ++c)
-            if (*c != '*' && *c != '`' && *c != '#') {
-                plain += *c == '\n' ? ' ' : *c;
-            }
-        set_text(w.line1, plain.empty() ? (ui.swifty.configured ? "Hold the AI key and ask me anything." : "Set me up in Settings, Web settings.")
-                 : plain.c_str());
-        set_text(w.title, ui.swifty.listening ? "Listening\xE2\x80\xA6" : ui.swifty.busy ? "Thinking\xE2\x80\xA6" : "Swifty");
-        break;
-    }
-    case W_BATTERY: {
-        const int b = ui.battery;
-        card_fill_set(w.card, b > 0 ? b : 0, b >= 0 && b <= 20 ? RED : GREEN.glow, b >= 0 && b <= 20 ? RED : GREEN.glow);
-        ink(slot, b > 45);
-        if (b >= 0) {
-            snprintf(v, sizeof(v), "%d%%", b);
-        } else {
-            strlcpy(v, "\xE2\x80\x94", sizeof(v));
-        }
-        set_text(w.big, v);
-        set_text(w.line1, b < 0 ? "No reading" : ui.charging ? "Charging" : "On battery");
-        set_text(w.line2, "");
-        break;
-    }
-    default:  // clock
-        set_text(w.big, ui.clock_text);
-        set_text(w.line1, ui.date_text);
-        set_text(w.line2, "");
-        break;
-    }
-}
-
-void close_picker()
-{
-    if (ui.picker) {
-        lv_obj_delete_async(ui.picker);
-    }
-    ui.picker = nullptr;
-}
-
-void pick_cb(lv_event_t *e)
-{
-    const int v = int(intptr_t(lv_event_get_user_data(e)));
-    const int slot = v >> 8, kind = v & 0xFF;
-    close_picker();
-    ui.w[slot].kind = kind;
-    build_widget(slot);
-    if (ui.hooks.save_widgets) {
-        ui.hooks.save_widgets(ui.w[0].kind, ui.w[1].kind);
-    }
-}
-
-void open_picker(int slot)
-{
-    close_picker();
+    close_gallery();
+    ui.gallery_for = replace;
+    ui.gallery_width = replace.empty() ? 2 : L::width(replace);
+    const int current = replace.empty() ? -1 : LW::kind_of(replace);
     lv_obj_t *o = box(ui.screen, 0, 0, PANEL, PANEL);
     lv_obj_set_style_bg_color(o, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
     lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
-    ui.picker = o;
-    label(o, slot ? "Right widget" : "Left widget", 0, 26, PANEL, TEXT, 24, true, LV_TEXT_ALIGN_CENTER);
-    for (int k = 0; k < W_KINDS; ++k) {
-        lv_obj_t *r = glass(o, 50 + (k % 2) * 194, 74 + (k / 2) * 92, 186, 84, 22, CYAN);
-        icon(r, WIDGET_ICONS[k], 16, 14, 26, k == ui.w[slot].kind ? CYAN.glow : TEXT, 1.7f);
-        label(r, WIDGET_NAMES[k], 16, 48, 160, TEXT, 17, true);
-        if (k == ui.w[slot].kind) {
+    ui.gallery = o;
+    lv_obj_t *back = box(o, 56, 14, 44, 44, 22);
+    lv_obj_set_style_bg_color(back, lv_color_hex(FIELD), 0);
+    lv_obj_set_style_bg_opa(back, LV_OPA_COVER, 0);
+    icon(back, "back", 10, 10, 24, TEXT, 2.0f);
+    press_fx(back);
+    on(back, [](lv_event_t *) {
+        close_gallery();
+    });
+    label(o, replace.empty() ? "Widgets" : "Change widget", 112, 18, 0, TEXT, 30, true);
+    // The size: half a row (two icons wide) or the whole row.
+    static const char *const SIZES[] = {"Half row", "Whole row"};
+    lv_obj_t *size = capsule(o, 110, 70, 260, 40, SIZES, 2, ui.gallery_width >= 4 ? 1 : 0, CYAN, 15);
+    lv_obj_add_event_cb(size, [](lv_event_t *e) {
+        ui.gallery_width = capsule_selected(lv_event_get_current_target_obj(e)) == 1 ? 4 : 2;
+    }, LV_EVENT_VALUE_CHANGED, nullptr);
+    // The kinds, two to a row; not those of apps a filter hides.
+    int n = 0;
+    for (int k = 0; k < LW::KINDS; ++k) {
+        if (!app_visible(LW::info(k).app)) {
+            continue;
+        }
+        lv_obj_t *r = glass(o, 50 + (n % 2) * 194, 124 + (n / 2) * 92, 186, 84, 22, CYAN);
+        ++n;
+        LW::kind_icon(r, k, 16, 14, 26, k == current ? CYAN.glow : TEXT);
+        label(r, LW::info(k).title, 16, 48, 160, TEXT, 17, true);
+        if (k == current) {
             icon(r, "check", 146, 16, 24, CYAN.glow, 2.0f);
         }
         press_fx(r);
-        on(r, pick_cb, LV_EVENT_CLICKED, reinterpret_cast<void *>(intptr_t(slot << 8 | k)));
+        on(r, pick_widget_cb, LV_EVENT_CLICKED, reinterpret_cast<void *>(intptr_t(k)));
     }
-    lv_obj_t *cancel = field_button(o, 170, 366, 140, 46, "Cancel", 16, TEXT2);
-    on(cancel, [](lv_event_t *) {
-        close_picker();
-    });
+    const int by = 124 + (n + 1) / 2 * 92 + 8;
+    if (replace.empty()) {
+        // The hidden apps (and from there the shortcuts and a reset) live behind + too.
+        char text[24];
+        snprintf(text, sizeof(text), "Hidden (%u)", unsigned(hidden_count()));
+        lv_obj_t *hidden = field_button(o, 298, 16, 126, 40, text, 15, TEXT2);
+        on(hidden, [](lv_event_t *) {
+            close_gallery();
+            open_hidden();
+        });
+    } else {
+        lv_obj_t *remove = field_button(o, 130, by, 220, 46, "Remove widget", 15, RED);
+        on(remove, [](lv_event_t *) {
+            L::remove(ui.layout, ui.gallery_for);
+            close_gallery();
+            normalize();
+            apply_layout(true);
+            save_layout();
+        });
+    }
+    box(o, 0, by + 46, 1, 70);  // room past the rounded bottom
+    lv_obj_add_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(o, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(o, LV_SCROLLBAR_MODE_OFF);
     stagger(o, 0, 12);
+}
+
+// ---- the weather's place (from Settings) ---------------------------------------------------------
+void update_settings_weather();
+
+void close_place()
+{
+    if (ui.place_sheet) {
+        lv_obj_delete_async(ui.place_sheet);
+    }
+    ui.place_sheet = nullptr;
+}
+
+void set_place(const char *text)
+{
+    weather_set_place(text);
+    close_place();
+    if (ui.have_data) {
+        weather_report(&ui.data.weather);
+        update_settings_weather();
+    }
+}
+
+// A city or "latitude, longitude", typed; empty (or Automatic) for the
+// network's location.
+void open_place()
+{
+    close_place();
+    lv_obj_t *o = box(ui.screen, 0, 0, PANEL, PANEL);
+    lv_obj_set_style_bg_color(o, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    ui.place_sheet = o;
+    lv_obj_t *back = box(o, 56, 14, 44, 44, 22);
+    lv_obj_set_style_bg_color(back, lv_color_hex(FIELD), 0);
+    lv_obj_set_style_bg_opa(back, LV_OPA_COVER, 0);
+    icon(back, "back", 10, 10, 24, TEXT, 2.0f);
+    press_fx(back);
+    on(back, [](lv_event_t *) {
+        close_place();
+    });
+    label(o, "Weather place", 112, 18, 0, TEXT, 30, true);
+    char place[64];
+    weather_place(place, sizeof(place));
+    lv_obj_t *ta = lv_textarea_create(o);
+    lv_obj_set_pos(ta, 24, 76);
+    lv_obj_set_size(ta, 432, 58);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_max_length(ta, 60);
+    lv_textarea_set_placeholder_text(ta, "Automatic");
+    lv_textarea_set_text(ta, place);
+    lv_obj_set_style_bg_color(ta, lv_color_hex(CARD), 0);
+    lv_obj_set_style_bg_opa(ta, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(ta, lv_color_hex(CYAN.glow), 0);
+    lv_obj_set_style_border_width(ta, 2, 0);
+    lv_obj_set_style_radius(ta, 18, 0);
+    lv_obj_set_style_pad_hor(ta, 16, 0);
+    lv_obj_set_style_pad_ver(ta, 15, 0);
+    lv_obj_set_style_text_color(ta, lv_color_hex(TEXT), 0);
+    lv_obj_set_style_text_color(ta, lv_color_hex(TEXT3), LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_set_style_text_font(ta, font(20, false), 0);
+    lv_obj_set_style_bg_color(ta, lv_color_hex(CYAN.glow), LV_PART_CURSOR);
+    lv_obj_set_style_bg_opa(ta, LV_OPA_COVER, LV_PART_CURSOR);
+    lv_obj_set_style_width(ta, 2, LV_PART_CURSOR);
+    lv_obj_add_state(ta, LV_STATE_FOCUSED);
+    lv_obj_add_event_cb(ta, [](lv_event_t *e) {
+        set_place(lv_textarea_get_text(lv_event_get_current_target_obj(e)));
+    }, LV_EVENT_READY, nullptr);
+    label(o, "A city, or latitude, longitude", 28, 156, 290, TEXT3, 14);
+    lv_obj_t *automatic = field_button(o, 330, 146, 126, 40, "Automatic", 15, TEXT2);
+    on(automatic, [](lv_event_t *) {
+        set_place("");
+    });
+    KeyboardConfig kc;
+    kc.action = "Save";
+    kc.accent = &CYAN;
+    keyboard(o, ta, 0, 236, PANEL, 234, kc);
 }
 
 // ---- status bar: clock, date, Wi-Fi, battery ---------------------------------------------------
@@ -1161,9 +1349,9 @@ void build_status_bar()
 
 void update_status_bar()
 {
-    set_text(ui.clock, ui.clock_text);
-    set_text(ui.date, ui.date_text);
-    const int b = ui.battery;
+    set_text(ui.clock, ui.data.clock);
+    set_text(ui.date, ui.data.date);
+    const int b = ui.data.battery;
     const bool known = b >= 0;
     set_hidden(ui.batt, !known);
     set_hidden(ui.batt_nub, !known);
@@ -1173,17 +1361,17 @@ void update_status_bar()
     // No number: the colour says it. Green charging or plenty, amber under
     // half, red under a fifth.
     const int pct = std::clamp(b, 0, 100);
-    const uint32_t color = ui.charging ? OK : pct <= 20 ? RED : pct <= 50 ? WARN : OK;
+    const uint32_t color = ui.data.charging ? OK : pct <= 20 ? RED : pct <= 50 ? WARN : OK;
     const int width = std::max(3, 24 * pct / 100);
     if (lv_obj_get_style_width(ui.batt_fill, LV_PART_MAIN) != width) {
         lv_obj_set_width(ui.batt_fill, width);
     }
     set_bg_color(ui.batt_fill, lv_color_hex(color));
-    if (!lv_color_eq(lv_obj_get_style_border_color(ui.batt, LV_PART_MAIN), lv_color_hex(ui.charging ? OK : TEXT2))) {
-        lv_obj_set_style_border_color(ui.batt, lv_color_hex(ui.charging ? OK : TEXT2), 0);
+    if (!lv_color_eq(lv_obj_get_style_border_color(ui.batt, LV_PART_MAIN), lv_color_hex(ui.data.charging ? OK : TEXT2))) {
+        lv_obj_set_style_border_color(ui.batt, lv_color_hex(ui.data.charging ? OK : TEXT2), 0);
     }
-    set_bg_color(ui.batt_nub, lv_color_hex(ui.charging ? OK : TEXT2));
-    set_hidden(ui.batt_bolt, !ui.charging);
+    set_bg_color(ui.batt_nub, lv_color_hex(ui.data.charging ? OK : TEXT2));
+    set_hidden(ui.batt_bolt, !ui.data.charging);
 }
 
 // ---- Settings page -----------------------------------------------------------------------
@@ -1358,7 +1546,34 @@ void build_settings(int brightness, bool haptics, bool auto_rotate)
             ui.hooks.web_settings(toggle_on(lv_event_get_current_target_obj(e)));
         }
     }, LV_EVENT_VALUE_CHANGED, nullptr);
-    box(c, 0, Y + 940, 1, 60);  // room to scroll the last card clear of the rounded bottom
+    // Weather: the widget's units and place (a city, coordinates, or the network's location).
+    lv_obj_t *wx = glass(c, 10, Y + 952, 460, 132, 28, GREEN);
+    label(wx, "Weather", 24, 16, 200, TEXT, 18, true);
+    static const char *const UNITS[] = {"\xC2\xB0" "C", "\xC2\xB0" "F"};
+    WeatherReport report;
+    const bool have = weather_report(&report);
+    ui.s_units = capsule(wx, 300, 10, 140, 40, UNITS, 2, have && report.fahrenheit ? 1 : 0, GREEN, 15);
+    lv_obj_add_event_cb(ui.s_units, [](lv_event_t *e) {
+        weather_set_fahrenheit(capsule_selected(lv_event_get_current_target_obj(e)) == 1);
+        if (ui.have_data) {  // the widgets in the new units at once
+            weather_report(&ui.data.weather);
+            for (auto &cell : ui.cells)
+                if (cell->widget) {
+                    LW::update(cell->widget, ui.data);
+                }
+        }
+    }, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_t *where = box(wx, 10, 58, 440, 64, 18);
+    lv_obj_set_style_bg_color(where, lv_color_hex(FIELD), 0);
+    lv_obj_set_style_bg_opa(where, LV_OPA_COVER, 0);
+    ui.s_place = label(where, "", 14, 10, 370, TEXT, 16, true);
+    ui.s_weather = label(where, "", 14, 36, 370, TEXT3, 13, true);
+    icon(where, "chev", 404, 20, 24, TEXT2, 2.0f);
+    press_fx(where);
+    on(where, [](lv_event_t *) {
+        open_place();
+    });
+    box(c, 0, Y + 1084, 1, 60);  // room to scroll the last card clear of the rounded bottom
     lv_obj_add_flag(c, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(c, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(c, LV_SCROLLBAR_MODE_OFF);
@@ -1401,11 +1616,44 @@ void update_settings(const LauncherStatus &s)
         set_text(ui.s_web_code, code);
     }
     char hidden[24];
-    const size_t n = ui.layout.hidden.size();
+    const size_t n = hidden_count();
     if (n) {
         snprintf(hidden, sizeof(hidden), "%u hidden", unsigned(n));
     }
     set_text(ui.s_hidden, n ? hidden : "None hidden");
+    update_settings_weather();
+}
+
+void update_settings_weather()
+{
+    if (!ui.s_place) {
+        return;
+    }
+    const WeatherReport &r = ui.data.weather;
+    char place[64], text[96];
+    weather_place(place, sizeof(place));
+    if (place[0]) {
+        strlcpy(text, place, sizeof(text));
+    } else if (r.automatic && r.place[0]) {
+        snprintf(text, sizeof(text), "Automatic \xC2\xB7 %s", r.place);
+    } else {
+        strlcpy(text, "Automatic \xC2\xB7 from the network", sizeof(text));
+    }
+    set_text(ui.s_place, text);
+    if (r.state == WeatherState::NoPlace) {
+        strlcpy(text, "Not found: tap to change it", sizeof(text));
+    } else if (r.valid) {
+        snprintf(text, sizeof(text), "%s%s \xC2\xB7 Open-Meteo", r.stale ? "Offline, last updated " : "Updated ", r.updated);
+    } else {
+        strlcpy(text, r.state == WeatherState::Locating ? "Finding where you are\xE2\x80\xA6"
+                : r.state == WeatherState::Fetching ? "Updating\xE2\x80\xA6" : "No forecast yet", sizeof(text));
+    }
+    set_text(ui.s_weather, text);
+    set_text_color(ui.s_weather, lv_color_hex(r.state == WeatherState::NoPlace || (r.valid && r.stale) ? WARN : TEXT3));
+    const int units = capsule_selected(ui.s_units);
+    if (units != (r.fahrenheit ? 1 : 0)) {
+        capsule_select(ui.s_units, r.fahrenheit ? 1 : 0, units >= 0);
+    }
 }
 
 // ---- corner calibration --------------------------------------------------------------------
@@ -1469,17 +1717,25 @@ lv_obj_t *launcher_ui_build(const LauncherHooks &hooks, int radius, int brightne
     pager_scrolls(true);
     lv_obj_add_event_cb(ui.pager, scroll_cb, LV_EVENT_SCROLL, nullptr);
     lv_obj_add_event_cb(ui.pager, scroll_cb, LV_EVENT_SCROLL_END, nullptr);
+    // The saved layout; one from before widgets were items gets the two widget
+    // kinds saved apart from it, where they were (saved below, as version 2).
     ui.layout = L::parse(layout ? layout : "");
     ui.saved = layout ? layout : "";
+    if (ui.layout.version < L::VERSION) {
+        const auto old = [](int k, int fallback) {
+            return LW::key_for(k >= 0 && k <= LW::CLOCK ? k : fallback, 2);
+        };
+        std::string left = old(left_widget, LW::GLIMDOCK), right = old(right_widget, LW::LIGHTS);
+        if (right == left) {
+            right += "~1";
+        }
+        L::migrate(ui.layout, {left, right});
+    }
     normalize();
     sync_pages();
     build_status_bar();
     ui.dots = box(s, 0, DOTS_Y, PANEL, 7);
     build_editbar();
-    ui.w[0].kind = left_widget >= 0 && left_widget < W_KINDS ? left_widget : W_GLIMDOCK;
-    ui.w[1].kind = right_widget >= 0 && right_widget < W_KINDS ? right_widget : W_LIGHTS;
-    build_widget(0);
-    build_widget(1);
     for (int i = 0; i < LAUNCHER_APP_COUNT; ++i) {
         make_cell(LAUNCHER_APPS[i].key);
     }
@@ -1487,7 +1743,7 @@ lv_obj_t *launcher_ui_build(const LauncherHooks &hooks, int radius, int brightne
         make_cell(sc.key);
     }
     ui.built = true;
-    apply_layout(false);
+    apply_layout(false);  // and the widgets' cells
     ui.jiggle = lv_timer_create(jiggle_cb, 40, nullptr);
     lv_timer_pause(ui.jiggle);
     build_settings(brightness, haptics, auto_rotate);
@@ -1495,6 +1751,7 @@ lv_obj_t *launcher_ui_build(const LauncherHooks &hooks, int radius, int brightne
         hooks.decorate(ui.status, ui.settings);
     }
     stagger(ui.pages[0], 0, 12);
+    save_layout();  // a migrated layout, at once
     return s;
 }
 
@@ -1503,13 +1760,21 @@ void launcher_ui_update(const LauncherStatus &status, const glimdock_summary_t &
 {
     (void)camera;
     (void)files;
-    strlcpy(ui.clock_text, status.clock ? status.clock : "--:--", sizeof(ui.clock_text));
-    strlcpy(ui.date_text, status.date ? status.date : "", sizeof(ui.date_text));
-    ui.battery = status.battery_pct;
-    ui.charging = status.charging;
-    ui.glim = glim;
-    ui.home_data = home;
-    ui.swifty = swifty;
+    LW::Data &d = ui.data;
+    strlcpy(d.clock, status.clock ? status.clock : "--:--", sizeof(d.clock));
+    strlcpy(d.date, status.date ? status.date : "", sizeof(d.date));
+    d.battery = status.battery_pct;
+    d.charging = status.charging;
+    d.wifi_connected = status.wifi_connected;
+    d.wifi_configured = status.wifi_configured;
+    strlcpy(d.ssid, status.ssid ? status.ssid : "", sizeof(d.ssid));
+    strlcpy(d.ip, status.wifi_connected && status.ip ? status.ip : "", sizeof(d.ip));
+    d.vpn = status.vpn;
+    d.glim = glim;
+    d.home = home;
+    d.swifty = swifty;
+    weather_report(&d.weather);
+    d.reminder = reminders_next(&d.reminder_at, d.reminder_text, sizeof(d.reminder_text));
     ui.have_data = true;
     set_color(ui.wifi, status.wifi_connected ? TEXT : status.wifi_configured ? WARN : RED);
     // White while connected, amber while connecting, red when it cannot.
@@ -1522,9 +1787,10 @@ void launcher_ui_update(const LauncherStatus &status, const glimdock_summary_t &
         }
     }
     update_status_bar();
-    for (int i = 0; i < 2; ++i) {
-        update_widget(i);
-    }
+    for (auto &c : ui.cells)
+        if (c->widget) {
+            LW::update(c->widget, d);
+        }
     if (ui.badge) {
         if (glim.ready && glim.alerts > 0) {
             char v[8];
@@ -1546,7 +1812,8 @@ void launcher_ui_entered(ShellApp app)
 {
     (void)app;
     lv_obj_add_flag(ui.settings, LV_OBJ_FLAG_HIDDEN);
-    close_picker();
+    close_gallery();
+    close_place();
     close_hidden();
     set_editing(false);
     stagger(ui.pages[size_t(std::min(ui.page, int(ui.pages.size()) - 1))], 0, 10);
@@ -1555,21 +1822,22 @@ void launcher_ui_entered(ShellApp app)
 void launcher_ui_show_page(int index)
 {
     lv_obj_add_flag(ui.settings, LV_OBJ_FLAG_HIDDEN);
+    close_gallery();
+    close_place();
     close_hidden();
     if (index >= 6) {
         open_settings();
         return;
     }
-    const int page = std::clamp(index, 0, int(ui.pages.size()) - 1);
-    lv_obj_scroll_to_x(ui.pager, page * PANEL, LV_ANIM_OFF);
-    ui.page = page;
-    page_dots();
+    show_page(index, false);
 }
 
 bool launcher_ui_back()
 {
-    if (ui.picker) {
-        close_picker();
+    if (ui.place_sheet) {
+        close_place();
+    } else if (ui.gallery) {
+        close_gallery();
     } else if (ui.hidden_sheet) {
         close_hidden();
     } else if (ui.editing) {
@@ -1577,9 +1845,7 @@ bool launcher_ui_back()
     } else if (!lv_obj_has_flag(ui.settings, LV_OBJ_FLAG_HIDDEN)) {
         lv_obj_add_flag(ui.settings, LV_OBJ_FLAG_HIDDEN);
     } else if (ui.page > 0) {
-        lv_obj_scroll_to_x(ui.pager, 0, LV_ANIM_ON);
-        ui.page = 0;
-        page_dots();
+        show_page(0, true);
     } else {
         return false;
     }
@@ -1600,6 +1866,15 @@ void launcher_ui_hidden_apps(bool visible)
     }
 }
 
+void launcher_ui_widgets(bool visible)
+{
+    if (visible) {
+        open_gallery("");
+    } else {
+        close_gallery();
+    }
+}
+
 size_t launcher_ui_layout(char *out, size_t capacity)
 {
     L::Layout copy = ui.layout;
@@ -1614,19 +1889,30 @@ void launcher_ui_set_layout(const char *text)
     if (ui.drag) {
         return;
     }
-    ui.layout = L::parse(text ? text : "");
+    ui.layout = text && *text ? L::parse(text) : default_layout();
+    // A text from before widgets: the default widgets over it.
+    L::migrate(ui.layout, {LW::key_for(LW::GLIMDOCK, 2), LW::key_for(LW::LIGHTS, 2)});
     normalize();
     apply_layout(false);
     save_layout();
 }
 
-void launcher_ui_refilter()
+void launcher_ui_set_app_filter(bool (*visible)(const char *key))
 {
-    if (!ui.built || ui.drag) {
+    ui.app_filter = visible;
+    if (!ui.built) {
         return;
+    }
+    if (ui.drag) {
+        drop();
     }
     normalize();
     apply_layout(false);
+}
+
+bool launcher_ui_app_visible(const char *key)
+{
+    return app_visible(key);
 }
 
 void launcher_ui_calibration(bool visible, int radius)

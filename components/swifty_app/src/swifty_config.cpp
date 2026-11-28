@@ -19,8 +19,10 @@ const char *TAG = "swifty-cfg";
 constexpr const char *NS = "swifty_agent";
 constexpr uint16_t RPC_SERVICE = 0x4744, RPC_CONFIG = 40;
 constexpr size_t MAX_FRAME = 16 * 1024;
-const char *const KEYS[] = {"llm_url", "llm_key", "llm_model", "asr_url", "asr_key", "asr_model", "asr_ca", "search_key"};
-constexpr int NKEYS = 8, CA_KEY = 6;
+const char *const KEYS[] = {"llm_url", "llm_key", "llm_model", "asr_url", "asr_key", "asr_model", "asr_ca", "search_key",
+                            "paseo_url", "paseo_token", "paseo_ca", "paseo_provider"
+                           };
+constexpr int NKEYS = 12, CA_KEY = 6, PASEO_CA_KEY = 10;
 
 std::mutex lock;
 Config current;
@@ -39,7 +41,9 @@ std::string status_pages;  // op 5: the status being read a page at a time (no k
 
 std::string *field(Config &c, int i)
 {
-    std::string *fields[] = {&c.llm_url, &c.llm_key, &c.llm_model, &c.asr_url, &c.asr_key, &c.asr_model, &c.asr_ca, &c.search_key};
+    std::string *fields[] = {&c.llm_url, &c.llm_key, &c.llm_model, &c.asr_url, &c.asr_key, &c.asr_model, &c.asr_ca, &c.search_key,
+                             &c.paseo_url, &c.paseo_token, &c.paseo_ca, &c.paseo_provider
+                            };
     return fields[i];
 }
 
@@ -91,7 +95,7 @@ const char *apply_swifty(JsonVariant doc)
             return "values must be strings";
         }
         const char *text = v.as<const char *>();
-        if (strlen(text) > (i == CA_KEY ? 8000u : 400u)) {
+        if (strlen(text) > (i == CA_KEY || i == PASEO_CA_KEY ? 8000u : 400u)) {
             return "a value is too long";
         }
         *field(next, i) = text;
@@ -205,6 +209,10 @@ std::string status_json()
     sw["asr_key"] = !c.asr_key.empty();
     sw["asr_ca"] = !c.asr_ca.empty();
     sw["search_key"] = !c.search_key.empty();
+    sw["paseo_url"] = c.paseo_url;
+    sw["paseo_provider"] = c.paseo_provider;
+    sw["paseo_token"] = !c.paseo_token.empty();
+    sw["paseo_ca"] = !c.paseo_ca.empty();
     std::vector<Section> secs;
     {
         std::lock_guard<std::mutex> g(lock);
