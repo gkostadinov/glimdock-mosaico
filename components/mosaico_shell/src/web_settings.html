@@ -62,12 +62,41 @@ button:disabled { opacity: 0.4; cursor: default; }
 .sc .tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .sc .tools button { margin-top: 0; }
 .chip { width: 12px; height: 12px; border-radius: 6px; flex: none; }
-.step { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 8px; align-items: end; margin-top: 10px;
-  padding-top: 10px; border-top: 1px solid var(--edge); }
-.step select, .step input { margin-top: 0; }
-.step .ctl { display: flex; gap: 4px; }
-.step .ctl button { padding: 8px 10px; }
-@media (max-width: 560px) { .step { grid-template-columns: 1fr 1fr; } }
+.sc.off { opacity: 0.7; }
+.sc .when { color: var(--text); font-size: 13px; margin-top: 4px; }
+.sc .steps { white-space: pre-wrap; font: 12px/1.45 ui-monospace, Menlo, monospace; }
+.sc.editing h3 { font-size: 15px; margin: 18px 0 2px; color: var(--text2); }
+.badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--field); color: var(--text2); }
+.badge.ok { background: var(--accent-dim); color: var(--accent); }
+.block { border: 1px solid var(--edge); border-radius: 14px; padding: 8px 10px 10px; margin-top: 8px; background: #181818; }
+.block.logic { border-color: #3d3456; background: #17151c; }
+.block.trig { background: #151a17; }
+.block .bh { display: flex; align-items: center; gap: 6px; }
+.block .bh > .fields { flex: 1; }
+.block .bh button { margin-top: 0; }
+.block .num { color: var(--text3); font: 12px ui-monospace, Menlo, monospace; min-width: 2.6em; }
+.block .kind { font-weight: 600; flex: 1; }
+.branch { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--text2); font-size: 13px; font-weight: 600; }
+.branch button { margin-top: 0; }
+.nest { margin-left: 6px; padding-left: 10px; border-left: 2px solid #3d3456; }
+.cond { margin-top: 6px; }
+.cond .nest > .cond { border: 1px dashed var(--edge); border-radius: 12px; padding: 4px 8px 8px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 0 8px; }
+label.ctl { margin-top: 6px; font-size: 12px; }
+label.ctl input, label.ctl select { margin-top: 3px; padding: 8px 10px; }
+label.check { display: flex; align-items: center; gap: 6px; font-weight: 400; color: var(--text2); }
+label.check input { width: auto; margin: 0; }
+select.add { width: auto; margin-top: 8px; padding: 7px 10px; font-size: 13px; color: var(--accent); }
+.days { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
+.days button { padding: 6px 9px; font-size: 12px; margin-top: 0; }
+.days button.on { background: var(--accent); color: #06200f; }
+.log { font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap; color: var(--text2); background: #0b0b0b;
+  border: 1px solid var(--edge); border-radius: 10px; padding: 8px 10px; margin-top: 8px; }
+.log.bad { border-color: #5a2a26; }
+details summary { cursor: pointer; color: var(--text2); font-size: 13px; margin-top: 8px; }
+details summary.bad { color: var(--red); }
+details.loc { margin-top: 14px; }
+@media (max-width: 560px) { .nest { margin-left: 2px; padding-left: 6px; } .block { padding: 6px 7px 8px; } }
 button.danger { color: var(--red); }
 </style>
 </head>
@@ -396,16 +425,38 @@ function renderWeather() {
   return s;
 }
 
-// ---- Shortcuts: one-tap tiles on the board's home screen ----
+// ---- Shortcuts: small programs, like Shortcuts on a phone (shortcuts.h) ----
+// The editor works on the board's own JSON (format 2): blocks for steps, ifs
+// and repeats inside one another, conditions, triggers. The board checks
+// every save and names the step that is wrong ("step 2.1: ..."); the numbers
+// on the blocks are those.
 let shortcuts = null;  // the board's answer to /api/shortcuts
 const ACCENT_COLOURS = { violet: "#8c73ff", cyan: "#6fe3f7", amber: "#f7ce7e", green: "#8ee6b5" };
-const KINDS = [["home", "Swifty Home"], ["wait", "Wait"], ["ir", "TV remote (infrared)"], ["board_lights", "Interaction board lights"],
+const STEP_KINDS = [["home", "Swifty Home"], ["wait", "Wait"], ["message", "Show a message"], ["if", "If … then"],
+  ["repeat", "Repeat"], ["set", "Set a variable"], ["add", "Add to a variable"], ["run", "Run another shortcut"],
+  ["stop", "Stop"], ["ir", "TV remote (infrared)"], ["board_lights", "Interaction board lights"],
   ["brightness", "Screen brightness"], ["open", "Open an app"], ["flashlight", "Flashlight"]];
+const BLOCK_KINDS = ["if", "repeat"];
 const VERBS = { lights_on: "Lights on", lights_off: "Lights off", lights_toggle: "Lights on or off", brightness: "Brightness",
   color: "Colour", scene: "Scene", plug_on: "Plug on", plug_off: "Plug off", plug_toggle: "Plug on or off", tv_on: "TV on",
   tv_off: "TV off", tv_toggle: "TV on or off", volume: "Speaker volume", play: "Play", pause: "Pause", mute: "Mute", unmute: "Unmute" };
 const LIGHT_VERBS = ["lights_on", "lights_off", "lights_toggle", "brightness", "color"];
 const PLUG_VERBS = ["plug_on", "plug_off", "plug_toggle"];
+const NO_TARGET_VERBS = ["tv_on", "tv_off", "tv_toggle", "volume", "play", "pause", "mute", "unmute"];
+// Home's commands: the ones named above and any others the board lists (Home learns new ones).
+function verbPairs() {
+  const all = [...Object.keys(VERBS), ...(shortcuts.verbs || []).filter(v => !VERBS[v])];
+  return all.map(v => [v, VERBS[v] || v.replace(/_/g, " ")]);
+}
+const CHECKS = [["time", "Time is between"], ["day", "Day is"], ["home", "Home device"], ["motion", "Motion (Interaction)"],
+  ["button", "Button held (Interaction)"], ["light", "Light level (Interaction)"], ["wifi", "On Wi-Fi"], ["vpn", "VPN is up"],
+  ["battery", "Battery"], ["charging", "Charging"], ["var", "Variable"], ["and", "All of these"], ["or", "Any of these"],
+  ["not", "Not"]];
+const TRIGGERS = [["tile", "Tap its tile on the home screen"], ["time", "At a time"], ["every", "Every few minutes"],
+  ["boot", "At start-up"], ["motion", "Motion (Interaction)"], ["button", "A button (Interaction)"],
+  ["home", "A Home device changes"], ["sun", "Sunrise or sunset"]];
+const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const DAY_LABELS = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
 
 function options(select, pairs, value) {
   select.replaceChildren(...pairs.map(([v, t]) => el("option", { value: v, textContent: t })));
@@ -417,6 +468,62 @@ function options(select, pairs, value) {
   return select;
 }
 
+// A small labelled control in a block: kind is select, number, text or time.
+function ctl(title, input) {
+  return el("label", { className: "ctl" }, title, input);
+}
+function num(value, min, max, step, onInput) {
+  const i = el("input", { type: "number", value: value ?? "", min, max, step: step || 1 });
+  i.oninput = () => onInput(i.value === "" ? undefined : Number(i.value));
+  return i;
+}
+function txt(value, placeholder, onInput, list) {
+  const i = el("input", { type: "text", value: value ?? "", placeholder: placeholder || "", spellcheck: false });
+  if (list) i.setAttribute("list", list);
+  i.oninput = () => onInput(i.value.trim());
+  return i;
+}
+function hhmm(value, onInput) {
+  const i = el("input", { type: "time", value: value || "07:00" });
+  i.oninput = () => onInput(i.value);
+  return i;
+}
+function pick(pairs, value, onChange) {
+  const s = options(el("select"), pairs, value);
+  s.onchange = () => onChange(s.value);
+  return s;
+}
+// Weekday chips; days absent means every day.
+function dayChips(obj) {
+  const box = el("div", { className: "days" });
+  const on = new Set(normalDays(obj.days));
+  const draw = () => box.replaceChildren(...DAYS.map(d => {
+    const b = el("button", { type: "button", className: on.has(d) ? "on" : "", textContent: DAY_LABELS[d] });
+    b.onclick = () => {
+      if (on.has(d)) { if (on.size > 1) on.delete(d); } else on.add(d);
+      if (on.size === 7) delete obj.days; else obj.days = DAYS.filter(x => on.has(x));
+      draw();
+    };
+    return b;
+  }));
+  draw();
+  return ctl("Days", box);
+}
+function normalDays(days) {
+  if (!days) return DAYS;
+  if (days === "weekdays") return DAYS.slice(0, 5);
+  if (days === "weekend") return ["sat", "sun"];
+  return Array.isArray(days) ? days.map(d => String(d).slice(0, 3).toLowerCase()).filter(d => DAYS.includes(d)) : DAYS;
+}
+function daysWords(days) {
+  const d = normalDays(days);
+  if (d.length === 7) return "";
+  if (d.length === 5 && !d.includes("sat") && !d.includes("sun")) return " on weekdays";
+  if (d.length === 2 && d.includes("sat") && d.includes("sun")) return " at weekends";
+  return " on " + d.map(x => DAY_LABELS[x]).join(", ");
+}
+
+// ---- words: what a step, a condition or a trigger does --------------------------------------
 function homeTargets(verb) {
   const h = shortcuts.home || {};
   if (LIGHT_VERBS.includes(verb))
@@ -425,7 +532,6 @@ function homeTargets(verb) {
   if (PLUG_VERBS.includes(verb)) return (h.plugs || []).map(p => [p.target, p.name]);
   return null;
 }
-
 function targetName(target) {
   const h = shortcuts.home || {};
   if (target === "all" || !target) return "all lights";
@@ -434,157 +540,530 @@ function targetName(target) {
   const dev = [...(h.lights || []), ...(h.plugs || [])].find(d => d.target === target);
   return dev ? dev.name : target;
 }
-
-function stepText(s) {
+function sceneName(id) {
+  const sc = ((shortcuts.home || {}).scenes || []).find(x => x.id === id);
+  return sc ? sc.name : id;
+}
+function condWords(c) {
+  if (!c) return "?";
+  if (c.and || c.or) {
+    const kids = (c.and || c.or).map(k => (k.and || k.or) ? "(" + condWords(k) + ")" : condWords(k));
+    return kids.join(c.and ? " and " : " or ");
+  }
+  if (c.not) return "not " + condWords(c.not);
+  const cmp = o => o.above !== undefined ? "above " + o.above : o.below !== undefined ? "below " + o.below : "= " + o.equals;
+  switch (c.check) {
+    case "time": return c.from + "–" + c.to;
+    case "day": {
+      const w = daysWords(c.days);
+      return !w ? "any day" : w === " on weekdays" ? "a weekday" : w === " at weekends" ? "the weekend" : "it is " + w.slice(4);
+    }
+    case "home": return c.device + (c.is ? " is " + c.is : " is " + cmp(c) + "°");
+    case "motion": return c.within ? "motion in the last " + c.within + " s" : "there is motion";
+    case "button": return (c.button === "any" || !c.button ? "a" : "the " + c.button) + " button is held";
+    case "light": return "light " + cmp(c) + "%";
+    case "wifi": return "on Wi-Fi";
+    case "vpn": return "the VPN is up";
+    case "battery": return "battery " + cmp(c) + "%";
+    case "charging": return "charging";
+    case "var": return c.var + " " + (c.equals !== undefined ? "= " + c.equals : c.above !== undefined ? "> " + c.above : "< " + c.below);
+  }
+  return c.check || "?";
+}
+function triggerWords(t) {
+  switch (t.on) {
+    case "tile": return "Tap its tile";
+    case "time": return "At " + t.at + daysWords(t.days);
+    case "every": return "Every " + t.minutes + " min" + (t.from ? ", " + t.from + "–" + t.to : "") + daysWords(t.days);
+    case "boot": return "At start-up";
+    case "motion": return "On motion";
+    case "button": return (t.button === "any" || !t.button ? "Either" : "The " + t.button) + " button";
+    case "home": return "When " + t.device + (t.to && t.to !== "any" ? " turns " + t.to : t.above !== undefined ? " goes above " + t.above + "°" :
+      t.below !== undefined ? " goes below " + t.below + "°" : " changes");
+    case "sun": return (t.offset ? Math.abs(t.offset) + " min " + (t.offset < 0 ? "before " : "after ") : "At ") + t.event + daysWords(t.days);
+  }
+  return t.on;
+}
+function stepWords(s) {
   switch (s.do) {
     case "home": {
       const verb = VERBS[s.verb] || s.verb;
-      if (s.verb === "scene") return "Scene " + (sceneName(s.value || s.target));
+      if (s.verb === "scene") return "Scene " + sceneName(s.value || s.target);
       const t = homeTargets(s.verb) ? " · " + targetName(s.target) : "";
       return verb + t + (s.value ? " · " + s.value + (["brightness", "volume"].includes(s.verb) ? "%" : "") : "");
     }
-    case "wait": return "Wait " + s.seconds + " s";
+    case "wait": return "Wait " + (s.seconds >= 60 && s.seconds % 60 === 0 ? s.seconds / 60 + " min" : s.seconds + " s");
     case "ir": return "TV remote: " + s.key;
     case "board_lights": return "Board lights: " + s.mode + (s.colour ? " " + s.colour : "");
     case "brightness": return "Screen " + s.percent + "%";
     case "open": return "Open " + s.app + (s.tool ? " (" + s.tool + ")" : "");
     case "flashlight": return "Flashlight " + (s.on ? "on" : "off");
+    case "message": return "Show “" + s.text + "”";
+    case "set": return "Set " + s.var + " to " + s.value;
+    case "add": return (s.value < 0 ? "Take " + -s.value + " from " : "Add " + (s.value ?? 1) + " to ") + s.var;
+    case "run": return "Run " + (s.shortcut || "shortcut " + s.id);
+    case "stop": return "Stop";
   }
   return s.do;
 }
-
-function sceneName(id) {
-  const sc = ((shortcuts.home || {}).scenes || []).find(x => x.id === id);
-  return sc ? sc.name : id;
+// The steps as indented lines, as the board shows them.
+function stepLines(steps, depth = 0, out = []) {
+  const pad = "   ".repeat(depth);
+  for (const s of steps || []) {
+    if (s.do === "if") {
+      out.push(pad + "If " + condWords(s.if) + ":");
+      stepLines(s.then, depth + 1, out);
+      for (const e of s.elif || []) { out.push(pad + "Else if " + condWords(e.if) + ":"); stepLines(e.then, depth + 1, out); }
+      if (s.else) { out.push(pad + "Otherwise:"); stepLines(s.else, depth + 1, out); }
+    } else if (s.do === "repeat") {
+      out.push(pad + (s.while ? "While " + condWords(s.while) + " (" + (s.max || 10) + " rounds at most):" : "Repeat " + s.times + " times:"));
+      stepLines(s.steps, depth + 1, out);
+    } else out.push(pad + stepWords(s));
+  }
+  return out;
+}
+function countSteps(steps) {
+  let n = 0;
+  for (const s of steps || []) {
+    n++;
+    n += countSteps(s.then) + countSteps(s.else) + countSteps(s.steps);
+    for (const e of s.elif || []) n += countSteps(e.then);
+  }
+  return n;
 }
 
-// One step's row: what kind, then its fields.
-function stepRow(step, list, rows, redraw) {
-  const row = el("div", { className: "step" });
-  const kind = options(el("select"), KINDS, step.do);
-  const a = el("select"), b = el("select"), c = el("input");
-  const la = el("label", {}, "", a), lb = el("label", {}, "", b), lc = el("label", {}, "", c);
-  const up = el("button", { type: "button", textContent: "↑", title: "Earlier" });
-  const down = el("button", { type: "button", textContent: "↓", title: "Later" });
-  const del = el("button", { type: "button", className: "danger", textContent: "×", title: "Remove this step" });
-  const lk = el("label", {}, "Step", kind);
-  row.append(lk, la, lb, lc, el("div", { className: "ctl" }, up, down, del));
-  const setLabel = (l, text, show) => { l.firstChild.textContent = text; l.classList.toggle("hidden", !show); };
-  function fill() {
-    const k = kind.value;
-    setLabel(la, "", false); setLabel(lb, "", false); setLabel(lc, "", false);
-    c.type = "text"; c.placeholder = "";
-    if (k === "home") {
-      options(a, Object.entries(VERBS), step.verb || "lights_off");
-      setLabel(la, "Do", true);
-      const verb = a.value, targets = homeTargets(verb);
-      if (verb === "scene") {
+// ---- the block editor ------------------------------------------------------------------------
+function newStep(kind) {
+  const others = (shortcuts.shortcuts || []);
+  switch (kind) {
+    case "home": return { do: "home", verb: "lights_off", target: "all" };
+    case "wait": return { do: "wait", seconds: 5 };
+    case "message": return { do: "message", text: "" };
+    case "if": return { do: "if", if: { check: "time", from: "22:00", to: "06:00" }, then: [] };
+    case "repeat": return { do: "repeat", times: 3, steps: [] };
+    case "set": return { do: "set", var: "n", value: 0 };
+    case "add": return { do: "add", var: "n", value: 1 };
+    case "run": return { do: "run", shortcut: others.length ? others[0].name : "" };
+    case "ir": return { do: "ir", key: "power" };
+    case "board_lights": return { do: "board_lights", mode: "rainbow" };
+    case "brightness": return { do: "brightness", percent: 60 };
+    case "open": return { do: "open", app: "home" };
+    case "flashlight": return { do: "flashlight", on: true };
+  }
+  return { do: kind };
+}
+
+// The fields of an action, a wait, a message, a variable or a run step.
+function stepFields(s, redraw) {
+  const f = el("div", { className: "fields" });
+  const set = (k, v) => { if (v === undefined || v === "") delete s[k]; else s[k] = v; };
+  switch (s.do) {
+    case "home": {
+      f.append(ctl("Do", pick(verbPairs(), s.verb, v => { s.verb = v; delete s.target; delete s.value; redraw(); })));
+      const targets = homeTargets(s.verb);
+      if (s.verb === "scene") {
         const scenes = ((shortcuts.home || {}).scenes || []).map(x => [x.id, x.name]);
-        options(b, scenes.length ? scenes : [["evening", "Evening"], ["movie", "Movie"], ["all_off", "Lights off"]], step.value || step.target);
-        setLabel(lb, "Scene", true);
+        if (!s.value) s.value = (scenes[0] || ["evening"])[0];
+        f.append(ctl("Scene", pick(scenes.length ? scenes : [["evening", "Evening"], ["movie", "Movie"]], s.value, v => s.value = v)));
       } else if (targets) {
-        options(b, targets.length ? targets : [["", "None found"]], step.target || (targets[0] || [""])[0]);
-        setLabel(lb, LIGHT_VERBS.includes(verb) ? "Which lights" : "Which plug", true);
+        if (s.target === undefined && targets.length) s.target = targets[0][0];
+        f.append(ctl(LIGHT_VERBS.includes(s.verb) ? "Which lights" : "Which plug",
+          pick(targets.length ? targets : [["", "None found"]], s.target, v => s.target = v)));
       }
-      if (["brightness", "volume"].includes(verb)) {
-        c.type = "number"; c.min = 0; c.max = 100; c.value = step.value || 50; setLabel(lc, "Percent", true);
-      } else if (verb === "color") {
-        c.value = step.value || "warm"; c.placeholder = "warm, cool, red, blue … or a hue"; setLabel(lc, "Colour", true);
+      if (["brightness", "volume"].includes(s.verb)) {
+        if (!s.value) s.value = "50";
+        f.append(ctl("Percent", num(s.value, 0, 100, 1, v => set("value", v === undefined ? undefined : String(v)))));
+      } else if (s.verb === "color") {
+        f.append(ctl("Colour", txt(s.value || "", "warm, cool, red … or a hue", v => set("value", v))));
+      } else if (!VERBS[s.verb]) {  // a command this page does not know: Home checks it
+        f.append(ctl("Which", txt(s.target, "a device or room", v => set("target", v), "sc-targets")));
+        f.append(ctl("Value", txt(s.value, "if it takes one", v => set("value", v))));
       }
-    } else if (k === "wait") {
-      c.type = "number"; c.min = 0.1; c.max = 60; c.step = 0.1; c.value = step.seconds || 2; setLabel(lc, "Seconds", true);
-    } else if (k === "ir") {
-      options(a, (shortcuts.ir_keys || []).map(x => [x, x.replace(/_/g, " ")]), step.key || "power"); setLabel(la, "Key", true);
-    } else if (k === "board_lights") {
-      options(a, (shortcuts.board_modes || []).map(x => [x, x]), step.mode || "rainbow"); setLabel(la, "Mode", true);
-      c.value = step.colour || ""; c.placeholder = "red, warm, #RRGGBB"; setLabel(lc, "Colour (for colour)", true);
-    } else if (k === "brightness") {
-      c.type = "number"; c.min = 5; c.max = 100; c.value = step.percent || 60; setLabel(lc, "Percent", true);
-    } else if (k === "open") {
-      options(a, (shortcuts.apps || []).map(x => [x, x]), step.app || "glimdock"); setLabel(la, "App", true);
-      options(b, [["", "—"], ...(shortcuts.tools || []).map(x => [x, x])], step.tool || ""); setLabel(lb, "Tool", a.value === "tools");
-    } else if (k === "flashlight") {
-      options(a, [["true", "On"], ["false", "Off"]], step.on === false ? "false" : "true"); setLabel(la, "Light", true);
+      break;
     }
+    case "wait":
+      f.append(ctl("Seconds", num(s.seconds, 0.1, 3600, 0.1, v => s.seconds = v)));
+      break;
+    case "message": {
+      f.append(ctl("Text ({n} shows variable n)", txt(s.text, "Good night", v => s.text = v)));
+      const opt = (k, t) => {
+        const c = el("input", { type: "checkbox", checked: !!s[k] });
+        c.onchange = () => set(k, c.checked || undefined);
+        return el("label", { className: "check" }, c, " " + t);
+      };
+      f.append(el("div", { className: "row" }, opt("haptic", "Buzz"), opt("sound", "Chime")));
+      break;
+    }
+    case "set":
+    case "add":
+      f.append(ctl("Variable", txt(s.var, "n", v => s.var = v)));
+      f.append(ctl(s.do === "set" ? "Value" : "Add (negative: take away)", num(s.value, -1000000, 1000000, 1, v => set("value", v))));
+      break;
+    case "run": {
+      const names = (shortcuts.shortcuts || []).map(x => [x.name, x.name]);
+      f.append(ctl("Shortcut", pick(names.length ? names : [["", "No other shortcuts"]], s.shortcut, v => { s.shortcut = v; delete s.id; })));
+      break;
+    }
+    case "ir":
+      f.append(ctl("Key", pick((shortcuts.ir_keys || []).map(x => [x, x.replace(/_/g, " ")]), s.key, v => s.key = v)));
+      break;
+    case "board_lights":
+      f.append(ctl("Mode", pick((shortcuts.board_modes || []).map(x => [x, x]), s.mode, v => s.mode = v)));
+      f.append(ctl("Colour (for colour)", txt(s.colour, "red, warm, #RRGGBB", v => set("colour", v))));
+      break;
+    case "brightness":
+      f.append(ctl("Percent", num(s.percent, 5, 100, 1, v => s.percent = v)));
+      break;
+    case "open":
+      f.append(ctl("App", pick((shortcuts.apps || []).map(x => [x, x]), s.app, v => { s.app = v; if (v !== "tools") delete s.tool; redraw(); })));
+      if (s.app === "tools") f.append(ctl("Tool", pick([["", "—"], ...(shortcuts.tools || []).map(x => [x, x])], s.tool || "", v => set("tool", v))));
+      break;
+    case "flashlight":
+      f.append(ctl("Light", pick([["true", "On"], ["false", "Off"]], String(s.on !== false), v => s.on = v === "true")));
+      break;
   }
-  function read() {
-    const k = kind.value, s = { do: k };
-    if (k === "home") {
-      s.verb = a.value;
-      if (s.verb === "scene") s.value = b.value;
-      else if (homeTargets(s.verb)) s.target = b.value;
-      if (["brightness", "volume", "color"].includes(s.verb)) s.value = c.value.trim();
-    } else if (k === "wait") s.seconds = Number(c.value);
-    else if (k === "ir") s.key = a.value;
-    else if (k === "board_lights") { s.mode = a.value; if (c.value.trim()) s.colour = c.value.trim(); }
-    else if (k === "brightness") s.percent = Number(c.value);
-    else if (k === "open") { s.app = a.value; if (a.value === "tools" && b.value) s.tool = b.value; }
-    else if (k === "flashlight") s.on = a.value === "true";
-    return s;
+  return f;
+}
+
+// A condition, and inside it more for all of / any of / not.
+function condType(c) {
+  return c.and ? "and" : c.or ? "or" : c.not ? "not" : c.check;
+}
+function newCond(type) {
+  switch (type) {
+    case "and": case "or": return { [type]: [{ check: "wifi" }] };
+    case "not": return { not: { check: "motion" } };
+    case "time": return { check: "time", from: "22:00", to: "06:00" };
+    case "day": return { check: "day", days: ["sat", "sun"] };
+    case "home": return { check: "home", device: ((shortcuts.devices || [])[0] || {}).name || "", is: "on" };
+    case "motion": return { check: "motion", within: 60 };
+    case "button": return { check: "button", button: "any" };
+    case "light": return { check: "light", below: 15 };
+    case "battery": return { check: "battery", below: 20 };
+    case "var": return { check: "var", var: "n", equals: 0 };
   }
-  kind.onchange = () => { step = { do: kind.value }; fill(); };
-  a.onchange = () => { step = read(); if (kind.value === "home") { delete step.target; delete step.value; } fill(); };
-  const entry = { row, read };
-  const move = d => {
-    const i = rows.indexOf(entry), j = i + d;
-    if (j < 0 || j >= rows.length) return;
-    rows.splice(i, 1); rows.splice(j, 0, entry);
+  return { check: type };
+}
+function condEditor(c, replace, redraw, depth = 0) {
+  const box = el("div", { className: "cond" });
+  const type = condType(c);
+  const head = el("div", { className: "fields" });
+  head.append(ctl(depth ? "And this" : "Condition", pick(CHECKS.filter(([k]) => depth < 3 || !["and", "or", "not"].includes(k)), type,
+    v => { replace(newCond(v)); redraw(); })));
+  box.append(head);
+  const cmpPick = (obj, keys, unit) => {
+    const now = keys.find(k => obj[k] !== undefined) || keys[0];
+    const value = obj[now] ?? 0;
+    const n = num(value, -1000, 1000, 1, v => { for (const k of keys) delete obj[k]; obj[sel.value] = v ?? 0; });
+    const sel = pick(keys.map(k => [k, k === "above" ? "above" : k === "below" ? "below" : "equals"]), now,
+      v => { for (const k of keys) delete obj[k]; obj[v] = Number(n.value || 0); });
+    head.append(ctl("Is", sel), ctl(unit, n));
+  };
+  switch (type) {
+    case "and": case "or": {
+      const list = el("div", { className: "nest" });
+      c[type].forEach((k, i) => {
+        const kid = condEditor(k, x => c[type][i] = x, redraw, depth + 1);
+        const del = el("button", { type: "button", className: "small danger", textContent: "Remove" });
+        del.onclick = () => { c[type].splice(i, 1); if (!c[type].length) c[type].push({ check: "wifi" }); redraw(); };
+        kid.append(del);
+        list.append(kid);
+      });
+      const add = el("button", { type: "button", className: "small", textContent: "+ Condition" });
+      add.onclick = () => { c[type].push({ check: "wifi" }); redraw(); };
+      list.append(add);
+      box.append(list);
+      break;
+    }
+    case "not": {
+      const list = el("div", { className: "nest" });
+      list.append(condEditor(c.not, x => c.not = x, redraw, depth + 1));
+      box.append(list);
+      break;
+    }
+    case "time":
+      head.append(ctl("From", hhmm(c.from, v => c.from = v)), ctl("To", hhmm(c.to, v => c.to = v)));
+      break;
+    case "day":
+      box.append(dayChips(c));
+      break;
+    case "home": {
+      head.append(ctl("Device or room", txt(c.device, "Desk lamp", v => c.device = v, "sc-devices")));
+      const mode = c.is ? c.is : c.above !== undefined ? "above" : "below";
+      const n = num(c.above ?? c.below ?? 22, -50, 100, 0.5, v => { if (c.above !== undefined) c.above = v ?? 0; else c.below = v ?? 0; });
+      const sel = pick([["on", "is on"], ["off", "is off"], ["above", "above (°)"], ["below", "below (°)"]], mode, v => {
+        delete c.is; delete c.above; delete c.below;
+        if (v === "on" || v === "off") c.is = v; else c[v] = Number(n.value || 22);
+        redraw();
+      });
+      head.append(ctl("Is", sel));
+      if (!c.is) head.append(ctl("Degrees", n));
+      break;
+    }
+    case "motion":
+      head.append(ctl("Within (s, 0: now)", num(c.within || 0, 0, 86400, 1, v => { if (v) c.within = v; else delete c.within; })));
+      break;
+    case "button":
+      head.append(ctl("Button", pick([["any", "Either"], ["left", "Left"], ["right", "Right"]], c.button || "any", v => c.button = v)));
+      break;
+    case "light": case "battery":
+      cmpPick(c, ["below", "above"], "Percent");
+      break;
+    case "var":
+      head.append(ctl("Variable", txt(c.var, "n", v => c.var = v)));
+      cmpPick(c, ["equals", "above", "below"], "Number");
+      break;
+  }
+  return box;
+}
+
+// A list of blocks (the steps of a shortcut, an if's branch, a repeat).
+function blockList(steps, depth, prefix, redraw, ctx) {
+  const list = el("div", { className: depth ? "nest" : "" });
+  steps.forEach((s, i) => list.append(block(s, steps, i, depth, prefix + (i + 1), redraw, ctx)));
+  const add = el("select", { className: "add" });
+  add.append(el("option", { value: "", textContent: steps.length ? "+ Add a step" : "+ Add the first step" }));
+  for (const [k, t] of STEP_KINDS)
+    if (depth < ctx.maxDepth || !BLOCK_KINDS.includes(k)) add.append(el("option", { value: k, textContent: t }));
+  add.onchange = () => {
+    if (!add.value) return;
+    if (countSteps(ctx.sc.steps) >= ctx.maxSteps) { toast(ctx.maxSteps + " steps at most"); add.value = ""; return; }
+    steps.push(newStep(add.value));
     redraw();
   };
-  up.onclick = () => move(-1);
-  down.onclick = () => move(1);
-  del.onclick = () => { rows.splice(rows.indexOf(entry), 1); redraw(); };
-  fill();
-  return entry;
+  list.append(add);
+  return list;
+}
+
+function block(s, steps, i, depth, path, redraw, ctx) {
+  const logic = BLOCK_KINDS.includes(s.do);
+  const b = el("div", { className: "block" + (logic ? " logic" : "") });
+  const kindName = (STEP_KINDS.find(([k]) => k === s.do) || [s.do, s.do])[1];
+  const up = el("button", { type: "button", className: "small", textContent: "↑", title: "Earlier" });
+  const down = el("button", { type: "button", className: "small", textContent: "↓", title: "Later" });
+  const del = el("button", { type: "button", className: "small danger", textContent: "×", title: "Remove this step" });
+  up.disabled = i === 0;
+  down.disabled = i === steps.length - 1;
+  up.onclick = () => { steps.splice(i - 1, 0, steps.splice(i, 1)[0]); redraw(); };
+  down.onclick = () => { steps.splice(i + 1, 0, steps.splice(i, 1)[0]); redraw(); };
+  del.onclick = () => { steps.splice(i, 1); redraw(); };
+  b.append(el("div", { className: "bh" }, el("span", { className: "num", textContent: path }),
+    el("span", { className: "kind", textContent: kindName }), up, down, del));
+  if (s.do === "if") {
+    b.append(condEditor(s.if, x => s.if = x, redraw));
+    b.append(el("div", { className: "branch", textContent: "Then" }), blockList(s.then, depth + 1, path + ".", redraw, ctx));
+    (s.elif || []).forEach((e, k) => {
+      const rm = el("button", { type: "button", className: "small danger", textContent: "Remove" });
+      rm.onclick = () => { s.elif.splice(k, 1); if (!s.elif.length) delete s.elif; redraw(); };
+      b.append(el("div", { className: "branch" }, "Else if ", rm), condEditor(e.if, x => e.if = x, redraw),
+        blockList(e.then, depth + 1, path + ".", redraw, ctx));
+    });
+    if (s.else) {
+      const rm = el("button", { type: "button", className: "small danger", textContent: "Remove" });
+      rm.onclick = () => { delete s.else; redraw(); };
+      b.append(el("div", { className: "branch" }, "Otherwise ", rm), blockList(s.else, depth + 1, path + ".", redraw, ctx));
+    }
+    const addElif = el("button", { type: "button", className: "small", textContent: "+ Else if" });
+    addElif.onclick = () => { (s.elif = s.elif || []).push({ if: { check: "wifi" }, then: [] }); redraw(); };
+    addElif.disabled = (s.elif || []).length >= 4;
+    const addElse = el("button", { type: "button", className: "small", textContent: "+ Otherwise" });
+    addElse.onclick = () => { s.else = []; redraw(); };
+    addElse.disabled = !!s.else;
+    b.append(el("div", { className: "row" }, addElif, addElse));
+  } else if (s.do === "repeat") {
+    const f = el("div", { className: "fields" });
+    const mode = s.while ? "while" : "times";
+    f.append(ctl("Repeat", pick([["times", "A number of times"], ["while", "While …"]], mode, v => {
+      if (v === "while") { delete s.times; s.while = { check: "motion" }; s.max = 10; }
+      else { delete s.while; delete s.max; s.times = 3; }
+      redraw();
+    })));
+    if (mode === "times") f.append(ctl("Times (1–100)", num(s.times, 1, 100, 1, v => s.times = v)));
+    else f.append(ctl("Rounds at most (1–100)", num(s.max || 10, 1, 100, 1, v => s.max = v)));
+    b.append(f);
+    if (mode === "while") b.append(condEditor(s.while, x => s.while = x, redraw));
+    b.append(blockList(s.steps, depth + 1, path + ".", redraw, ctx));
+  } else if (s.do !== "stop") {
+    b.append(stepFields(s, redraw));
+  }
+  return b;
+}
+
+// What starts it.
+function newTrigger(on) {
+  switch (on) {
+    case "time": return { on, at: "07:00" };
+    case "every": return { on, minutes: 15, from: "08:00", to: "20:00" };
+    case "boot": return { on, delay: 20 };
+    case "motion": return { on, cooldown: 60 };
+    case "button": return { on, button: "any" };
+    case "home": return { on, device: ((shortcuts.devices || [])[0] || {}).name || "", to: "on" };
+    case "sun": return { on, event: "sunset", offset: 0 };
+  }
+  return { on };
+}
+function triggerRow(t, list, i, redraw) {
+  const b = el("div", { className: "block trig" });
+  const del = el("button", { type: "button", className: "small danger", textContent: "×", title: "Remove" });
+  del.onclick = () => { list.splice(i, 1); redraw(); };
+  const f = el("div", { className: "fields" });
+  f.append(ctl("When", pick(TRIGGERS, t.on, v => { list[i] = newTrigger(v); redraw(); })));
+  switch (t.on) {
+    case "time": f.append(ctl("At", hhmm(t.at, v => t.at = v))); break;
+    case "every":
+      f.append(ctl("Minutes", num(t.minutes, 1, 1440, 1, v => t.minutes = v)));
+      f.append(ctl("From", hhmm(t.from || "00:00", v => t.from = v)), ctl("To", hhmm(t.to || "23:59", v => t.to = v)));
+      break;
+    case "boot": f.append(ctl("After (s)", num(t.delay ?? 20, 0, 3600, 1, v => t.delay = v ?? 0))); break;
+    case "motion": f.append(ctl("Again after (s)", num(t.cooldown ?? 60, 10, 86400, 1, v => t.cooldown = v ?? 60))); break;
+    case "button": f.append(ctl("Button", pick([["any", "Either"], ["left", "Left"], ["right", "Right"]], t.button || "any", v => t.button = v))); break;
+    case "home": {
+      f.append(ctl("Device", txt(t.device, "Desk lamp", v => t.device = v, "sc-devices")));
+      const mode = t.above !== undefined ? "above" : t.below !== undefined ? "below" : t.to || "any";
+      f.append(ctl("Turns", pick([["on", "on"], ["off", "off"], ["any", "on or off"], ["above", "above (°)"], ["below", "below (°)"]], mode, v => {
+        delete t.to; delete t.above; delete t.below;
+        if (v === "above" || v === "below") t[v] = 24; else t.to = v;
+        redraw();
+      })));
+      if (mode === "above" || mode === "below") f.append(ctl("Degrees", num(t[mode], -50, 100, 0.5, v => t[mode] = v ?? 0)));
+      break;
+    }
+    case "sun":
+      f.append(ctl("At", pick([["sunrise", "Sunrise"], ["sunset", "Sunset"]], t.event, v => t.event = v)));
+      f.append(ctl("Minutes after (− before)", num(t.offset || 0, -180, 180, 1, v => t.offset = v || 0)));
+      break;
+  }
+  b.append(el("div", { className: "bh" }, f, del));
+  if (["time", "every", "sun"].includes(t.on)) b.append(dayChips(t));
+  if (t.on === "sun" && !shortcuts.location) b.append(el("p", { className: "msg err", textContent: "Set the location below for sunrise and sunset." }));
+  return b;
+}
+
+// Checks the board would refuse, said before a round trip.
+function problems(sc, ctx) {
+  const out = [];
+  if (!sc.name.trim()) out.push("It needs a name.");
+  if (!sc.steps.length) out.push("It needs a step.");
+  if (countSteps(sc.steps) > ctx.maxSteps) out.push(ctx.maxSteps + " steps at most, in all.");
+  const walk = (steps, path) => steps.forEach((s, i) => {
+    const p = path + (i + 1);
+    if (s.do === "repeat" && !(s.steps || []).length) out.push("Step " + p + ": a repeat needs a step inside.");
+    if (s.do === "message" && !(s.text || "").trim()) out.push("Step " + p + ": the message needs text.");
+    if (s.do === "run" && !s.shortcut && !s.id) out.push("Step " + p + ": choose a shortcut to run.");
+    walk(s.then || [], p + "."); walk(s.else || [], p + "."); walk(s.steps || [], p + ".");
+    (s.elif || []).forEach(e => walk(e.then || [], p + "."));
+  });
+  walk(sc.steps, "");
+  return out;
+}
+
+function logBox(result) {
+  const lines = [(result.ok === false ? "Failed: " : "") + (result.message || ""), ...(result.log || [])];
+  return el("div", { className: "log" + (result.ok === false ? " bad" : ""), textContent: lines.join("\n") });
 }
 
 // The editor for one shortcut (sc null: a new one).
 function shortcutEditor(sc, done) {
-  const box = el("div", { className: "sc" });
-  const name = field("text", "Name", sc ? sc.name : "", "On the tile, e.g. Bedroom lights off");
-  const icon = options(el("select"), (shortcuts.icons || []).map(x => [x, x]), sc ? sc.icon : "");
-  const accent = options(el("select"), (shortcuts.accents || []).map(x => [x, x]), sc ? sc.accent : "violet");
-  if (!sc) {
-    icon.prepend(el("option", { value: "", textContent: "Chosen for the first step" }));
-    icon.value = "";
-  }
+  const work = sc ? JSON.parse(JSON.stringify(sc)) : { name: "", accent: "violet", enabled: true, triggers: [{ on: "tile" }],
+    steps: [{ do: "home", verb: "lights_off", target: "all" }] };
+  delete work.last; delete work.next;
+  work.triggers = work.triggers || [];
+  const ctx = { sc: work, maxSteps: shortcuts.max_steps || 48, maxDepth: shortcuts.max_depth || 4 };
+  const box = el("div", { className: "sc editing" });
+  const name = field("text", "Name", work.name, "On the tile, e.g. Bedroom lights off");
+  name.input.oninput = () => work.name = name.input.value;
+  const icon = options(el("select"), (shortcuts.icons || []).map(x => [x, x]), work.icon || "");
+  if (!work.icon) { icon.prepend(el("option", { value: "", textContent: "Chosen for the first step" })); icon.value = ""; }
+  icon.onchange = () => { if (icon.value) work.icon = icon.value; else delete work.icon; };
+  const accent = pick((shortcuts.accents || []).map(x => [x, x]), work.accent || "violet", v => work.accent = v);
+  const enabled = el("input", { type: "checkbox", checked: work.enabled !== false });
+  enabled.onchange = () => work.enabled = enabled.checked;
   box.append(el("div", { className: "grid" }, name.box, el("div", { className: "grid" },
     el("label", {}, "Icon", icon), el("label", {}, "Colour", accent))));
-  const list = el("div");
-  box.append(list);
-  const rows = [];
-  const redraw = () => list.replaceChildren(...rows.map(r => r.row));
-  const steps = sc ? sc.steps : [{ do: "home", verb: "lights_off", target: "all" }];
-  steps.forEach(s => rows.push(stepRow(s, list, rows, redraw)));
-  redraw();
-  const add = el("button", { type: "button", className: "small", textContent: "Add a step" });
-  add.onclick = () => {
-    if (rows.length >= 10) return toast("Ten steps at most");
-    rows.push(stepRow({ do: "home", verb: "lights_off", target: "all" }, list, rows, redraw)); redraw();
+  box.append(el("label", { className: "check" }, enabled, " On: its triggers start it (off, only a tap does)"));
+  const trigHead = el("h3", { textContent: "When" });
+  const trigList = el("div");
+  const stepHead = el("h3", { textContent: "Do" });
+  const stepList = el("div");
+  const warn = el("div", { className: "msg err" });
+  const redraw = () => {
+    trigList.replaceChildren(...work.triggers.map((t, i) => triggerRow(t, work.triggers, i, redraw)));
+    if (!work.triggers.length) trigList.append(el("p", { className: "note", textContent: "Nothing starts it: run it here, from Swifty or from another shortcut." }));
+    const addT = el("select", { className: "add" });
+    addT.append(el("option", { value: "", textContent: "+ Add a trigger" }), ...TRIGGERS.map(([k, t]) => el("option", { value: k, textContent: t })));
+    addT.onchange = () => {
+      if (!addT.value) return;
+      if (work.triggers.length >= 6) { toast("Six triggers at most"); addT.value = ""; return; }
+      work.triggers.push(newTrigger(addT.value)); redraw();
+    };
+    trigList.append(addT);
+    stepList.replaceChildren(blockList(work.steps, 0, "", redraw, ctx));
+    stepHead.textContent = "Do · " + countSteps(work.steps) + " of " + ctx.maxSteps + " steps";
+    warn.textContent = "";
   };
-  box.append(add);
+  redraw();
+  box.append(trigHead, trigList, stepHead, stepList);
   const save = el("button", { type: "button", className: "primary", textContent: sc ? "Save" : "Make it" });
+  const test = el("button", { type: "button", textContent: "Test (dry run)" });
   const cancel = el("button", { type: "button", textContent: "Cancel" });
   const msg = el("span", { className: "msg" });
-  box.append(el("div", { className: "actions" }, save, cancel, msg));
+  const result = el("div");
+  box.append(warn, el("div", { className: "actions" }, save, test, cancel, msg), result);
   cancel.onclick = () => done(false);
+  const ready = () => {
+    const p = problems(work, ctx);
+    warn.textContent = p.join(" ");
+    return !p.length;
+  };
   save.onclick = async () => {
-    const out = { name: name.value(), accent: accent.value, steps: rows.map(r => r.read()) };
-    if (icon.value) out.icon = icon.value;
-    if (sc) out.id = sc.id;
+    if (!ready()) return;
     save.disabled = true;
     msg.textContent = "Saving…"; msg.className = "msg";
     try {
-      await api("/api/shortcuts", { op: "save", shortcut: out });
-      toast(sc ? "Saved" : "On the home screen");
+      await api("/api/shortcuts", { op: "save", shortcut: work });
+      toast(sc ? "Saved" : "Made");
       done(true);
     } catch (e) { msg.textContent = e.message; msg.className = "msg err"; save.disabled = false; }
+  };
+  test.onclick = async () => {
+    if (!ready()) return;
+    test.disabled = true;
+    msg.textContent = "Testing on the board…"; msg.className = "msg";
+    try {
+      const r = await api("/api/shortcuts", { op: "test", shortcut: work });
+      msg.textContent = r.ok === false ? "The test failed" : "Tested: nothing was sent";
+      msg.className = "msg " + (r.ok === false ? "err" : "ok");
+      result.replaceChildren(logBox(r));
+    } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
+    test.disabled = false;
   };
   return box;
 }
 
+function locationBox(redrawSection) {
+  const loc = shortcuts.location || {};
+  const lat = field("text", "Latitude", loc.lat !== undefined ? String(loc.lat) : "", "e.g. 51.51");
+  const lon = field("text", "Longitude", loc.lon !== undefined ? String(loc.lon) : "", "e.g. -0.13 (west is negative)");
+  const save = el("button", { type: "button", className: "small", textContent: "Save location" });
+  const clear = el("button", { type: "button", className: "small", textContent: "Clear" });
+  clear.disabled = !shortcuts.location;
+  save.onclick = async () => {
+    const a = Number(lat.value()), b = Number(lon.value());
+    if (!lat.value() || !lon.value() || isNaN(a) || isNaN(b)) return toast("Decimal degrees, e.g. 51.51 and -0.13");
+    try { await api("/api/shortcuts", { op: "location", lat: a, lon: b }); toast("Location saved"); redrawSection(true); } catch (e) { toast(e.message); }
+  };
+  clear.onclick = async () => {
+    try { await api("/api/shortcuts", { op: "location", lat: null }); toast("Location cleared"); redrawSection(true); } catch (e) { toast(e.message); }
+  };
+  const d = el("details", { className: "loc" });
+  d.append(el("summary", { textContent: "Location for sunrise and sunset" + (shortcuts.location ? " · set" : " · not set") }),
+    el("p", { className: "note", textContent: "Kept on the board only. Two decimals (about a kilometre) are plenty." }),
+    el("div", { className: "grid" }, lat.box, lon.box), el("div", { className: "row" }, save, clear));
+  return d;
+}
+
 function renderShortcuts() {
-  const s = sectionBox("Shortcuts", "One-tap tiles on the home screen");
+  const s = sectionBox("Shortcuts", "Tiles, schedules and automations");
   if (!shortcuts) {
     s.append(el("p", { className: "note", textContent: "The board did not send its shortcuts." }));
     return s;
@@ -593,6 +1072,14 @@ function renderShortcuts() {
   if (!h.paired) s.append(el("p", { className: "note", textContent: "Pair Swifty Home (above) for home steps." }));
   else if (!h.ready) s.append(el("p", { className: "note", textContent: "Swifty Home has not answered yet: rooms and lights come when it does." }));
   if (shortcuts.dry_run) s.append(el("p", { className: "msg err", textContent: "Every run is a dry run (set over ESP-Iris) until the board restarts." }));
+  const devices = el("datalist", { id: "sc-devices" });
+  const seen = new Set();
+  for (const d of shortcuts.devices || [])
+    for (const n of [d.name, d.room]) if (n && !seen.has(n)) { seen.add(n); devices.append(el("option", { value: n })); }
+  const targets = el("datalist", { id: "sc-targets" });
+  for (const list of Object.values(h))
+    if (Array.isArray(list)) for (const d of list) if (d && d.name && d.target) targets.append(el("option", { value: d.name }));
+  s.append(devices, targets);
   const holder = el("div");
   s.append(holder);
   const all = shortcuts.shortcuts || [];
@@ -601,33 +1088,54 @@ function renderShortcuts() {
     s.replaceWith(renderShortcuts());
   };
   all.forEach(sc => {
-    const card = el("div", { className: "sc" });
+    const card = el("div", { className: "sc" + (sc.enabled === false ? " off" : "") });
     const chip = el("span", { className: "chip" });
     chip.style.background = ACCENT_COLOURS[sc.accent] || "#888";
-    card.append(el("div", { className: "top" }, chip, el("span", { className: "name", textContent: sc.name }),
+    const auto = (sc.triggers || []).some(t => t.on !== "tile");
+    const badges = el("span", { className: "row" });
+    if (sc.enabled === false && auto) badges.append(el("span", { className: "badge", textContent: "Off" }));
+    if ((sc.last || {}).running) badges.append(el("span", { className: "badge ok", textContent: "Running" }));
+    card.append(el("div", { className: "top" }, chip, el("span", { className: "name", textContent: sc.name }), badges,
       el("span", { className: "note", textContent: sc.icon })));
-    card.append(el("div", { className: "steps", textContent: sc.steps.map(stepText).join(" → ") }));
+    const when = (sc.triggers || []).map(triggerWords).join(" · ") || "Run by hand";
+    card.append(el("div", { className: "when", textContent: when + (sc.next ? " · next " + sc.next : "") }));
+    card.append(el("div", { className: "steps", textContent: stepLines(sc.steps).join("\n") }));
+    const last = sc.last || {};
+    if (last.message) {
+      const d = el("details", { className: "lastrun" });
+      d.append(el("summary", { className: last.ok ? "" : "bad", textContent: "Last run" + (last.at ? " " + last.at : "") + " (" + last.source + ")" +
+        (last.dry ? ", a test" : "") + ": " + (last.ok ? "" : "failed: ") + last.message }), logBox(last));
+      card.append(d);
+    }
     const run = el("button", { type: "button", className: "small", textContent: "Run" });
     const test = el("button", { type: "button", className: "small", textContent: "Test (dry run)" });
     const edit = el("button", { type: "button", className: "small", textContent: "Edit" });
+    const onoff = el("button", { type: "button", className: "small", textContent: sc.enabled === false ? "Turn on" : "Turn off" });
     const del = el("button", { type: "button", className: "small danger", textContent: "Delete" });
-    card.append(el("div", { className: "tools" }, run, test, edit, del));
+    const out = el("div");
+    card.append(el("div", { className: "tools" }, run, test, edit, ...(auto ? [onoff] : []), del), out);
     const call = async (body, okText) => {
       try { await api("/api/shortcuts", body); toast(okText); return true; } catch (e) { toast(e.message); return false; }
     };
     run.onclick = () => call({ op: "run", id: sc.id }, "Running on the board");
-    test.onclick = () => call({ op: "run", id: sc.id, dry_run: true }, "Dry run: see the board");
+    test.onclick = async () => {
+      test.disabled = true;
+      try { out.replaceChildren(logBox(await api("/api/shortcuts", { op: "test", id: sc.id }))); } catch (e) { toast(e.message); }
+      test.disabled = false;
+    };
     edit.onclick = () => card.replaceWith(shortcutEditor(sc, changed => redrawSection(changed)));
+    onoff.onclick = async () => { if (await call({ op: "enable", id: sc.id, on: sc.enabled === false }, sc.enabled === false ? "On" : "Off")) redrawSection(true); };
     del.onclick = async () => {
-      if (!confirm("Delete “" + sc.name + "” and its tile?")) return;
+      if (!confirm("Delete “" + sc.name + "”" + ((sc.triggers || []).some(t => t.on === "tile") ? " and its tile?" : "?"))) return;
       if (await call({ op: "delete", id: sc.id }, "Deleted")) redrawSection(true);
     };
     holder.append(card);
   });
   if (!all.length) holder.append(el("p", { className: "note", textContent: "No shortcuts yet." }));
-  else holder.append(el("p", { className: "note", textContent: "Each is a tile on the home screen: move or hide it there, like an app." }));
+  else holder.append(el("p", { className: "note", textContent: "A tile moves and hides on the home screen like an app. Automations nobody tapped stay quiet unless they fail or show a message." }));
   const add = el("button", { type: "button", className: "primary", textContent: "New shortcut", disabled: all.length >= (shortcuts.max || 24) });
   const starters = el("button", { type: "button", textContent: "Add starters", disabled: !h.ready });
+  const reload = el("button", { type: "button", textContent: "Refresh" });
   starters.title = "All lights off, and lights off for your rooms";
   add.onclick = () => { holder.prepend(shortcutEditor(null, changed => redrawSection(changed))); add.disabled = true; };
   starters.onclick = async () => {
@@ -637,7 +1145,9 @@ function renderShortcuts() {
       redrawSection(true);
     } catch (e) { toast(e.message); }
   };
-  s.append(el("div", { className: "actions" }, add, starters));
+  reload.onclick = () => redrawSection(true);
+  s.append(el("div", { className: "actions" }, add, starters, reload));
+  s.append(locationBox(redrawSection));
   return s;
 }
 

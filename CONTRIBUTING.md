@@ -101,6 +101,11 @@ cmake -S components/games_app/host_test -B build-host/games-sim -DCMAKE_BUILD_TY
 cmake --build build-host/games-sim && build-host/games-sim/games-sim
 ```
 
+The shortcuts' programs (`shortcuts_program.cpp`: the format 1 migration,
+checks, the interpreter's conditions, loops and limits, schedules) have host
+tests: `host/render.py` builds `build-host/shortcuts-test`, or see the command
+at the top of `host/shortcuts_test.cpp`.
+
 ## Diagnostics over ESP-Iris
 
 The shell registers RPCs on service `0x4744` (18244), callable with
@@ -125,7 +130,7 @@ The shell registers RPCs on service `0x4744` (18244), callable with
 | 48 | keyframes of 11 bytes, little-endian: ms from the start (u16), fingers down (0–2), then x, y of each finger (i16) | A scripted touch, for testing gestures such as a pinch without a finger on the glass. Points move in a straight line between keyframes with the same fingers; the panel is ignored until the last keyframe. |
 | 49 | none / `01` / `02` / `00` | The always-on display: its state (off, dimmed or showing), timeout, seconds without use, times shown, clock draws and times dimmed (nothing is logged during webcam mode, where it only dims); `01` shows the clock now, `02` dims, `00` wakes the board. |
 | 52 | a URL (`http://` or `https://`) / none | Starts a GET of the URL / its result: HTTP status, time, the default route and DNS servers in use, the start of the body. Where the board's traffic goes, with the VPN on or off. |
-| 55 | none, or JSON text: `{"op":"list"}`, `{"op":"run","id":N,"dry_run":true}`, `{"op":"save","shortcut":{...}}`, `{"op":"delete","id":N}`, `{"op":"starters"}`, `{"op":"editor"}`, `{"op":"dry_run","on":true}` | Shortcuts (`shortcuts.h`): the list with each one's steps and the last run, or a change. `dry_run` on makes every run a dry run (nothing sent to Swifty Home or the Interaction board) until a restart. |
+| 55 | none, or JSON text. Questions: `{"op":"list"}`, `{"op":"get","id":N}` (its program as JSON), `{"op":"log","id":N}` (its last run, step by step; id 0: the last test), `{"op":"next"}` (the next scheduled runs and the location); `"from":K` reads a long answer from byte K. Changes: `{"op":"save","shortcut":{...}}`, `{"op":"delete","id":N}`, `{"op":"run","id":N,"dry_run":true}`, `{"op":"fire","id":N,"as":"time"}` (as a trigger starts it: quiet, asking before what Home asks first; `as` time, every, boot, motion, button, home or sun), `{"op":"stop","id":N}`, `{"op":"test","shortcut":{...}}` (a dry run of one not saved; read it with `log` 0), `{"op":"enable","id":N,"on":false}`, `{"op":"location","lat":L,"lon":L}`, `{"op":"starters"}`, `{"op":"editor"}`, `{"op":"dry_run","on":true}` | Shortcuts (`shortcuts.h`, format in `shortcuts_program.h`): each one's triggers, steps, next run and last run, or a change (`{"reply":"ok"}` or `{"error":...}`). `dry_run` on makes every run a dry run (nothing sent to Swifty Home or the Interaction board, waits skipped) until a restart. Changes run on a helper task; replies are cut at the RPC's 1 KB. |
 
 | 53 | none / `00` / `01` then text / `02` / `03` / `04` / `05` / `06` | The home screen: page, editing and layout (`@2` first, pages split by `\|`, keys by commas, hidden keys after `#`; a widget's key is `w2:` (half a row) or `w4:` (a whole row) and its kind, such as `w4:weather`; see `launcher_layout.h`). `00` resets the layout, `01` sets it from the text (one without `@2`, from before widgets moved, gets the two default widgets first), `02` and `03` start and end editing, `04` shows the hidden apps, `05` shows Settings and `06` opens Settings > Wi-Fi. The reply comes before the change. |
 | 56 | `00` / `01` / `02` ssid `00` password / `03` ssid | The board's Wi-Fi (`board_wifi.h`) as JSON: the network, whether it is connected, its address and signal, whether it is saved or Vibe Mode's, the last join's result and the networks from the last scan. `01` scans first (read again for the results), `02` joins (no password: the saved one), `03` forgets a saved network. Passwords are never in the reply. |

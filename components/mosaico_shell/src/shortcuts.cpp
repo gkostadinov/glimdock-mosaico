@@ -1,362 +1,112 @@
 // SPDX-License-Identifier: Apache-2.0
-// Shortcuts (see shortcuts.h). The list lives in memory behind a mutex: Web
-// settings, Swifty's agent task and RPC 55 change it; the LVGL task saves it
-// (a flash write) from its timer, as reminders do, and hands the home screen
-// its tiles. A run is a script on its own task (stack in PSRAM, below LVGL's
-// drawing, no flash writes): Swifty Home commands start on the LVGL task (with
-// the display lock) and are waited for, waits sleep, and the Interaction
-// board's steps, which can take seconds, block there and not the screen.
+// Shortcuts' engine (see shortcuts.h). The list lives in memory behind a
+// mutex, each shortcut an unchanging copy that runs share: Web settings,
+// Swifty's agent task and RPC 55 replace them; the LVGL task saves the list
+// (a flash write) from its timer, as reminders do, hands the home screen its
+// tiles and watches the triggers. Runs happen on three tasks of their own
+// (stacks in PSRAM, below LVGL's drawing, no flash writes): Swifty Home
+// commands start on the LVGL task (with the display lock) and are waited for,
+// waits sleep, and the Interaction board's steps, which can take seconds,
+// block there and not the screen. The programs (their JSON, checks and
+// interpreter) are shortcuts_program.cpp; the screens shortcuts_ui.cpp.
 #include "shortcuts.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include <algorithm>
 #include <atomic>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <vector>
 
 #include "ArduinoJson.h"
 #include "always_on.h"
+#include "board_wifi.h"
 #include "bsp/esp_mosaico.h"
 #include "esp_heap_caps.h"
 #include "esp_iris.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
+#include "glimdock_app.h"
 #include "haptics.h"
 #include "home_app.h"
 #include "launcher_ui.h"
 #include "mui.h"
 #include "nvs.h"
+#include "shortcuts_internal.h"
 #include "swifty_app.h"
 #include "tools_app.h"
+#include "vpn_app.h"
 
+namespace shortcuts {
 namespace {
-using namespace mui;
 const char *TAG = "shortcuts";
 constexpr const char *NS = "shortcuts";
-constexpr size_t MAX_COUNT = 24, MAX_STEPS = 10, MAX_NAME = 32, MAX_STORED = 12 * 1024;
-constexpr int MAX_WAIT_MS = 60000, MAX_QUEUE = 4;
+constexpr size_t MAX_STORED = 12 * 1024;  // the list as saved (NVS is shared by every app)
+constexpr size_t MAX_QUEUE = 6;
+constexpr int RUNNERS = 3;                 // runs at once
+constexpr time_t CLOCK_SET = 1735689600;   // 2025-01-01: before this the clock is not set yet
+constexpr int ASK_S = 60;                  // a card that asks waits this long
+const mui::Accent *const ACCENT_STYLES[] = {&mui::VIOLET, &mui::CYAN, &mui::AMBER, &mui::GREEN};
 
-enum class Do : uint8_t { Home, Wait, Ir, BoardLights, Brightness, Open, Flashlight };
-const char *const DO_NAMES[] = {"home", "wait", "ir", "board_lights", "brightness", "open", "flashlight"};
-constexpr int DO_COUNT = 7;
-
-const char *const HOME_VERBS[] = {"lights_on", "lights_off", "lights_toggle", "brightness", "color", "scene",
-                                  "plug_on", "plug_off", "plug_toggle", "tv_on", "tv_off", "tv_toggle",
-                                  "volume", "play", "pause", "mute", "unmute"
-                                 };
-const char *const IR_KEYS[] = {"power", "volume_up", "volume_down", "mute", "input", "ok", "up", "down", "left",
-                               "right", "back", "home", "channel_up", "channel_down"
-                              };
-const char *const BOARD_MODES[] = {"off", "react", "rainbow", "night", "colour"};
-const char *const APPS[] = {"launcher", "glimdock", "home", "camera", "swifty", "files", "tools", "gallery",
-                            "webcam", "interaction", "calculator"
-                           };
-const char *const TOOLS[] = {"torch", "level", "compass"};
-const char *const ICONS[] = {"bulb", "power", "house", "rooms", "tv", "speaker", "play", "pause", "snow", "bell",
-                             "clock", "lock", "key", "heart", "paw", "camera", "mic", "cloud", "printer", "laptop",
-                             "nas", "puzzle", "pin", "person"
-                            };
-const char *const ACCENTS[] = {"violet", "cyan", "amber", "green"};
-const Accent *const ACCENT_STYLES[] = {&VIOLET, &CYAN, &AMBER, &GREEN};
-
-template <size_t N> int index_of(const char *const(&names)[N], const std::string &name)
-{
-    for (size_t i = 0; i < N; ++i)
-        if (!strcasecmp(names[i], name.c_str())) {
-            return int(i);
-        }
-    return -1;
-}
-
-template <size_t N> std::string joined(const char *const(&names)[N])
-{
-    std::string out;
-    for (size_t i = 0; i < N; ++i) {
-        out += (i ? ", " : "") + std::string(names[i]);
-    }
-    return out;
-}
-
-// One step. home: verb, target, value. ir: value (the key). board_lights:
-// verb (the mode), value (the colour). open: verb (the app), value (a tool).
-// wait: n ms. brightness: n percent. flashlight: n 1 on, 0 off.
-struct Step {
-    Do kind = Do::Wait;
-    std::string verb, target, value;
-    int n = 0;
-};
-
-struct Shortcut {
-    uint32_t id = 0;
-    std::string name, icon;
-    uint8_t accent = 0;
-    std::vector<Step> steps;
-};
+using Ptr = std::shared_ptr<const Shortcut>;
 
 std::mutex lock;
-std::vector<Shortcut> list;
+std::vector<Ptr> list;
 uint32_t next_id = 1;
-bool seeded = false;         // the starters were offered once (deleting them is final)
-bool dirty = false;          // changed since saved (the timer saves it)
-uint32_t revision = 1;       // bumped by every change: the tiles follow it
-std::string last_result;     // how the last run went, for RPC 55
-std::atomic<bool> dry_all{false};  // RPC 55: every run is a dry run until a restart
+bool seeded = false;          // the starters were offered once (deleting them is final)
+bool dirty = false;           // changed since saved (the timer saves it)
+uint32_t list_rev = 1;        // bumped by every change to the list: the tiles follow it
+std::atomic<uint32_t> rev{1};  // list_rev and every run's start and end: the editor follows it
+Location location;
+std::map<uint32_t, RunStatus> statuses;  // 0: the last test of a shortcut not saved
+std::vector<uint32_t> boot_ids;          // there at start-up, with a boot trigger
+std::atomic<bool> dry_all{false};        // RPC 55: every run is a dry run until a restart
 std::atomic<bool> starters_wanted{false};  // RPC 55 asked for them: the LVGL timer adds them
 ShortcutHooks H;
 
-// ---- JSON (the stored form is the one the API takes) ------------------------------------
-void step_json(const Step &s, JsonObject o)
+DeserializationError read_json(JsonDocument &doc, const char *text, size_t length)
 {
-    o["do"] = DO_NAMES[int(s.kind)];
-    switch (s.kind) {
-    case Do::Home:
-        o["verb"] = s.verb;
-        if (!s.target.empty()) {
-            o["target"] = s.target;
-        }
-        if (!s.value.empty()) {
-            o["value"] = s.value;
-        }
-        break;
-    case Do::Wait:
-        o["seconds"] = s.n / 1000.0f;
-        break;
-    case Do::Ir:
-        o["key"] = s.value;
-        break;
-    case Do::BoardLights:
-        o["mode"] = s.verb;
-        if (!s.value.empty()) {
-            o["colour"] = s.value;
-        }
-        break;
-    case Do::Brightness:
-        o["percent"] = s.n;
-        break;
-    case Do::Open:
-        o["app"] = s.verb;
-        if (!s.value.empty()) {
-            o["tool"] = s.value;
-        }
-        break;
-    case Do::Flashlight:
-        o["on"] = s.n != 0;
-        break;
-    }
+    // A shortcut's blocks nest deeper than ArduinoJson's default of 10.
+    return deserializeJson(doc, text, length, DeserializationOption::NestingLimit(24));
 }
 
-void shortcut_json(const Shortcut &sc, JsonObject o)
+DeserializationError read_json(JsonDocument &doc, const std::string &text)
 {
-    o["id"] = sc.id;
-    o["name"] = sc.name;
-    o["icon"] = sc.icon;
-    o["accent"] = ACCENTS[sc.accent % 4];
-    JsonArray steps = o["steps"].to<JsonArray>();
-    for (const Step &s : sc.steps) {
-        step_json(s, steps.add<JsonObject>());
-    }
+    return read_json(doc, text.data(), text.size());
 }
 
-std::string text_of(JsonVariantConst v)
+std::string json_text(const JsonDocument &doc)
 {
-    if (v.is<const char *>()) {
-        return v.as<const char *>();
-    }
-    if (v.is<int>()) {
-        return std::to_string(v.as<int>());
-    }
-    if (v.is<float>()) {
-        char t[24];
-        snprintf(t, sizeof(t), "%g", double(v.as<float>()));
-        return t;
-    }
-    return "";
+    std::string text;
+    serializeJson(doc, text);
+    return text;
 }
 
-std::string trimmed(std::string s, size_t max_bytes)
+std::string error_json(const std::string &why)
 {
-    while (!s.empty() && isspace(uint8_t(s.back()))) {
-        s.pop_back();
-    }
-    size_t start = 0;
-    while (start < s.size() && isspace(uint8_t(s[start]))) {
-        ++start;
-    }
-    s.erase(0, start);
-    for (char &c : s)
-        if (c == '\n' || c == '\r' || c == '\t') {
-            c = ' ';
-        }
-    if (s.size() > max_bytes) {
-        size_t cut = max_bytes;
-        while (cut > 0 && (uint8_t(s[cut]) & 0xC0) == 0x80) {
-            --cut;  // never inside a UTF-8 character
-        }
-        s.resize(cut);
-    }
-    return s;
+    JsonDocument e;
+    e["error"] = why;
+    return json_text(e);
 }
 
-bool parse_step(JsonObjectConst o, Step &s, std::string &error)
+std::string when_text(time_t t)
 {
-    const int kind = index_of(DO_NAMES, o["do"] | "");
-    if (kind < 0) {
-        error = "each step's do is one of " + joined(DO_NAMES);
-        return false;
+    if (!t) {
+        return "";
     }
-    s = Step();
-    s.kind = Do(kind);
-    switch (s.kind) {
-    case Do::Home: {
-        s.verb = o["verb"] | (o["action"] | "");
-        if (index_of(HOME_VERBS, s.verb) < 0) {
-            error = "home verb \"" + s.verb + "\": one of " + joined(HOME_VERBS);
-            return false;
-        }
-        s.target = trimmed(o["target"] | "", 64);
-        s.value = trimmed(text_of(o["value"]), 40);
-        if ((s.verb == "brightness" || s.verb == "volume") && s.value.empty()) {
-            error = s.verb + " needs value, 0 to 100";
-            return false;
-        }
-        if ((s.verb == "color" || s.verb == "scene") && s.value.empty() && (s.verb == "color" || s.target.empty())) {
-            error = s.verb == "color" ? "color needs value (a colour name or a hue)" : "scene needs value (the scene's name)";
-            return false;
-        }
-        return true;
-    }
-    case Do::Wait: {
-        const float seconds = o["seconds"].is<float>() ? o["seconds"].as<float>() : o["ms"].is<int>() ? o["ms"].as<int>() / 1000.0f : -1;
-        if (seconds < 0.1f || seconds * 1000 > MAX_WAIT_MS) {
-            error = "wait needs seconds, 0.1 to 60";
-            return false;
-        }
-        s.n = int(seconds * 1000 + 0.5f);
-        return true;
-    }
-    case Do::Ir:
-        s.value = o["key"] | "";
-        if (index_of(IR_KEYS, s.value) < 0) {
-            error = "ir key: one of " + joined(IR_KEYS);
-            return false;
-        }
-        return true;
-    case Do::BoardLights:
-        s.verb = o["mode"] | "";
-        s.value = trimmed(o["colour"] | (o["color"] | ""), 16);
-        if (s.verb.empty() && !s.value.empty()) {
-            s.verb = "colour";
-        }
-        if (index_of(BOARD_MODES, s.verb) < 0) {
-            error = "board_lights mode: one of " + joined(BOARD_MODES);
-            return false;
-        }
-        return true;
-    case Do::Brightness:
-        s.n = o["percent"] | -1;
-        if (s.n < 5 || s.n > 100) {
-            error = "brightness needs percent, 5 to 100";
-            return false;
-        }
-        return true;
-    case Do::Open:
-        s.verb = o["app"] | "";
-        s.value = o["tool"] | "";
-        if (s.verb == "tools" && (s.value == "calculator" || s.value == "interact")) {
-            s.verb = s.value == "interact" ? "interaction" : s.value;  // Tools' tabs once, apps now
-            s.value.clear();
-        }
-        if (index_of(APPS, s.verb) < 0) {
-            error = "open app: one of " + joined(APPS);
-            return false;
-        }
-        if (!s.value.empty() && index_of(TOOLS, s.value) < 0) {
-            error = "open tool: one of " + joined(TOOLS);
-            return false;
-        }
-        return true;
-    case Do::Flashlight:
-        if (!o["on"].is<bool>()) {
-            error = "flashlight needs on (true or false)";
-            return false;
-        }
-        s.n = o["on"].as<bool>() ? 1 : 0;
-        return true;
-    }
-    return false;
-}
-
-// An icon and a colour that suit the first step, when none is given.
-void defaults_for(Shortcut &sc)
-{
-    const Step &s = sc.steps.front();
-    const bool off = s.verb.find("off") != std::string::npos;
-    switch (s.kind) {
-    case Do::Home:
-        sc.icon = s.verb.rfind("lights", 0) == 0 || s.verb == "brightness" || s.verb == "color" ? (off ? "power" : "bulb")
-                  : s.verb == "scene" ? "house" : s.verb.rfind("tv", 0) == 0 ? "tv" : s.verb.rfind("plug", 0) == 0 ? "power" : "speaker";
-        sc.accent = off ? 0 : s.verb.rfind("tv", 0) == 0 ? 1 : 2;
-        break;
-    case Do::Ir:
-        sc.icon = "tv", sc.accent = 1;
-        break;
-    case Do::Wait:
-        sc.icon = "clock", sc.accent = 3;
-        break;
-    default:
-        sc.icon = "bulb", sc.accent = 3;
-    }
-}
-
-bool parse_shortcut(JsonObjectConst o, Shortcut &sc, std::string &error)
-{
-    sc = Shortcut();
-    sc.id = o["id"] | 0u;
-    sc.name = trimmed(o["name"] | "", MAX_NAME);
-    if (sc.name.empty()) {
-        error = "a shortcut needs a name";
-        return false;
-    }
-    JsonArrayConst steps = o["steps"].as<JsonArrayConst>();
-    if (steps.size() == 0 || steps.size() > MAX_STEPS) {
-        error = "a shortcut has 1 to 10 steps";
-        return false;
-    }
-    for (JsonObjectConst so : steps) {
-        Step s;
-        if (!parse_step(so, s, error)) {
-            error = "step " + std::to_string(sc.steps.size() + 1) + ": " + error;
-            return false;
-        }
-        sc.steps.push_back(std::move(s));
-    }
-    defaults_for(sc);
-    const std::string icon = o["icon"] | "";
-    if (!icon.empty()) {
-        if (index_of(ICONS, icon) < 0) {
-            error = "icon: one of " + joined(ICONS);
-            return false;
-        }
-        sc.icon = ICONS[index_of(ICONS, icon)];
-    }
-    JsonVariantConst accent = o["accent"];
-    if (accent.is<int>()) {
-        sc.accent = uint8_t(std::clamp(accent.as<int>(), 0, 3));
-    } else if (accent.is<const char *>() && *accent.as<const char *>()) {
-        const int a = index_of(ACCENTS, accent.as<const char *>());
-        if (a < 0) {
-            error = "accent: one of " + joined(ACCENTS);
-            return false;
-        }
-        sc.accent = uint8_t(a);
-    }
-    return true;
+    tm local;
+    localtime_r(&t, &local);
+    char text[24];
+    strftime(text, sizeof(text), "%a %H:%M", &local);
+    return text;
 }
 
 // ---- the display lock, from the other tasks ----------------------------------------------
@@ -370,74 +120,70 @@ template <typename F> bool on_ui(F f, int timeout_ms = 3000)
     return true;
 }
 
-// Home steps take the hub's names for their targets (a room's id, a device's
-// target) when Home can tell, so a near name ("bedroom") keeps working after
-// another room comes along. False: Home knows and there is no such thing.
-bool resolve_home_steps(Shortcut &sc, std::string &error)
+// A card that asks, from a run or Swifty's task (never the LVGL task): true
+// on Allow, false on Not now or when nobody answers within a minute.
+bool ask_screen(const std::string &title, const std::string &body, const std::string &allow)
 {
-    bool ok = true;
-    for (size_t i = 0; i < sc.steps.size() && ok; ++i) {
-        Step &s = sc.steps[i];
-        if (s.kind != Do::Home) {
-            continue;
-        }
-        on_ui([&] {
-            if (!home_app_ready()) {
-                return;  // checked when it runs
-            }
-            std::string what, resolved;
-            if (!home_app_resolve(s.verb.c_str(), s.target.c_str(), s.value.c_str(), what, resolved))
-            {
-                error = "step " + std::to_string(i + 1) + ": " + what;
-                ok = false;
-            } else if (s.verb == "scene" && !resolved.empty())
-            {
-                s.value = resolved;  // the scene's id
-                s.target.clear();
-            } else if (!resolved.empty())
-            {
-                s.target = resolved;
-            }
+    auto answer = std::make_shared<std::atomic<int>>(-1);
+    if (!on_ui([&] {
+    ui_ask(title, body, allow, ASK_S, [answer](bool yes) {
+            answer->store(yes ? 1 : 0);
         });
+    })) {
+        return false;
     }
-    return ok;
+    for (int waited = 0; answer->load() < 0 && waited < (ASK_S + 5) * 1000; waited += 100) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    return answer->load() == 1;
 }
 
-// What a step does, in words (home steps as Home puts them, when it can).
-std::string describe(const Step &s, bool ask_home)
+// ---- the list (under lock) ---------------------------------------------------------------
+Ptr find_locked(uint32_t id)
 {
-    char t[96];
-    switch (s.kind) {
-    case Do::Home: {
-        std::string what, resolved;
-        if (ask_home) {
-            on_ui([&] {
-                if (home_app_ready()) {
-                    home_app_resolve(s.verb.c_str(), s.target.c_str(), s.value.c_str(), what, resolved);
-                }
-            });
+    for (const Ptr &p : list)
+        if (p->id == id) {
+            return p;
         }
-        if (!what.empty()) {
-            return what;
+    return nullptr;
+}
+
+// A shortcut named like this (exactly, then nearly). nullptr: none.
+Ptr by_name_locked(const std::string &want)
+{
+    const std::string w = lowered(want);
+    for (int exact = 1; exact >= 0; --exact)
+        for (const Ptr &p : list) {
+            const std::string n = lowered(p->name);
+            if (exact ? n == w : (!w.empty() && n.find(w) != std::string::npos)) {
+                return p;
+            }
         }
-        return s.verb + (s.target.empty() ? "" : " " + s.target) + (s.value.empty() ? "" : " " + s.value);
+    return nullptr;
+}
+
+std::string stored_json_locked()
+{
+    JsonDocument doc;
+    doc["v"] = FORMAT;
+    doc["next"] = next_id;
+    doc["seeded"] = seeded;
+    if (location.set) {
+        doc["loc"]["lat"] = location.lat;
+        doc["loc"]["lon"] = location.lon;
     }
-    case Do::Wait:
-        snprintf(t, sizeof(t), "Wait %g s", s.n / 1000.0);
-        return t;
-    case Do::Ir:
-        return "TV remote: " + s.value;
-    case Do::BoardLights:
-        return "Interaction board lights: " + s.verb + (s.value.empty() ? "" : " " + s.value);
-    case Do::Brightness:
-        snprintf(t, sizeof(t), "Screen brightness %d%%", s.n);
-        return t;
-    case Do::Open:
-        return "Open " + s.verb + (s.value.empty() ? "" : " " + s.value);
-    case Do::Flashlight:
-        return s.n ? "Flashlight on" : "Flashlight off";
+    JsonArray arr = doc["list"].to<JsonArray>();
+    for (const Ptr &p : list) {
+        shortcut_json(*p, arr.add<JsonObject>());
     }
-    return "";
+    return json_text(doc);
+}
+
+void changed_locked()
+{
+    dirty = true;
+    ++list_rev;
+    ++rev;
 }
 
 // ---- storage (LVGL task) -----------------------------------------------------------------
@@ -455,39 +201,38 @@ void load()
     }
     nvs_close(h);
     JsonDocument doc;
-    if (text.empty() || deserializeJson(doc, text)) {
+    bool migrated = false;
+    if (text.empty() || read_json(doc, text) || !migrate(doc, &migrated)) {
         return;
     }
+    // A format 1 list is read through the migration every start until
+    // something changes; only then is format 2 written over it.
     std::lock_guard<std::mutex> g(lock);
     for (JsonObjectConst o : doc["list"].as<JsonArrayConst>()) {
-        Shortcut sc;
+        auto sc = std::make_shared<Shortcut>();
         std::string error;
-        if (parse_shortcut(o, sc, error) && sc.id) {
-            list.push_back(std::move(sc));
+        if (parse_shortcut(o, *sc, error) && sc->id) {
+            list.push_back(sc);
         } else {
             ESP_LOGW(TAG, "dropped a stored shortcut: %s", error.c_str());
         }
     }
     next_id = std::max<uint32_t>(doc["next"] | 1u, 1);
-    for (const Shortcut &sc : list) {
-        next_id = std::max(next_id, sc.id + 1);
+    for (const Ptr &p : list) {
+        next_id = std::max(next_id, p->id + 1);
+        if (p->enabled && std::any_of(p->triggers.begin(), p->triggers.end(), [](const Trigger & t) {
+        return t.kind == On::Boot;
+    })) {
+            boot_ids.push_back(p->id);
+        }
     }
     seeded = doc["seeded"] | false;
-    ESP_LOGI(TAG, "%u shortcuts", unsigned(list.size()));
-}
-
-std::string stored_json_locked()
-{
-    JsonDocument doc;
-    doc["next"] = next_id;
-    doc["seeded"] = seeded;
-    JsonArray arr = doc["list"].to<JsonArray>();
-    for (const Shortcut &sc : list) {
-        shortcut_json(sc, arr.add<JsonObject>());
+    if (doc["loc"]["lat"].is<float>()) {
+        location.set = true;
+        location.lat = doc["loc"]["lat"];
+        location.lon = doc["loc"]["lon"] | 0.0f;
     }
-    std::string text;
-    serializeJson(doc, text);
-    return text;
+    ESP_LOGI(TAG, "%u shortcuts%s", unsigned(list.size()), migrated ? " (format 1, read as format 2)" : "");
 }
 
 void save()
@@ -511,334 +256,11 @@ void save()
     nvs_close(h);
 }
 
-void changed_locked()
+// ---- Home --------------------------------------------------------------------------------
+// Home started, paired and with the hub's lists, waiting up to 15 s for them
+// after a restart (a run's or Swifty's task, never the LVGL task).
+bool wait_home(std::string &error)
 {
-    dirty = true;
-    ++revision;
-}
-
-// ---- changes (any task) ------------------------------------------------------------------
-// Adds sc (id 0) or replaces the one with its id. False: why not, in error.
-// resolve: ask Home for its names (not on a small stack: see rpc()).
-bool store(Shortcut sc, std::string &error, uint32_t *id_out, bool resolve = true)
-{
-    if (resolve && !resolve_home_steps(sc, error)) {
-        return false;
-    }
-    std::lock_guard<std::mutex> g(lock);
-    if (sc.id) {
-        auto it = std::find_if(list.begin(), list.end(), [&](const Shortcut & s) {
-            return s.id == sc.id;
-        });
-        if (it == list.end()) {
-            error = "there is no shortcut " + std::to_string(sc.id);
-            return false;
-        }
-        *it = std::move(sc);
-        *id_out = it->id;
-    } else {
-        if (list.size() >= MAX_COUNT) {
-            error = "there are already " + std::to_string(MAX_COUNT) + " shortcuts: delete one first";
-            return false;
-        }
-        sc.id = next_id++;
-        *id_out = sc.id;
-        list.push_back(std::move(sc));
-    }
-    if (stored_json_locked().size() > MAX_STORED) {
-        error = "too much to keep: make it shorter";
-        list.erase(std::find_if(list.begin(), list.end(), [&](const Shortcut & s) {
-            return s.id == *id_out;
-        }));
-        return false;
-    }
-    changed_locked();
-    return true;
-}
-
-bool remove(uint32_t id, std::string &name)
-{
-    std::lock_guard<std::mutex> g(lock);
-    auto it = std::find_if(list.begin(), list.end(), [id](const Shortcut & s) {
-        return s.id == id;
-    });
-    if (it == list.end()) {
-        return false;
-    }
-    name = it->name;
-    list.erase(it);
-    changed_locked();
-    return true;
-}
-
-bool find_copy(uint32_t id, Shortcut &out)
-{
-    std::lock_guard<std::mutex> g(lock);
-    for (const Shortcut &sc : list)
-        if (sc.id == id) {
-            out = sc;
-            return true;
-        }
-    return false;
-}
-
-// A shortcut named like this (exactly, then nearly), for Swifty. 0: none.
-uint32_t find_by_name(const std::string &want)
-{
-    std::lock_guard<std::mutex> g(lock);
-    std::string w = want;
-    for (char &c : w) {
-        c = char(tolower(uint8_t(c)));
-    }
-    for (int exact = 1; exact >= 0; --exact)
-        for (const Shortcut &sc : list) {
-            std::string n = sc.name;
-            for (char &c : n) {
-                c = char(tolower(uint8_t(c)));
-            }
-            if (exact ? n == w : (!w.empty() && n.find(w) != std::string::npos)) {
-                return sc.id;
-            }
-        }
-    return 0;
-}
-
-// ---- starters ----------------------------------------------------------------------------
-Shortcut lights_off(const std::string &name, const std::string &target)
-{
-    Shortcut sc;
-    sc.name = trimmed(name, MAX_NAME);
-    sc.icon = "power";
-    sc.accent = 0;
-    Step s;
-    s.kind = Do::Home;
-    s.verb = "lights_off";
-    s.target = target;
-    sc.steps.push_back(s);
-    return sc;
-}
-
-// "All lights off" and one per room with lights (the living room and a
-// bedroom first), from what Home knows. Call with the display lock held.
-std::vector<Shortcut> starters_from_home()
-{
-    std::vector<Shortcut> out;
-    if (!home_app_ready()) {
-        return out;
-    }
-    JsonDocument doc;
-    deserializeJson(doc, home_app_choices_json());
-    struct Room {
-        std::string id, name;
-        int rank;
-    };
-    std::vector<Room> rooms;
-    for (JsonObjectConst r : doc["rooms"].as<JsonArrayConst>()) {
-        if ((r["lights"] | 0) == 0) {
-            continue;
-        }
-        std::string name = r["name"] | "", low = name;
-        for (char &c : low) {
-            c = char(tolower(uint8_t(c)));
-        }
-        const int rank = low.find("living") != std::string::npos ? 0 : low.find("bed") != std::string::npos ? 1 : 2;
-        rooms.push_back({r["id"] | "", name, rank});
-    }
-    std::stable_sort(rooms.begin(), rooms.end(), [](const Room & a, const Room & b) {
-        return a.rank < b.rank;
-    });
-    if (!doc["lights"].as<JsonArrayConst>().size()) {
-        return out;
-    }
-    out.push_back(lights_off("All lights off", "all"));
-    for (size_t i = 0; i < rooms.size() && i < 3; ++i) {
-        out.push_back(lights_off(rooms[i].name + " lights off", rooms[i].id));
-        out.back().icon = "bulb";
-    }
-    return out;
-}
-
-// Adds the starters not there yet (by name). Returns how many.
-int add_starters(const std::vector<Shortcut> &starters)
-{
-    std::lock_guard<std::mutex> g(lock);
-    int added = 0;
-    for (const Shortcut &s : starters) {
-        const bool have = std::any_of(list.begin(), list.end(), [&](const Shortcut & x) {
-            return !strcasecmp(x.name.c_str(), s.name.c_str());
-        });
-        if (have || list.size() >= MAX_COUNT) {
-            continue;
-        }
-        Shortcut sc = s;
-        sc.id = next_id++;
-        list.push_back(std::move(sc));
-        ++added;
-    }
-    seeded = true;
-    changed_locked();
-    return added;
-}
-
-// ---- feedback (LVGL task) ----------------------------------------------------------------
-enum class Feedback : uint8_t { Running, Done, Failed };
-
-struct {
-    lv_obj_t *pill = nullptr;
-    lv_timer_t *timer = nullptr;
-    lv_timer_t *buzz = nullptr;
-} T;
-
-void close_toast()
-{
-    if (T.timer) {
-        lv_timer_delete(T.timer);
-        T.timer = nullptr;
-    }
-    if (T.pill) {
-        lv_obj_delete(T.pill);
-        T.pill = nullptr;
-    }
-}
-
-// A pill at the foot of the panel, over any app: the shortcut's icon (a tick
-// or a cross once it ends), its name and how it went.
-void toast(const std::string &name, const std::string &glyph_name, uint8_t accent, Feedback state, const std::string &detail)
-{
-    close_toast();
-    always_on_wake();
-    const Accent &a = *ACCENT_STYLES[accent % 4];
-    const bool two_lines = !detail.empty();
-    const int h = two_lines ? 78 : 60, w = 400, x = (PANEL - w) / 2, y = PANEL - h - 44;
-    lv_obj_t *pill = glass(lv_layer_top(), x, y, w, h, h / 2, a);
-    lv_obj_remove_flag(pill, LV_OBJ_FLAG_CLICKABLE);
-    T.pill = pill;
-    lv_obj_t *badge = box(pill, 10, (h - 44) / 2, 44, 44, 22);
-    const uint32_t ring = state == Feedback::Failed ? RED : state == Feedback::Done ? OK : a.glow;
-    lv_obj_set_style_bg_color(badge, lv_color_hex(ring), 0);
-    lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
-    const char *glyph = state == Feedback::Failed ? "x" : state == Feedback::Done ? "check" : glyph_name.c_str();
-    icon(badge, glyph, 10, 10, 24, state == Feedback::Running ? a.ink : 0x06200F, 2.2f);
-    const int tx = 66, tw = w - tx - 22;
-    std::string title = name;
-    if (state == Feedback::Running) {
-        title += "\xE2\x80\xA6";
-    }
-    lv_obj_t *t = label(pill, title.c_str(), tx, two_lines ? 12 : (h - 24) / 2, tw, TEXT, 18, true);
-    lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_DOTS);
-    if (two_lines) {
-        lv_obj_t *d = label(pill, detail.c_str(), tx, 40, tw, state == Feedback::Failed ? RED : TEXT2, 14);
-        lv_label_set_long_mode(d, LV_LABEL_LONG_MODE_DOTS);
-    }
-    lv_obj_set_style_opa(pill, LV_OPA_TRANSP, 0);
-    lv_anim_t an;
-    lv_anim_init(&an);
-    lv_anim_set_var(&an, pill);
-    lv_anim_set_values(&an, LV_OPA_TRANSP, LV_OPA_COVER);
-    lv_anim_set_duration(&an, 160);
-    lv_anim_set_exec_cb(&an, [](void *o, int32_t v) {
-        lv_obj_set_style_opa(static_cast<lv_obj_t *>(o), lv_opa_t(v), 0);
-    });
-    lv_anim_start(&an);
-    if (state != Feedback::Running) {
-        T.timer = lv_timer_create([](lv_timer_t *) {
-            T.timer = nullptr;  // deleted after this run (repeat count 1)
-            if (T.pill) {
-                lv_obj_delete(T.pill);
-                T.pill = nullptr;
-            }
-        }, state == Feedback::Failed ? 5000 : 2500, nullptr);
-        lv_timer_set_repeat_count(T.timer, 1);
-        lv_timer_set_auto_delete(T.timer, true);
-    }
-}
-
-void toast(const Shortcut &sc, Feedback state, const std::string &detail)
-{
-    toast(sc.name, sc.icon, sc.accent, state, detail);
-}
-
-void buzz(bool failed)
-{
-    haptics_pulse(HapticPulse::Tap);
-    if (failed && !T.buzz) {
-        T.buzz = lv_timer_create([](lv_timer_t *) {
-            T.buzz = nullptr;
-            haptics_pulse(HapticPulse::Tap);
-        }, 220, nullptr);
-        lv_timer_set_repeat_count(T.buzz, 1);
-        lv_timer_set_auto_delete(T.buzz, true);
-    }
-}
-
-// The home screen's tiles follow the list (LVGL task). Their keys are
-// "sc:<id>"; the launcher keeps where each one is (and if it is hidden).
-std::string tile_key(uint32_t id)
-{
-    return "sc:" + std::to_string(id);
-}
-
-std::vector<uint32_t> tiles;  // the ids the launcher has (LVGL task)
-
-void tile_tapped(const char *, void *user)
-{
-    shortcuts_run(uint32_t(uintptr_t(user)));
-}
-
-void tiles_publish()
-{
-    std::vector<Shortcut> copy;
-    {
-        std::lock_guard<std::mutex> g(lock);
-        copy = list;
-    }
-    for (uint32_t id : tiles) {
-        const bool kept = std::any_of(copy.begin(), copy.end(), [id](const Shortcut & s) {
-            return s.id == id;
-        });
-        if (!kept) {
-            launcher_shortcut_remove(tile_key(id).c_str());  // deleted: its place goes too
-        }
-    }
-    tiles.clear();
-    for (const Shortcut &sc : copy) {
-        const std::string key = tile_key(sc.id);
-        const LauncherShortcut tile = {key.c_str(), sc.name.c_str(), sc.icon.c_str(), ACCENT_STYLES[sc.accent % 4],
-                                       tile_tapped, reinterpret_cast<void *>(uintptr_t(sc.id))
-                                      };
-        if (launcher_shortcut_set(tile)) {
-            tiles.push_back(sc.id);
-        }
-    }
-}
-
-void tile_feedback(uint32_t id, Feedback state)
-{
-    launcher_shortcut_feedback(tile_key(id).c_str(), state == Feedback::Running ? -1 : state == Feedback::Done ? 1 : 0);
-}
-
-// ---- runs (their own task) ---------------------------------------------------------------
-struct Outcome {
-    std::atomic<bool> done{false};
-    bool ok = false;
-    std::string message;
-};
-struct Job {
-    uint32_t id;
-    bool dry;
-    std::shared_ptr<Outcome> outcome;
-};
-std::deque<Job> jobs;  // under lock
-TaskHandle_t runner = nullptr;
-
-struct HomeResult {
-    std::atomic<int> state{-1};  // -1 waiting, 0 failed, 1 done
-    std::string message;
-};
-
-bool run_home(const Step &s, bool dry, std::string &what, std::string &error)
-{
-    // Home starts a few seconds after a restart and needs the hub's lists.
     bool ready = false, paired = true;
     for (int i = 0; i < 60 && !ready; ++i) {
         on_ui([&] {
@@ -860,13 +282,105 @@ bool run_home(const Step &s, bool dry, std::string &what, std::string &error)
     }
     if (!ready) {
         error = "No answer from Swifty Home.";
+    }
+    return ready;
+}
+
+struct Reading {
+    std::string name;
+    bool has_on = false, on = false, has_temp = false;
+    float temp = 0;
+};
+
+// What a name means among Home's devices (home_app_states_json): a device by
+// its target or name, else a room (on when anything in it is on; its first
+// temperature), else a device whose name holds it.
+bool reading_of(JsonArrayConst devices, const std::string &want, Reading &out)
+{
+    out = Reading();
+    const std::string w = lowered(want);
+    auto take = [&](JsonObjectConst d) {
+        if (d["on"].is<bool>()) {
+            out.has_on = true;
+            out.on = out.on || d["on"].as<bool>();
+        }
+        if (!out.has_temp && d["temp"].is<float>()) {
+            out.has_temp = true;
+            out.temp = d["temp"].as<float>();
+        }
+    };
+    for (JsonObjectConst d : devices)
+        if (w == lowered(d["target"] | "") || w == lowered(d["name"] | "")) {
+            out.name = d["name"] | "";
+            take(d);
+            return true;
+        }
+    for (JsonObjectConst d : devices) {
+        const std::string room = lowered(d["room"] | "");
+        if (!room.empty() && (w == room || w == room + " lights")) {
+            out.name = d["room"] | "";
+            take(d);
+        }
+    }
+    if (!out.name.empty()) {
+        return true;
+    }
+    for (JsonObjectConst d : devices)
+        if (!w.empty() && lowered(d["name"] | "").find(w) != std::string::npos) {
+            out.name = d["name"] | "";
+            take(d);
+            return true;
+        }
+    return false;
+}
+
+// The device and room names Home has, for an error that says what to use.
+std::string home_names(JsonArrayConst devices)
+{
+    std::vector<std::string> names;
+    for (JsonObjectConst d : devices) {
+        for (const char *key : {"name", "room"}) {
+            const std::string n = d[key] | "";
+            if (!n.empty() && std::find(names.begin(), names.end(), n) == names.end() && names.size() < 12) {
+                names.push_back(n);
+            }
+        }
+    }
+    std::string out;
+    for (const std::string &n : names) {
+        out += (out.empty() ? "" : ", ") + n;
+    }
+    return out;
+}
+
+bool run_home(const Action &a, bool dry, bool ask, const std::string &shortcut, std::string &what, std::string &error)
+{
+    if (!wait_home(error)) {
         return false;
     }
+    // Nobody tapped: what Home asks before (the TV's power, Movie) is asked on the screen.
+    if (ask && !dry) {
+        bool asks = false;
+        std::string words, resolved;
+        on_ui([&] {
+            asks = home_app_asks_first(a.verb.c_str(), a.target.c_str(), a.value.c_str());
+            home_app_resolve(a.verb.c_str(), a.target.c_str(), a.value.c_str(), words, resolved);
+        });
+        if (asks && !ask_screen(shortcut, "wants to: " + words + ". Nobody tapped it: allow this now?", "Allow")) {
+            what = words;
+            error = "Not allowed on the screen (Swifty Home asks first for this).";
+            return false;
+        }
+    }
+    struct HomeResult {
+        std::atomic<int> state{-1};  // -1 waiting, 0 failed, 1 done
+        std::string message;
+    };
     auto result = std::make_shared<HomeResult>();
     const TaskHandle_t me = xTaskGetCurrentTaskHandle();
     bool started = false;
     const bool locked = on_ui([&] {
-        started = home_app_run(s.verb.c_str(), s.target.c_str(), s.value.c_str(), dry,
+        started = home_app_run(a.verb.c_str(), a.target.c_str(), a.value.c_str(), dry,
         [result, me](bool ok, const std::string & message) {
             result->message = message;
             result->state.store(ok ? 1 : 0);
@@ -896,48 +410,54 @@ bool run_home(const Step &s, bool dry, std::string &what, std::string &error)
     return true;
 }
 
-bool run_step(const Step &s, bool dry, std::string &what, std::string &error)
+// ---- actions: the one way out (a run's task) ---------------------------------------------
+bool perform(const Action &a, bool dry, Source source, const std::string &shortcut, std::string &what, std::string &error)
 {
+    what = action_text(a);
+    // Profiles' choke point: every action, just before it runs.
+    const ShortcutActionInfo info = {kind_name(a.kind), a.verb.c_str(), a.target.c_str(), a.value.c_str(), a.n,
+                                     source_name(source), shortcut.c_str(), dry
+                                    };
+    std::string why;
+    if (!shortcuts_action_allowed(info, &why)) {
+        error = why.empty() ? "Not allowed." : why;
+        return false;
+    }
     char out[200] = "";
-    what = describe(s, false);
-    switch (s.kind) {
+    switch (a.kind) {
     case Do::Home:
-        return run_home(s, dry, what, error);
-    case Do::Wait:
-        vTaskDelay(pdMS_TO_TICKS(s.n));
-        return true;
+        return run_home(a, dry, source_automatic(source), shortcut, what, error);
     case Do::Ir:
-        if (dry) {
-            return true;
-        }
-        if (!tools_board_ir(s.value.c_str(), -1, -1, out, sizeof(out))) {
+        if (!dry && !tools_board_ir(a.value.c_str(), -1, -1, out, sizeof(out))) {
             error = out;
             return false;
         }
         return true;
     case Do::BoardLights:
-        if (dry) {
-            return true;
-        }
-        if (!tools_board_lights(s.verb.c_str(), s.value.c_str(), out, sizeof(out))) {
+        if (!dry && !tools_board_lights(a.verb.c_str(), a.value.c_str(), out, sizeof(out))) {
             error = out;
             return false;
         }
         return true;
     case Do::Brightness:
-        on_ui([&] {
-            if (H.brightness) {
-                H.brightness(s.n);
-            }
-        });
+        if (!dry) {
+            on_ui([&] {
+                if (H.brightness) {
+                    H.brightness(a.n);
+                }
+            });
+        }
         return true;
     case Do::Open: {
+        if (dry) {
+            return true;
+        }
         bool ok = false;
         on_ui([&] {
-            ok = H.open_app && H.open_app(s.verb.c_str(), s.value.c_str());
+            ok = H.open_app && H.open_app(a.verb.c_str(), a.value.c_str());
         });
         if (!ok) {
-            error = "could not open " + s.verb;
+            error = "could not open " + a.verb;
         }
         return ok;
     }
@@ -947,60 +467,326 @@ bool run_step(const Step &s, bool dry, std::string &what, std::string &error)
         }
         bool ok = false;
         on_ui([&] {
-            ok = H.flashlight && H.flashlight(s.n != 0);
+            ok = H.flashlight && H.flashlight(a.n != 0);
         });
         if (!ok) {
             error = "no camera module";
         }
         return ok;
     }
+    default:
+        return false;
     }
-    return false;
 }
 
-void run_one(const Job &job)
+// ---- the board, for the interpreter (a run's task) ---------------------------------------
+class BoardEnv : public Env {
+public:
+    BoardEnv(const Shortcut &sc, Source source, std::atomic<bool> &stop) : sc_(sc), source_(source), stop_(stop) {}
+
+    bool act(const Action &a, bool dry, std::string &what, std::string &error) override
+    {
+        return perform(a, dry, source_, sc_.name, what, error);
+    }
+
+    bool read(const Cond &c, bool &value, std::string &error) override
+    {
+        switch (c.kind) {
+        case Check::Home: {
+            if (!wait_home(error)) {
+                return false;
+            }
+            std::string states;
+            on_ui([&] {
+                states = home_app_states_json();
+            });
+            JsonDocument doc;
+            deserializeJson(doc, states);
+            Reading r;
+            if (!reading_of(doc.as<JsonArrayConst>(), c.name, r)) {
+                error = "Swifty Home has no \"" + c.name + "\"";
+                return false;
+            }
+            if (c.cmp == Cmp::IsOn || c.cmp == Cmp::IsOff) {
+                if (!r.has_on) {
+                    error = r.name + " does not say whether it is on";
+                    return false;
+                }
+                value = r.on == (c.cmp == Cmp::IsOn);
+            } else {
+                if (!r.has_temp) {
+                    error = r.name + " reports no temperature";
+                    return false;
+                }
+                value = c.cmp == Cmp::Above ? r.temp > c.num : r.temp < c.num;
+            }
+            return true;
+        }
+        case Check::Motion:
+        case Check::Button:
+        case Check::Light: {
+            tools_board_inputs_t in;
+            if (!tools_board_inputs(&in, 3000)) {
+                error = "no Interaction board";
+                return false;
+            }
+            if (c.kind == Check::Motion) {
+                value = in.motion || (c.a > 0 && in.motion_age_s >= 0 && in.motion_age_s <= c.a);
+            } else if (c.kind == Check::Button) {
+                value = c.name == "left" ? in.left : c.name == "right" ? in.right : in.left || in.right;
+            } else {
+                if (in.light < 0) {
+                    error = "the Interaction board's light sensor has not answered";
+                    return false;
+                }
+                value = c.cmp == Cmp::Above ? in.light > c.num : in.light < c.num;
+            }
+            return true;
+        }
+        case Check::Wifi:
+            on_ui([&] {
+                value = board_wifi_status().connected;
+            });
+            return true;
+        case Check::Vpn: {
+            vpn_summary_t s = {};
+            on_ui([&] {
+                vpn_app_summary(&s);
+            });
+            value = s.state == VPN_CONNECTED;
+            return true;
+        }
+        case Check::Battery:
+        case Check::Charging: {
+            int pct = -1;
+            bool charging = false;
+            on_ui([&] {
+                if (H.battery) {
+                    pct = H.battery(&charging);
+                }
+            });
+            if (pct < 0) {
+                error = "the battery cannot be read";
+                return false;
+            }
+            value = c.kind == Check::Charging ? charging : c.cmp == Cmp::Above ? pct > c.num : pct < c.num;
+            return true;
+        }
+        default:
+            error = "nothing reads this";
+            return false;
+        }
+    }
+
+    bool sleep(int ms) override
+    {
+        for (int left = ms; left > 0; left -= 100) {
+            if (stop_.load()) {
+                return false;
+            }
+            vTaskDelay(pdMS_TO_TICKS(std::min(left, 100)));
+        }
+        return !stop_.load();
+    }
+
+    int64_t now_ms() override
+    {
+        return esp_timer_get_time() / 1000;
+    }
+
+    bool local_time(struct tm &out) override
+    {
+        const time_t now = time(nullptr);
+        if (now < CLOCK_SET) {
+            return false;
+        }
+        localtime_r(&now, &out);
+        return true;
+    }
+
+    void message(const std::string &text, bool buzz, bool chime) override
+    {
+        on_ui([&] {
+            ui_message(sc_.name, text, sc_.accent, buzz, chime);
+        });
+    }
+
+    std::shared_ptr<const Shortcut> find(uint32_t id) override
+    {
+        return shortcuts::find(id);
+    }
+
+    bool stopped() override
+    {
+        return stop_.load();
+    }
+
+private:
+    const Shortcut &sc_;
+    Source source_;
+    std::atomic<bool> &stop_;
+};
+
+// ---- the home screen's tiles (LVGL task) -------------------------------------------------
+// Their keys are "sc:<id>"; the launcher keeps where each one is (and if it is hidden).
+std::string tile_key(uint32_t id)
 {
-    Shortcut sc;
-    if (!find_copy(job.id, sc)) {
-        if (job.outcome) {
-            job.outcome->message = "That shortcut is gone.";
-            job.outcome->done.store(true);
+    return "sc:" + std::to_string(id);
+}
+
+std::vector<uint32_t> tiles;  // the ids the launcher has
+
+void tile_tapped(const char *, void *user)
+{
+    const uint32_t id = uint32_t(uintptr_t(user));
+    if (!start(id, false, Source::Tile)) {
+        Ptr p = find(id);
+        if (p && status_of(id).running) {
+            ui_toast(p->name, p->icon, p->accent, Feedback::Failed, "Running already: stop it in the shortcuts' editor");
         }
-        return;
     }
-    const bool dry = job.dry || dry_all.load();
-    ESP_LOGI(TAG, "running %u \"%s\"%s", unsigned(sc.id), sc.name.c_str(), dry ? " (dry run)" : "");
-    on_ui([&] {
-        tile_feedback(sc.id, Feedback::Running);
-        toast(sc, Feedback::Running, dry ? "Dry run: nothing is sent" : "");
-    });
-    bool ok = true;
+}
+
+void tiles_publish()
+{
+    std::vector<Ptr> copy = list_copy();
+    for (uint32_t id : tiles) {
+        const bool kept = std::any_of(copy.begin(), copy.end(), [id](const Ptr & p) {
+            return p->id == id && p->tile();
+        });
+        if (!kept) {
+            launcher_shortcut_remove(tile_key(id).c_str());  // deleted (or its tile is): its place goes too
+        }
+    }
+    tiles.clear();
+    for (const Ptr &p : copy) {
+        if (!p->tile()) {
+            continue;
+        }
+        const std::string key = tile_key(p->id);
+        const LauncherShortcut tile = {key.c_str(), p->name.c_str(), p->icon.c_str(), ACCENT_STYLES[p->accent % 4],
+                                       tile_tapped, reinterpret_cast<void *>(uintptr_t(p->id))
+                                      };
+        if (launcher_shortcut_set(tile)) {
+            tiles.push_back(p->id);
+        }
+    }
+}
+
+void tile_feedback(uint32_t id, Feedback state)
+{
+    if (std::find(tiles.begin(), tiles.end(), id) != tiles.end()) {
+        launcher_shortcut_feedback(tile_key(id).c_str(), state == Feedback::Running ? -1 : state == Feedback::Done ? 1 : 0);
+    }
+}
+
+// ---- runs (their own tasks) --------------------------------------------------------------
+struct Outcome {
+    std::atomic<bool> done{false};
+    bool ok = false;
     std::string message;
-    for (size_t i = 0; i < sc.steps.size(); ++i) {
-        std::string what, error;
-        const bool step_ok = run_step(sc.steps[i], dry, what, error);
-        ESP_LOGI(TAG, "  step %u: %s: %s%s", unsigned(i + 1), what.c_str(), step_ok ? "ok" : "failed: ", error.c_str());
-        if (!step_ok) {
-            ok = false;
-            message = (sc.steps.size() > 1 ? "Step " + std::to_string(i + 1) + ": " : std::string()) + error;
-            break;
+    std::vector<std::string> log;
+};
+struct Job {
+    Ptr sc;
+    uint32_t key;  // the shortcut's id; 0 for a test of one not saved
+    bool dry;
+    Source source;
+    std::shared_ptr<Outcome> outcome;
+};
+struct Active {
+    uint32_t key;
+    std::shared_ptr<std::atomic<bool>> stop;
+};
+std::deque<Job> jobs;        // under lock
+std::vector<Active> active;  // under lock
+TaskHandle_t runners[RUNNERS] = {};
+
+bool busy_locked(uint32_t key)
+{
+    return key && (std::any_of(jobs.begin(), jobs.end(), [key](const Job & j) {
+        return j.key == key;
+    }) || std::any_of(active.begin(), active.end(), [key](const Active & a) {
+        return a.key == key;
+    }));
+}
+
+// Queues a run. False: why not (it is running already, or too many wait).
+bool enqueue(Ptr sc, uint32_t key, bool dry, Source source, std::shared_ptr<Outcome> outcome, std::string *why)
+{
+    {
+        std::lock_guard<std::mutex> g(lock);
+        if (!runners[0]) {
+            *why = "Shortcuts have not started yet.";
+            return false;
         }
+        if (busy_locked(key)) {
+            *why = "\"" + sc->name + "\" is running already.";
+            return false;
+        }
+        if (jobs.size() >= MAX_QUEUE) {
+            *why = "Too many shortcuts are running; try again in a moment.";
+            return false;
+        }
+        jobs.push_back({std::move(sc), key, dry, source, std::move(outcome)});
+        statuses[key].running = true;
+        ++rev;
     }
-    if (ok) {
-        message = dry ? "Dry run: nothing was sent" : sc.steps.size() > 1 ? "Done, " + std::to_string(sc.steps.size()) + " steps" : "Done";
+    for (TaskHandle_t t : runners) {
+        xTaskNotifyGive(t);  // whichever is free takes it
     }
+    return true;
+}
+
+void run_job(const Job &job, std::atomic<bool> &stop)
+{
+    const Shortcut &sc = *job.sc;
+    const bool dry = job.dry || dry_all.load();
+    // A run nobody tapped stays quiet unless it fails (its messages show anyway).
+    const bool quiet = source_automatic(job.source);
+    ESP_LOGI(TAG, "running %u \"%s\" (%s)%s", unsigned(sc.id), sc.name.c_str(), source_name(job.source), dry ? " (dry run)" : "");
     on_ui([&] {
-        tile_feedback(sc.id, ok ? Feedback::Done : Feedback::Failed);
-        toast(sc, ok ? Feedback::Done : Feedback::Failed, ok && sc.steps.size() == 1 && !dry ? "" : message);
-        buzz(!ok);
+        if (job.key) {
+            tile_feedback(job.key, Feedback::Running);
+        }
+        if (!quiet) {
+            ui_toast(sc.name, sc.icon, sc.accent, Feedback::Running, dry ? "Test: nothing is sent" : "");
+        }
+    });
+    BoardEnv env(sc, job.source, stop);
+    const RunResult r = run(sc, env, dry);
+    for (const std::string &line : r.log) {
+        ESP_LOGI(TAG, "  %s", line.c_str());
+    }
+    ESP_LOGI(TAG, "  %s: %s (%lld ms)", r.ok ? "ok" : "failed", r.message.c_str(), (long long)r.ms);
+    on_ui([&] {
+        if (job.key) {
+            tile_feedback(job.key, r.ok ? Feedback::Done : Feedback::Failed);
+        }
+        if (!quiet || !r.ok) {
+            ui_toast(sc.name, sc.icon, sc.accent, r.ok ? Feedback::Done : Feedback::Failed,
+                     r.ok && r.steps == 1 && !dry ? "" : r.message);
+            ui_buzz(!r.ok);
+        }
     });
     {
         std::lock_guard<std::mutex> g(lock);
-        last_result = sc.name + ": " + (ok ? "ok" : "failed") + " - " + message;
+        RunStatus &st = statuses[job.key];
+        st.running = false;
+        st.ran = true;
+        st.ok = r.ok;
+        st.dry = dry;
+        st.source = job.source;
+        const time_t now = time(nullptr);
+        st.at = now >= CLOCK_SET ? now : 0;
+        st.message = r.message;
+        st.log = r.log;
+        ++rev;
     }
     if (job.outcome) {
-        job.outcome->ok = ok;
-        job.outcome->message = message;
+        job.outcome->ok = r.ok;
+        job.outcome->message = r.message;
+        job.outcome->log = r.log;
         job.outcome->done.store(true);
     }
 }
@@ -1009,48 +795,520 @@ void runner_task(void *)
 {
     for (;;) {
         Job job;
+        auto stop = std::make_shared<std::atomic<bool>>(false);
         for (;;) {
             {
                 std::lock_guard<std::mutex> g(lock);
                 if (!jobs.empty()) {
                     job = jobs.front();
                     jobs.pop_front();
+                    active.push_back({job.key, stop});
                     break;
                 }
             }
             ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         }
-        run_one(job);
+        run_job(job, *stop);
+        std::lock_guard<std::mutex> g(lock);
+        active.erase(std::find_if(active.begin(), active.end(), [&](const Active & a) {
+            return a.stop == stop;
+        }));
     }
 }
 
-bool queue_run(uint32_t id, bool dry, std::shared_ptr<Outcome> outcome)
+// Waits for a run that reports back (Swifty's and Web settings' tasks).
+bool wait_for(const std::shared_ptr<Outcome> &outcome, int timeout_ms)
 {
-    {
-        std::lock_guard<std::mutex> g(lock);
-        const bool known = std::any_of(list.begin(), list.end(), [id](const Shortcut & s) {
-            return s.id == id;
+    for (int waited = 0; !outcome->done.load() && waited < timeout_ms; waited += 100) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    return outcome->done.load();
+}
+
+// ---- checks before a shortcut is kept (any task but the LVGL task) -----------------------
+// Home steps take the hub's names for their targets (a room's id, a device's
+// target) when Home can tell, so a near name ("bedroom") keeps working after
+// another room comes along. False: Home knows and there is no such thing.
+bool resolve_home_steps(Shortcut &sc, std::string &error)
+{
+    bool ok = true;
+    int index = 0;
+    each_node(sc.steps, [&](Node & n) {
+        ++index;
+        if (!ok || n.kind != Do::Home) {
+            return;
+        }
+        Action &a = n.act;
+        on_ui([&] {
+            if (!home_app_ready()) {
+                return;  // checked when it runs
+            }
+            std::string what, resolved;
+            if (!home_app_resolve(a.verb.c_str(), a.target.c_str(), a.value.c_str(), what, resolved))
+            {
+                error = "a home step (" + action_text(a) + "): " + what;
+                ok = false;
+            } else if (a.verb == "scene" && !resolved.empty())
+            {
+                a.value = resolved;  // the scene's id
+                a.target.clear();
+            } else if (!resolved.empty())
+            {
+                a.target = resolved;
+            }
         });
-        if (!known || !runner || jobs.size() >= MAX_QUEUE) {
+    });
+    return ok;
+}
+
+// The devices that conditions and triggers name are Home's (when it answers).
+bool check_home_names(const Shortcut &sc, std::string &error)
+{
+    std::vector<std::string> names;
+    auto add_cond = [&](const Cond & c) {
+        each_cond(c, [&](const Cond & k) {
+            if (k.kind == Check::Home) {
+                names.push_back(k.name);
+            }
+        });
+    };
+    each_node(sc.steps, [&](const Node & n) {
+        if (n.kind == Do::If) {
+            add_cond(n.cond);
+            for (const Branch &b : n.elifs) {
+                add_cond(b.cond);
+            }
+        } else if (n.kind == Do::Repeat && !n.n) {
+            add_cond(n.cond);
+        }
+    });
+    for (const Trigger &t : sc.triggers)
+        if (t.kind == On::Home) {
+            names.push_back(t.name);
+        }
+    if (names.empty()) {
+        return true;
+    }
+    bool ready = false;
+    std::string states;
+    on_ui([&] {
+        ready = home_app_ready();
+        if (ready) {
+            states = home_app_states_json();
+        }
+    });
+    if (!ready) {
+        return true;  // checked when it runs
+    }
+    JsonDocument doc;
+    deserializeJson(doc, states);
+    for (const std::string &name : names) {
+        Reading r;
+        if (!reading_of(doc.as<JsonArrayConst>(), name, r)) {
+            error = "Swifty Home has no device or room \"" + name + "\" (it has: " + home_names(doc.as<JsonArrayConst>()) + ")";
             return false;
         }
-        jobs.push_back({id, dry, std::move(outcome)});
     }
-    xTaskNotifyGive(runner);
     return true;
 }
 
-// ---- the LVGL timer: save, tiles, starters -----------------------------------------------
+// Run steps name another shortcut: kept by its id (and its name, for reading).
+bool resolve_runs_locked(Shortcut &sc, std::string &error)
+{
+    bool ok = true;
+    each_node(sc.steps, [&](Node & n) {
+        if (!ok || n.kind != Do::Run) {
+            return;
+        }
+        Ptr target = n.n ? find_locked(uint32_t(n.n)) : nullptr;
+        if (!target && !n.text.empty()) {
+            target = by_name_locked(n.text);
+        }
+        if (!target) {
+            error = "run: there is no shortcut " + (n.text.empty() ? std::to_string(n.n) : "\"" + n.text + "\"");
+            ok = false;
+        } else if (sc.id && target->id == sc.id) {
+            error = "run: a shortcut cannot run itself";
+            ok = false;
+        } else {
+            n.n = int(target->id);
+            n.text = target->name;
+        }
+    });
+    return ok;
+}
+
+// Adds sc (id 0) or replaces the one with its id. resolve: ask Home for its
+// names (not on a small stack: see rpc()). approve: asked last, once
+// everything else is right (a card on the screen). False: why not, in error.
+bool store(Shortcut sc, std::string &error, uint32_t *id_out, bool resolve, const std::function<bool(const Shortcut &)> &approve = nullptr)
+{
+    if (resolve && (!resolve_home_steps(sc, error) || !check_home_names(sc, error))) {
+        return false;
+    }
+    auto check_locked = [&]() {
+        if (!resolve_runs_locked(sc, error)) {
+            return false;
+        }
+        if (sc.id && !find_locked(sc.id)) {
+            error = "there is no shortcut " + std::to_string(sc.id);
+            return false;
+        }
+        for (const Ptr &p : list)
+            if (p->id != sc.id && !strcasecmp(p->name.c_str(), sc.name.c_str())) {
+                error = "there is a shortcut named \"" + p->name + "\" already (id " + std::to_string(p->id) +
+                        "): give its id to change it, or another name";
+                return false;
+            }
+        if (!sc.id && list.size() >= MAX_COUNT) {
+            error = "there are " + std::to_string(MAX_COUNT) + " shortcuts already: delete one first";
+            return false;
+        }
+        return true;
+    };
+    {
+        std::lock_guard<std::mutex> g(lock);
+        if (!check_locked()) {
+            return false;
+        }
+    }
+    if (approve && !approve(sc)) {
+        error = "not allowed on the board's screen";
+        return false;
+    }
+    std::lock_guard<std::mutex> g(lock);
+    if (!check_locked()) {  // again: the list may have changed while the card waited
+        return false;
+    }
+    const bool fresh = sc.id == 0;
+    if (fresh) {
+        sc.id = next_id++;
+    }
+    const uint32_t id = sc.id;
+    Ptr ptr = std::make_shared<const Shortcut>(std::move(sc));
+    Ptr old;
+    if (fresh) {
+        list.push_back(ptr);
+    } else {
+        for (Ptr &p : list)
+            if (p->id == id) {
+                old = p;
+                p = ptr;
+            }
+    }
+    if (stored_json_locked().size() > MAX_STORED) {
+        error = "too much to keep on the board: make it shorter, or delete a shortcut";
+        if (fresh) {
+            list.pop_back();
+        } else {
+            for (Ptr &p : list)
+                if (p->id == id) {
+                    p = old;
+                }
+        }
+        return false;
+    }
+    *id_out = id;
+    changed_locked();
+    return true;
+}
+
+bool remove_one(uint32_t id, std::string &name)
+{
+    std::lock_guard<std::mutex> g(lock);
+    auto it = std::find_if(list.begin(), list.end(), [id](const Ptr & p) {
+        return p->id == id;
+    });
+    if (it == list.end()) {
+        return false;
+    }
+    name = (*it)->name;
+    list.erase(it);
+    statuses.erase(id);
+    for (const Active &a : active)
+        if (a.key == id) {
+            a.stop->store(true);  // a run of it ends at its next step
+        }
+    changed_locked();
+    return true;
+}
+
+// A changed copy in place of one (enabled, its tile). No checks: nothing
+// that needs them changes.
+template <typename F> bool modify(uint32_t id, std::string &error, F change)
+{
+    std::lock_guard<std::mutex> g(lock);
+    for (Ptr &p : list)
+        if (p->id == id) {
+            auto copy = std::make_shared<Shortcut>(*p);
+            change(*copy);
+            p = copy;
+            changed_locked();
+            return true;
+        }
+    error = "there is no shortcut " + std::to_string(id);
+    return false;
+}
+
+// ---- starters ----------------------------------------------------------------------------
+Shortcut lights_off(const std::string &name, const std::string &target)
+{
+    Shortcut sc;
+    sc.name = trimmed(name, MAX_NAME);
+    sc.icon = "power";
+    sc.accent = 0;
+    sc.triggers.push_back(Trigger());
+    Node n;
+    n.kind = Do::Home;
+    n.act.kind = Do::Home;
+    n.act.verb = "lights_off";
+    n.act.target = target;
+    sc.steps.push_back(n);
+    return sc;
+}
+
+// "All lights off" and one per room with lights (the living room and a
+// bedroom first), from what Home knows. Call with the display lock held.
+std::vector<Shortcut> starters_from_home()
+{
+    std::vector<Shortcut> out;
+    if (!home_app_ready()) {
+        return out;
+    }
+    JsonDocument doc;
+    deserializeJson(doc, home_app_choices_json());
+    struct Room {
+        std::string id, name;
+        int rank;
+    };
+    std::vector<Room> rooms;
+    for (JsonObjectConst r : doc["rooms"].as<JsonArrayConst>()) {
+        if ((r["lights"] | 0) == 0) {
+            continue;
+        }
+        std::string name = r["name"] | "";
+        const std::string low = lowered(name);
+        const int rank = low.find("living") != std::string::npos ? 0 : low.find("bed") != std::string::npos ? 1 : 2;
+        rooms.push_back({r["id"] | "", name, rank});
+    }
+    std::stable_sort(rooms.begin(), rooms.end(), [](const Room & a, const Room & b) {
+        return a.rank < b.rank;
+    });
+    if (!doc["lights"].as<JsonArrayConst>().size()) {
+        return out;
+    }
+    out.push_back(lights_off("All lights off", "all"));
+    for (size_t i = 0; i < rooms.size() && i < 3; ++i) {
+        out.push_back(lights_off(rooms[i].name + " lights off", rooms[i].id));
+        out.back().icon = "bulb";
+    }
+    return out;
+}
+
+// Adds the starters not there yet (by name). Returns how many.
+int add_starters(const std::vector<Shortcut> &starters)
+{
+    std::lock_guard<std::mutex> g(lock);
+    int added = 0;
+    for (const Shortcut &s : starters) {
+        const bool have = std::any_of(list.begin(), list.end(), [&](const Ptr & x) {
+            return !strcasecmp(x->name.c_str(), s.name.c_str());
+        });
+        if (have || list.size() >= MAX_COUNT) {
+            continue;
+        }
+        auto sc = std::make_shared<Shortcut>(s);
+        sc->id = next_id++;
+        list.push_back(sc);
+        ++added;
+    }
+    seeded = true;
+    changed_locked();
+    return added;
+}
+
+// ---- triggers (LVGL task) ----------------------------------------------------------------
+struct {
+    int64_t minute = -1;  // the last local minute looked at (minutes since 1970)
+    bool board = false;   // watching the Interaction board
+    bool inputs_valid = false;
+    tools_board_inputs_t inputs = {};
+    std::map<uint32_t, int64_t> motion_ran;  // when each shortcut last ran on motion (ms since start-up)
+    int64_t home_next = 0;
+    std::map<std::string, float> home_seen;  // "<id>/<trigger>": last on (0, 1) or temperature
+    uint32_t list_seen = 0;
+} W;
+
+void fire(const Ptr &p, Source source)
+{
+    std::string why;
+    if (enqueue(p, p->id, false, source, nullptr, &why)) {
+        ESP_LOGI(TAG, "\"%s\" started by %s", p->name.c_str(), source_name(source));
+    } else {
+        ESP_LOGI(TAG, "\"%s\" not started by %s: %s", p->name.c_str(), source_name(source), why.c_str());
+    }
+}
+
+void watch_triggers()
+{
+    std::vector<Ptr> autos;
+    Location loc;
+    uint32_t seen;
+    {
+        std::lock_guard<std::mutex> g(lock);
+        for (const Ptr &p : list)
+            if (p->enabled && p->automatic()) {
+                autos.push_back(p);
+            }
+        loc = location;
+        seen = list_rev;
+    }
+    if (seen != W.list_seen) {
+        W.list_seen = seen;
+        W.home_seen.clear();  // triggers may name other devices now
+    }
+    const int64_t now_ms = esp_timer_get_time() / 1000;
+    auto has = [&](const Ptr & p, On kind) {
+        return std::any_of(p->triggers.begin(), p->triggers.end(), [kind](const Trigger & t) {
+            return t.kind == kind;
+        });
+    };
+
+    // Schedules, minute by minute. Minutes passed while the board was off,
+    // asleep or before its clock was set are not made up.
+    const time_t now = time(nullptr);
+    if (now >= CLOCK_SET) {
+        const int64_t minute = int64_t(now) / 60;
+        if (W.minute < 0 || minute < W.minute || minute - W.minute > 3) {
+            W.minute = minute;
+        }
+        while (W.minute < minute) {
+            ++W.minute;
+            const time_t start = time_t(W.minute * 60);
+            tm local;
+            localtime_r(&start, &local);
+            for (const Ptr &p : autos)
+                for (const Trigger &t : p->triggers)
+                    if (fires_at(t, local, start, loc)) {
+                        fire(p, t.kind == On::Time ? Source::Time : t.kind == On::Every ? Source::Every : Source::Sun);
+                        break;
+                    }
+        }
+    }
+
+    // Start-up: each shortcut that was there with a boot trigger, once.
+    for (auto it = boot_ids.begin(); it != boot_ids.end();) {
+        Ptr p;
+        for (const Ptr &x : autos)
+            if (x->id == *it && has(x, On::Boot)) {
+                p = x;
+            }
+        const auto t = p ? std::find_if(p->triggers.begin(), p->triggers.end(), [](const Trigger & x) {
+            return x.kind == On::Boot;
+        }) : std::vector<Trigger>::const_iterator();
+        if (!p || now_ms > 3700 * 1000LL) {
+            it = boot_ids.erase(it);  // gone, off, or start-up is long past
+        } else if (now_ms >= t->n * 1000LL) {
+            fire(p, Source::Boot);
+            it = boot_ids.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // The Interaction board: motion and its buttons, by their counts.
+    const bool want_board = std::any_of(autos.begin(), autos.end(), [&](const Ptr & p) {
+        return has(p, On::Motion) || has(p, On::Button);
+    });
+    if (want_board != W.board) {
+        W.board = want_board;
+        W.inputs_valid = false;
+        tools_board_watch(want_board);
+    }
+    tools_board_inputs_t in;
+    if (want_board && tools_board_inputs(&in, 0)) {
+        const tools_board_inputs_t &was = W.inputs;
+        const bool reset = in.motions < was.motions || in.left_presses < was.left_presses || in.right_presses < was.right_presses;
+        if (W.inputs_valid && !reset) {
+            const bool motion = in.motions > was.motions, left = in.left_presses > was.left_presses,
+                       right = in.right_presses > was.right_presses;
+            for (const Ptr &p : autos)
+                for (const Trigger &t : p->triggers) {
+                    if (t.kind == On::Motion && motion) {
+                        auto ran = W.motion_ran.find(p->id);
+                        if (ran == W.motion_ran.end() || now_ms - ran->second >= t.n * 1000LL) {
+                            W.motion_ran[p->id] = now_ms;
+                            fire(p, Source::Motion);
+                            break;
+                        }
+                    } else if (t.kind == On::Button && ((t.name != "right" && left) || (t.name != "left" && right))) {
+                        fire(p, Source::Button);
+                        break;
+                    }
+                }
+        }
+        W.inputs = in;
+        W.inputs_valid = true;
+    } else {
+        W.inputs_valid = false;
+    }
+
+    // Home: a device turning on or off, or crossing a temperature, every 3 s
+    // from what Home already polls.
+    const bool want_home = std::any_of(autos.begin(), autos.end(), [&](const Ptr & p) {
+        return has(p, On::Home);
+    });
+    if (want_home && now_ms >= W.home_next) {
+        W.home_next = now_ms + 3000;
+        if (H.home_start) {
+            H.home_start();
+        }
+        if (home_app_ready()) {
+            JsonDocument doc;
+            deserializeJson(doc, home_app_states_json());
+            for (const Ptr &p : autos) {
+                bool fired = false;
+                for (size_t i = 0; i < p->triggers.size(); ++i) {
+                    const Trigger &t = p->triggers[i];
+                    Reading r;
+                    if (t.kind != On::Home || !reading_of(doc.as<JsonArrayConst>(), t.name, r)) {
+                        continue;
+                    }
+                    const bool temp = t.cmp == Cmp::Above || t.cmp == Cmp::Below;
+                    if (temp ? !r.has_temp : !r.has_on) {
+                        continue;
+                    }
+                    const float v = temp ? r.temp : r.on ? 1.0f : 0.0f;
+                    const std::string key = std::to_string(p->id) + "/" + std::to_string(i);
+                    auto it = W.home_seen.find(key);
+                    if (it != W.home_seen.end() && !fired) {
+                        const float x = it->second;
+                        const bool go = t.cmp == Cmp::IsOn ? x < 0.5f && v >= 0.5f : t.cmp == Cmp::IsOff ? x >= 0.5f && v < 0.5f
+                                        : t.cmp == Cmp::Above ? x <= t.num && v > t.num : t.cmp == Cmp::Below ? x >= t.num && v < t.num
+                                        : x != v;
+                        if (go) {
+                            fire(p, Source::Home);
+                            fired = true;
+                        }
+                    }
+                    W.home_seen[key] = v;
+                }
+            }
+        }
+    }
+}
+
+// ---- the LVGL timer: save, tiles, starters, triggers -------------------------------------
 uint32_t published = 0;
 
 void check(lv_timer_t *)
 {
     save();
-    uint32_t rev;
+    uint32_t seen;
     bool offer;
     {
         std::lock_guard<std::mutex> g(lock);
-        rev = revision;
+        seen = list_rev;
         offer = !seeded;
     }
     // The first time Home has its lists: the starters, unless there are
@@ -1069,114 +1327,260 @@ void check(lv_timer_t *)
         ESP_LOGI(TAG, "starters: %d added", added);
         save();
     }
-    if (rev != published) {
-        published = rev;
+    if (seen != published) {
+        published = seen;
         tiles_publish();
     }
+    watch_triggers();
+    ui_tick();
 }
 
 // ---- text for Swifty and RPC 55 ----------------------------------------------------------
+std::string triggers_text(const Shortcut &sc)
+{
+    if (sc.triggers.empty()) {
+        return "run by hand (Swifty, the editor or another shortcut)";
+    }
+    std::string out;
+    for (const Trigger &t : sc.triggers) {
+        out += (out.empty() ? "" : "; ") + trigger_text(t);
+    }
+    return out;
+}
+
+std::string status_text(uint32_t id)
+{
+    const RunStatus st = status_of(id);
+    if (st.running) {
+        return "running now";
+    }
+    if (!st.ran) {
+        return "";
+    }
+    return std::string(st.ok ? "ok" : "failed") + (st.dry ? " (test)" : "") + (st.at ? " " + when_text(st.at) : "") +
+           " (" + source_name(st.source) + "): " + st.message;
+}
+
+// ask_home: Home's words for its steps (takes the display lock: not RPC 55).
+std::string steps_text(const Shortcut &sc, bool ask_home, const char *joint)
+{
+    std::vector<std::string> lines;
+    if (ask_home) {
+        steps_lines(sc.steps, lines, [](const Action & a) {
+            std::string words;
+            on_ui([&] {
+                words = action_words(a);
+            });
+            return words;
+        });
+    } else {
+        steps_lines(sc.steps, lines);
+    }
+    std::string out;
+    for (const std::string &l : lines) {
+        out += (out.empty() ? "" : joint) + (ask_home ? trimmed(l, 200) : l);
+    }
+    return out;
+}
+
 std::string list_text(bool ask_home)
 {
-    std::vector<Shortcut> copy;
-    {
-        std::lock_guard<std::mutex> g(lock);
-        copy = list;
-    }
+    std::vector<Ptr> copy = list_copy();
     if (copy.empty()) {
         return "No shortcuts.";
     }
     std::string text;
-    for (const Shortcut &sc : copy) {
-        text += "Shortcut " + std::to_string(sc.id) + ": " + sc.name + " (" + sc.icon + ", " + ACCENTS[sc.accent % 4] + "): ";
-        for (size_t i = 0; i < sc.steps.size(); ++i) {
-            text += (i ? ", then " : "") + describe(sc.steps[i], ask_home);
-        }
-        text += "\n";
+    for (const Ptr &p : copy) {
+        const std::string last = status_text(p->id), next = next_text(*p);
+        text += "Shortcut " + std::to_string(p->id) + ": " + p->name + (p->enabled ? "" : " (off)") + ". Starts: " +
+                triggers_text(*p) + ". Does: " + steps_text(*p, ask_home, "; ") + "." + (next.empty() ? "" : " Next: " + next + ".") +
+                (last.empty() ? "" : " Last run: " + last) + "\n";
     }
     return text;
 }
 
+std::string log_text(uint32_t id)
+{
+    const RunStatus st = status_of(id);
+    std::string out = status_text(id);
+    if (out.empty()) {
+        return id ? "It has not run since the board started." : "No test yet.";
+    }
+    for (const std::string &l : st.log) {
+        out += "\n" + l;
+    }
+    return out;
+}
+
 // ---- Swifty's tools (its agent task) -----------------------------------------------------
+Ptr tool_target(JsonDocument &a)
+{
+    uint32_t id = a["id"] | 0u;
+    std::lock_guard<std::mutex> g(lock);
+    Ptr p = id ? find_locked(id) : nullptr;
+    if (!p && a["name"].is<const char *>()) {
+        p = by_name_locked(a["name"].as<const char *>());
+    }
+    return p;
+}
+
+void put(char *out, size_t cap, const std::string &text)
+{
+    strlcpy(out, text.c_str(), cap);
+}
+
+// Swifty asks; the person allows it on the board when it starts by itself.
+bool allowed_on_screen(const Shortcut &sc, bool change)
+{
+    std::vector<std::string> lines;
+    steps_lines(sc.steps, lines);
+    std::string what;
+    for (size_t i = 0; i < lines.size() && i < 4; ++i) {
+        what += (i ? "\n" : "") + trimmed(lines[i], 60);
+    }
+    if (lines.size() > 4) {
+        what += "\n\xE2\x80\xA6";
+    }
+    return ask_screen(sc.name, std::string("Swifty wants this to run by itself: ") + triggers_text(sc) + ".\n" + what,
+                      change ? "Allow change" : "Allow");
+}
+
+std::string saved_text(uint32_t id, bool changed)
+{
+    Ptr p = find(id);
+    if (!p) {
+        return "Saved.";
+    }
+    const std::string next = next_text(*p);
+    return "Shortcut " + std::to_string(id) + " \"" + p->name + "\" " + (changed ? "changed" : "made") +
+           (p->enabled ? "" : " (off)") + ". Starts: " + triggers_text(*p) + ". Does: " + steps_text(*p, true, "; ") + "." +
+           (p->tile() ? " Its tile is on the home screen." : "") + (next.empty() || !p->enabled ? "" : " Next: " + next + ".");
+}
+
 void add_tool(const char *args, char *out, size_t cap)
 {
     JsonDocument a;
-    deserializeJson(a, args);
+    if (read_json(a, args, strlen(args))) {
+        put(out, cap, "Not saved: the arguments are not JSON.");
+        return;
+    }
+    JsonObjectConst o = a["shortcut"].is<JsonObjectConst>() ? a["shortcut"].as<JsonObjectConst>() : a.as<JsonObjectConst>();
     Shortcut sc;
     std::string error;
-    if (!parse_shortcut(a.as<JsonObjectConst>(), sc, error)) {
-        snprintf(out, cap, "Not made: %s.", error.c_str());
+    if (!parse_shortcut(o, sc, error)) {
+        put(out, cap, "Not saved: " + error + ". Fix it and call add_shortcut again.");
         return;
     }
-    const bool replace = sc.id != 0;
+    const bool change = sc.id != 0;
     uint32_t id = 0;
-    if (!store(sc, error, &id)) {
-        snprintf(out, cap, "Not made: %s.", error.c_str());
+    std::function<bool(const Shortcut &)> approve;
+    if (sc.enabled && sc.automatic()) {
+        approve = [change](const Shortcut & s) {
+            return allowed_on_screen(s, change);
+        };
+    }
+    if (!store(sc, error, &id, true, approve)) {
+        put(out, cap, error == "not allowed on the board's screen"
+            ? "Not saved: it starts by itself, and nobody allowed it on the board's screen within a minute. "
+            "Tell the person; it is asked again when you retry."
+            : "Not saved: " + error + ".");
         return;
     }
-    Shortcut saved;
-    find_copy(id, saved);
-    std::string steps;
-    for (size_t i = 0; i < saved.steps.size(); ++i) {
-        steps += (i ? ", then " : "") + describe(saved.steps[i], true);
-    }
-    snprintf(out, cap, "Shortcut %u \"%s\" %s: %s. It is a tile on the home screen.", unsigned(id), saved.name.c_str(),
-             replace ? "changed" : "made", steps.c_str());
+    put(out, cap, saved_text(id, change));
 }
 
 void list_tool(const char *, char *out, size_t cap)
 {
-    strlcpy(out, list_text(true).c_str(), cap);
+    std::string text = list_text(true);
+    if (text.size() >= cap) {
+        text = list_text(false);  // Home's words are longer
+    }
+    put(out, cap, text);
+}
+
+void get_tool(const char *args, char *out, size_t cap)
+{
+    JsonDocument a;
+    read_json(a, args, strlen(args));
+    Ptr p = tool_target(a);
+    if (!p) {
+        put(out, cap, "No such shortcut (list_shortcuts shows them).");
+        return;
+    }
+    JsonDocument doc;
+    shortcut_json(*p, doc.to<JsonObject>());
+    put(out, cap, json_text(doc) + "\nLast run: " + log_text(p->id));
 }
 
 void run_tool(const char *args, char *out, size_t cap)
 {
     JsonDocument a;
-    deserializeJson(a, args);
-    uint32_t id = a["id"] | 0u;
-    if (!id && a["name"].is<const char *>()) {
-        id = find_by_name(a["name"].as<const char *>());
-    }
-    Shortcut sc;
-    if (!id || !find_copy(id, sc)) {
-        snprintf(out, cap, "No such shortcut (list_shortcuts shows them).");
+    read_json(a, args, strlen(args));
+    Ptr p = tool_target(a);
+    if (!p) {
+        put(out, cap, "No such shortcut (list_shortcuts shows them).");
         return;
     }
+    const bool dry = a["dry_run"] | false;
     auto outcome = std::make_shared<Outcome>();
-    if (!queue_run(id, false, outcome)) {
-        snprintf(out, cap, "Too many shortcuts are running; try again in a moment.");
+    std::string why;
+    if (!enqueue(p, p->id, dry, Source::Swifty, outcome, &why)) {
+        put(out, cap, why);
         return;
     }
-    // Waits for the end (steps can wait up to a minute each).
-    for (int waited = 0; !outcome->done.load() && waited < 90000; waited += 200) {
-        vTaskDelay(pdMS_TO_TICKS(200));
+    if (!wait_for(outcome, dry ? 40000 : 120000)) {
+        put(out, cap, "\"" + p->name + "\" is still running.");
+        return;
     }
-    if (!outcome->done.load()) {
-        snprintf(out, cap, "\"%s\" is still running.", sc.name.c_str());
-    } else {
-        snprintf(out, cap, "\"%s\" %s: %s.", sc.name.c_str(), outcome->ok ? "ran" : "failed", outcome->message.c_str());
+    std::string text = "\"" + p->name + "\" " + (outcome->ok ? (dry ? "tested" : "ran") : "failed") + ": " + outcome->message + ".";
+    for (size_t i = 0; i < outcome->log.size() && i < 16; ++i) {
+        text += "\n" + outcome->log[i];
     }
+    put(out, cap, text);
+}
+
+void enable_tool(const char *args, char *out, size_t cap)
+{
+    JsonDocument a;
+    read_json(a, args, strlen(args));
+    Ptr p = tool_target(a);
+    if (!p) {
+        put(out, cap, "No such shortcut (list_shortcuts shows them).");
+        return;
+    }
+    const bool on = a["on"] | true;
+    if (on && !p->enabled && p->automatic() && !allowed_on_screen(*p, true)) {
+        put(out, cap, "Not switched on: nobody allowed it on the board's screen within a minute.");
+        return;
+    }
+    std::string error;
+    if (!set_enabled(p->id, on, error)) {
+        put(out, cap, error);
+        return;
+    }
+    put(out, cap, "\"" + p->name + "\" is " + (on ? "on" : "off") + (p->automatic() ? (on ? ": it starts by itself (" + triggers_text(*p) + ")." :
+            ": only a tap or run_shortcut starts it.") : "."));
 }
 
 void delete_tool(const char *args, char *out, size_t cap)
 {
     JsonDocument a;
-    deserializeJson(a, args);
-    const uint32_t id = a["id"] | 0u;
+    read_json(a, args, strlen(args));
+    Ptr p = tool_target(a);
     std::string name;
-    if (!remove(id, name)) {
-        snprintf(out, cap, "There is no shortcut %u (list_shortcuts shows them).", unsigned(id));
+    if (!p || !remove_one(p->id, name)) {
+        put(out, cap, "There is no such shortcut (list_shortcuts shows them).");
         return;
     }
-    snprintf(out, cap, "Deleted shortcut %u, \"%s\", and its tile.", unsigned(id), name.c_str());
+    put(out, cap, "Deleted shortcut " + std::to_string(p->id) + ", \"" + name + "\"" + (p->tile() ? ", and its tile." : "."));
 }
 
 void register_tools()
 {
     static const std::string add_schema =
         std::string(R"({"type":"object","properties":{)"
-                    R"("id":{"type":"integer","description":"Change this shortcut instead of making a new one."},)"
-                    R"("name":{"type":"string","description":"Short, on the tile: e.g. Bedroom lights off."},)"
+                    R"("id":{"type":"integer","description":"Change this shortcut instead of making one: send all of it (get_shortcut gives it)."},)"
+                    R"("name":{"type":"string","description":"Short, on its tile: e.g. Bedroom lights off."},)"
                     R"("icon":{"type":"string","enum":[)") +
     [] {
         std::string s;
@@ -1186,37 +1590,63 @@ void register_tools()
         return s;
     }() +
     R"(]},"accent":{"type":"string","enum":["violet","cyan","amber","green"]},)"
-    R"("steps":{"type":"array","description":"Run in order, 1 to 10.","items":{"type":"object","properties":{)"
-    R"("do":{"type":"string","enum":["home","wait","ir","board_lights","brightness","open","flashlight"]},)"
-    R"("verb":{"type":"string","description":"home: lights_on, lights_off, lights_toggle, brightness, color, scene, plug_on, plug_off, plug_toggle, tv_on, tv_off, tv_toggle, volume, play, pause, mute, unmute"},)"
-    R"("target":{"type":"string","description":"home: a room, a light or a plug by name, or all"},)"
-    R"("value":{"type":"string","description":"home: brightness or volume 0-100, a colour, a scene's name"},)"
-    R"("seconds":{"type":"number","description":"wait: 0.1-60"},)"
-    R"("key":{"type":"string","description":"ir: an LG TV key: power, volume_up, volume_down, mute, input, ok, up, down, left, right, back, home, channel_up or channel_down"},)"
-    R"("mode":{"type":"string","description":"board_lights: off, react, rainbow, night or colour"},)"
-    R"("colour":{"type":"string","description":"board_lights: a colour name or #RRGGBB"},)"
-    R"("percent":{"type":"integer","description":"brightness: the screen, 5-100"},)"
-    R"("app":{"type":"string","description":"open: launcher, glimdock, home, camera, swifty, files, tools, gallery, webcam, interaction or calculator"},)"
-    R"("tool":{"type":"string","description":"open tools: torch, level or compass"},)"
-    R"("on":{"type":"boolean","description":"flashlight"}},"required":["do"]}}},"required":["name","steps"]})";
+    R"("enabled":{"type":"boolean","description":"Default true. Off: only a tap or run_shortcut starts it."},)"
+    R"("triggers":{"type":"array","description":"What starts it; default [{\"on\":\"tile\"}] (a tile to tap). )"
+    R"(tile; time {at:\"07:30\",days}; every {minutes,from,to,days}; boot {delay s}; motion {cooldown s}; )"
+    R"(button {button:left|right|any}; home {device,to:on|off|any} or {device,above|below:degrees}; )"
+    R"(sun {event:sunrise|sunset,offset:min,days}. days: [\"mon\",\"sat\"], \"weekdays\" or \"weekend\"; absent: every day.",)"
+    R"("items":{"type":"object","properties":{"on":{"type":"string","enum":["tile","time","every","boot","motion","button","home","sun"]}},"required":["on"]}},)"
+    R"("steps":{"type":"array","description":"Run in order, 48 in all at most. Actions: home {verb,target,value}; ir {key}; )"
+    R"(board_lights {mode,colour}; brightness {percent}; open {app,tool}; flashlight {on}. )"
+    R"(wait {seconds|minutes, up to 60 min}; message {text,haptic,sound} ({n} in text shows variable n); )"
+    R"(if {if:COND,then:[...],elif:[{if:COND,then:[...]}],else:[...]}; repeat {times:1-100,steps:[...]} or )"
+    R"({while:COND,max:1-100,steps:[...]}; set {var,value}; add {var,value} (whole numbers); )"
+    R"(run {shortcut: another's name}; stop. Ifs and repeats nest 4 deep. )"
+    R"(COND: {check:time,from:\"22:00\",to:\"06:00\"} | {check:day,days} | {check:home,device,is:on|off} or above|below )"
+    R"(| {check:motion,within:s} | {check:button,button} | {check:light,below:%} | {check:wifi} | {check:vpn} )"
+    R"(| {check:battery,below:%} | {check:charging} | {check:var,var,equals|above|below} | {and:[...]} | {or:[...]} | {not:COND}.",)"
+    R"("items":{"type":"object","properties":{"do":{"type":"string","enum":["home","ir","board_lights","brightness","open",)"
+    R"("flashlight","wait","if","repeat","set","add","message","run","stop"]},)"
+    R"("verb":{"type":"string","description":"home: lights_on, lights_off, lights_toggle, brightness, color, scene, plug_on, plug_off, plug_toggle, tv_on, tv_off, tv_toggle, volume, play, pause, mute, unmute, or another of Swifty Home's commands"},)"
+    R"("target":{"type":"string","description":"home: a room, light or plug by name, or all"},)"
+    R"("value":{"description":"home: brightness or volume 0-100, a colour, a scene; set/add: a number"},)"
+    R"("key":{"type":"string","description":"ir: power, volume_up, volume_down, mute, input, ok, up, down, left, right, back, home, channel_up, channel_down"},)"
+    R"("app":{"type":"string","description":"open: launcher, glimdock, home, camera, swifty, files, tools, gallery, webcam, interaction, calculator"}},)"
+    R"("required":["do"]}}},"required":["name","steps"]})";
     swifty_app_add_tool("add_shortcut",
-                        "Make a one-tap shortcut: a tile on the board's home screen (like Shortcuts on a phone) that runs "
-                        "steps in order: Swifty Home commands (home: home_control's actions, plus lights_toggle, "
-                        "plug_toggle and tv_toggle), waits, TV remote keys (ir, from the Interaction board), the board's "
-                        "lights, the screen's brightness, opening an app, the flashlight. Use home_state for the rooms' "
-                        "names. With id it changes that shortcut.",
+                        "Make or change a shortcut: a small program the board runs, like Siri Shortcuts: on a tile tap, at "
+                        "times, every N minutes, at start-up, sunrise or sunset, on the Interaction board's motion or "
+                        "buttons, or when a Swifty Home device changes. Steps: Home commands (home_status names the rooms "
+                        "and devices), waits, TV remote keys, the board's lights, brightness, apps, the flashlight, "
+                        "messages, ifs, repeats, variables and other shortcuts. The board checks it and says what to fix. "
+                        "One that starts by itself needs the person to tap Allow on the board's screen; say so. "
+                        "Example: {\"name\":\"Night\",\"triggers\":[{\"on\":\"time\",\"at\":\"23:00\",\"days\":\"weekdays\"}],"
+                        "\"steps\":[{\"do\":\"if\",\"if\":{\"check\":\"home\",\"device\":\"TV\",\"is\":\"on\"},"
+                        "\"then\":[{\"do\":\"message\",\"text\":\"TV still on\",\"sound\":true}],"
+                        "\"else\":[{\"do\":\"home\",\"verb\":\"lights_off\",\"target\":\"all\"}]}]}",
                         add_schema.c_str(), add_tool);
-    swifty_app_add_tool("list_shortcuts", "The home screen's shortcuts: their numbers (ids, kept when others are deleted), names and steps.",
+    swifty_app_add_tool("list_shortcuts",
+                        "The shortcuts: numbers (ids, kept when others are deleted), names, on or off, what starts them, "
+                        "their steps, the next scheduled run and how the last run went.",
                         R"({"type":"object","properties":{},"required":[]})", list_tool);
-    swifty_app_add_tool("run_shortcut",
-                        "Run a shortcut now, as a tap on its tile does, and say how it went. It switches real devices.",
+    swifty_app_add_tool("get_shortcut", "One shortcut as JSON (to change it with add_shortcut) and its last run's log.",
                         R"({"type":"object","properties":{"id":{"type":"integer"},"name":{"type":"string","description":"Instead of id"}},"required":[]})",
+                        get_tool);
+    swifty_app_add_tool("run_shortcut",
+                        "Run a shortcut now, as a tap on its tile does, and say how it went, step by step. It switches real "
+                        "devices; dry_run true checks every step and sends nothing (waits are skipped).",
+                        R"({"type":"object","properties":{"id":{"type":"integer"},"name":{"type":"string","description":"Instead of id"},"dry_run":{"type":"boolean"}},"required":[]})",
                         run_tool);
-    swifty_app_add_tool("delete_shortcut", "Delete a shortcut and its tile, by its number (from list_shortcuts). Ask first.",
-                        R"({"type":"object","properties":{"id":{"type":"integer"}},"required":["id"]})", delete_tool);
+    swifty_app_add_tool("enable_shortcut",
+                        "Switch a shortcut on or off. Off, its schedules and sensors no longer start it (a tap still does).",
+                        R"({"type":"object","properties":{"id":{"type":"integer"},"name":{"type":"string","description":"Instead of id"},"on":{"type":"boolean"}},"required":["on"]})",
+                        enable_tool);
+    swifty_app_add_tool("delete_shortcut", "Delete a shortcut (and its tile), by its number from list_shortcuts. Ask first.",
+                        R"({"type":"object","properties":{"id":{"type":"integer"},"name":{"type":"string","description":"Instead of id"}},"required":[]})",
+                        delete_tool);
 }
 
-// ---- web settings and RPC 55 (their tasks) -----------------------------------------------
+// ---- Web settings and RPC 55 (their tasks) -----------------------------------------------
 template <size_t N> void names_json(JsonArray a, const char *const(&names)[N])
 {
     for (const char *n : names) {
@@ -1224,23 +1654,63 @@ template <size_t N> void names_json(JsonArray a, const char *const(&names)[N])
     }
 }
 
-// light: from RPC 55, whose task has a small stack: nothing that asks Home
-// (names are then resolved when the shortcut runs; the starters wait for the
-// LVGL timer).
+void status_json(uint32_t id, JsonObject o)
+{
+    const RunStatus st = status_of(id);
+    o["running"] = st.running;
+    if (!st.ran) {
+        return;
+    }
+    o["ok"] = st.ok;
+    o["dry"] = st.dry;
+    o["source"] = source_name(st.source);
+    if (st.at) {
+        o["at"] = when_text(st.at);
+    }
+    o["message"] = st.message;
+    JsonArray log = o["log"].to<JsonArray>();
+    for (const std::string &l : st.log) {
+        log.add(l);
+    }
+}
 
+// A test: a dry run of an unsaved shortcut (or a saved one), waited for.
+std::string test_reply(Ptr sc, uint32_t key, bool *ok_out, bool wait)
+{
+    auto outcome = std::make_shared<Outcome>();
+    std::string why;
+    if (!enqueue(sc, key, true, Source::Test, outcome, &why)) {
+        return error_json(why);
+    }
+    JsonDocument out;
+    out["reply"] = "ok";
+    *ok_out = true;
+    if (!wait) {
+        out["queued"] = true;
+        return json_text(out);
+    }
+    if (!wait_for(outcome, 25000)) {
+        out["message"] = "Still running: its log comes with the list.";
+        return json_text(out);
+    }
+    out["ok"] = outcome->ok;
+    out["message"] = outcome->message;
+    JsonArray log = out["log"].to<JsonArray>();
+    for (const std::string &l : outcome->log) {
+        log.add(l);
+    }
+    return json_text(out);
+}
+
+// light: from RPC 55, whose reply waits: nothing that asks Home (names are
+// then resolved when the shortcut runs; the starters wait for the LVGL timer)
+// and nothing that waits for a run.
 std::string apply(const char *json, size_t length, bool *ok_out, bool light)
 {
     JsonDocument in, out;
     *ok_out = false;
-    auto fail = [&](const std::string & why) {
-        JsonDocument e;
-        e["error"] = why;
-        std::string text;
-        serializeJson(e, text);
-        return text;
-    };
-    if (deserializeJson(in, json, length) || !in.is<JsonObject>()) {
-        return fail("expected a JSON object");
+    if (read_json(in, json, length) || !in.is<JsonObject>()) {
+        return error_json("expected a JSON object");
     }
     const std::string op = in["op"] | "";
     std::string error;
@@ -1248,31 +1718,88 @@ std::string apply(const char *json, size_t length, bool *ok_out, bool light)
         Shortcut sc;
         uint32_t id = 0;
         if (!parse_shortcut(in["shortcut"].as<JsonObjectConst>(), sc, error) || !store(sc, error, &id, !light)) {
-            return fail(error);
+            return error_json(error);
         }
         out["id"] = id;
+    } else if (op == "test") {
+        Ptr sc;
+        uint32_t key = 0;
+        if (in["shortcut"].is<JsonObjectConst>()) {
+            auto made = std::make_shared<Shortcut>();
+            if (!parse_shortcut(in["shortcut"].as<JsonObjectConst>(), *made, error) ||
+                    (!light && (!resolve_home_steps(*made, error) || !check_home_names(*made, error)))) {
+                return error_json(error);
+            }
+            {
+                std::lock_guard<std::mutex> g(lock);
+                if (!resolve_runs_locked(*made, error)) {
+                    return error_json(error);
+                }
+            }
+            sc = made;
+        } else {
+            key = in["id"] | 0u;
+            sc = find(key);
+            if (!sc) {
+                return error_json("no such shortcut");
+            }
+        }
+        return test_reply(sc, key, ok_out, !light);
     } else if (op == "delete") {
         std::string name;
-        if (!remove(in["id"] | 0u, name)) {
-            return fail("no such shortcut");
+        if (!remove_one(in["id"] | 0u, name)) {
+            return error_json("no such shortcut");
         }
-    } else if (op == "run") {
-        if (!queue_run(in["id"] | 0u, in["dry_run"] | false, nullptr)) {
-            return fail("no such shortcut, or too many running");
+    } else if (op == "run" || op == "fire") {
+        // fire: as a trigger would start it (quiet, asking first), to try automations.
+        static const char *const FIRES[] = {"time", "every", "boot", "motion", "button", "home", "sun"};
+        Source source = op == "run" ? (light ? Source::Rpc : Source::Web) : Source::Time;
+        if (op == "fire") {
+            const std::string as = in["as"] | "time";
+            for (int i = 0; i < 7; ++i)
+                if (as == FIRES[i]) {
+                    source = Source(int(Source::Time) + i);
+                }
+        }
+        Ptr p = find(in["id"] | 0u);
+        std::string why = "no such shortcut";
+        if (!p || !enqueue(p, p->id, in["dry_run"] | false, source, nullptr, &why)) {
+            return error_json(why);
+        }
+    } else if (op == "stop") {
+        stop(in["id"] | 0u);
+    } else if (op == "enable") {
+        Ptr p = find(in["id"] | 0u);
+        if (!p || !set_enabled(p->id, in["on"] | true, error)) {
+            return error_json(p ? error : "no such shortcut");
         }
     } else if (op == "move") {
         std::lock_guard<std::mutex> g(lock);
         const uint32_t id = in["id"] | 0u;
-        auto it = std::find_if(list.begin(), list.end(), [id](const Shortcut & s) {
-            return s.id == id;
+        auto it = std::find_if(list.begin(), list.end(), [id](const Ptr & p) {
+            return p->id == id;
         });
         if (it == list.end()) {
-            return fail("no such shortcut");
+            return error_json("no such shortcut");
         }
         const size_t to = std::min<size_t>(size_t(std::max(0, in["to"] | 0)), list.size() - 1);
-        Shortcut sc = std::move(*it);
+        Ptr p = *it;
         list.erase(it);
-        list.insert(list.begin() + long(to), std::move(sc));
+        list.insert(list.begin() + long(to), p);
+        changed_locked();
+    } else if (op == "location") {
+        std::lock_guard<std::mutex> g(lock);
+        if (in["lat"].isNull()) {
+            location = Location();
+        } else {
+            const float lat = in["lat"] | 1000.0f, lon = in["lon"] | 1000.0f;
+            if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+                return error_json("latitude -90 to 90, longitude -180 to 180 (decimal degrees)");
+            }
+            location.set = true;
+            location.lat = lat;
+            location.lon = lon;
+        }
         changed_locked();
     } else if (op == "starters" && light) {
         starters_wanted.store(true);
@@ -1283,379 +1810,269 @@ std::string apply(const char *json, size_t length, bool *ok_out, bool light)
             starters = starters_from_home();
         });
         if (starters.empty()) {
-            return fail("Swifty Home has not answered yet (or has no lights)");
+            return error_json("Swifty Home has not answered yet (or has no lights)");
         }
         out["added"] = add_starters(starters);
     } else if (op == "editor") {
         // Opens the board's editor (a test hook, as RPC 30 opens apps).
         if (!on_ui([] { lv_async_call([](void *)
     {
-        shortcuts_editor_open();
+        ui_editor_open();
         }, nullptr);
                       }, 1000)) {
-            return fail("the screen is busy");
+            return error_json("the screen is busy");
         }
     } else if (op == "dry_run") {
         dry_all.store(in["on"] | true);
         out["dry_run"] = dry_all.load();
     } else {
-        return fail("op: save, delete, run, move, starters, editor or dry_run");
+        return error_json("op: save, test, delete, run, fire, stop, enable, move, location, starters, editor or dry_run");
     }
     out["reply"] = "ok";
     *ok_out = true;
-    std::string text;
-    serializeJson(out, text);
-    return text;
+    return json_text(out);
 }
 
-// Payload: a JSON change as Web settings sends (see shortcuts.h), or nothing
-// (or {"op":"list"}) for the list. The reply is text.
+// A change from RPC 55 runs on a helper task: the RPC task's 4 KB stack is
+// too small for a shortcut's nested JSON and checks. The reply waits for it.
+struct RpcChange {
+    std::string json, reply;
+    TaskHandle_t caller;
+};
+
+void rpc_change_task(void *arg)
+{
+    auto *held = static_cast<std::shared_ptr<RpcChange> *>(arg);
+    std::shared_ptr<RpcChange> job = *held;
+    delete held;
+    bool ok;
+    job->reply = apply(job->json.data(), job->json.size(), &ok, true);
+    xTaskNotifyGive(job->caller);
+    vTaskDeleteWithCaps(nullptr);  // its stack is in PSRAM
+}
+
+std::string rpc_change(const char *json, size_t length)
+{
+    auto job = std::make_shared<RpcChange>();
+    job->json.assign(json, length);
+    job->caller = xTaskGetCurrentTaskHandle();
+    auto *held = new std::shared_ptr<RpcChange>(job);
+    ulTaskNotifyTake(pdTRUE, 0);
+    if (xTaskCreatePinnedToCoreWithCaps(rpc_change_task, "shortcuts-rpc", 12288, held, 2, nullptr, tskNO_AFFINITY,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        delete held;
+        return error_json("out of memory");
+    }
+    if (!ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5000))) {
+        return error_json("no answer in time");
+    }
+    return job->reply;
+}
+
+// Payload: a JSON change as Web settings sends (see shortcuts.h), a question
+// ({"op":"list"}, {"op":"get","id":N}, {"op":"log","id":N}, {"op":"next"};
+// "from": a later page of a long answer), or nothing for the list. Replies
+// are text, cut to the reply's size.
 esp_err_t rpc(const esp_iris_rpc_request_t *request, uint8_t *out, size_t cap, size_t *size, void *)
 {
     std::string reply;
     JsonDocument op;
-    const bool listing = request->payload_size == 0 ||
-                         (!deserializeJson(op, reinterpret_cast<const char *>(request->payload), request->payload_size) &&
-                          op["op"] == "list");
-    if (listing) {
+    // Questions are flat; anything nested deeper is a change, read on the helper task.
+    const bool parsed = request->payload_size &&
+                        !deserializeJson(op, reinterpret_cast<const char *>(request->payload), request->payload_size,
+                                         DeserializationOption::NestingLimit(2));
+    const std::string what = parsed ? std::string(op["op"] | "") : std::string(request->payload_size ? "" : "list");
+    if (what == "list") {
         reply = list_text(false);
-        std::lock_guard<std::mutex> g(lock);
-        if (!last_result.empty()) {
-            reply += "Last run: " + last_result + "\n";
-        }
         if (dry_all.load()) {
             reply += "Every run is a dry run.\n";
         }
+    } else if (what == "get") {
+        Ptr p = find(op["id"] | 0u);
+        if (p) {
+            JsonDocument doc;
+            shortcut_json(*p, doc.to<JsonObject>());
+            reply = json_text(doc);
+        } else {
+            reply = "No such shortcut.";
+        }
+    } else if (what == "log") {
+        reply = log_text(op["id"] | 0u);
+    } else if (what == "next") {
+        for (const Ptr &p : list_copy()) {
+            const std::string next = next_text(*p);
+            if (p->enabled && !next.empty()) {
+                reply += std::to_string(p->id) + " " + p->name + ": " + next + "\n";
+            }
+        }
+        std::lock_guard<std::mutex> g(lock);
+        if (reply.empty()) {
+            reply = "Nothing scheduled.";
+        }
+        if (location.set) {
+            char t[64];
+            snprintf(t, sizeof(t), "Location %.2f, %.2f\n", double(location.lat), double(location.lon));
+            reply += t;
+        }
     } else {
-        bool ok;
-        reply = apply(reinterpret_cast<const char *>(request->payload), request->payload_size, &ok, true);
+        reply = rpc_change(reinterpret_cast<const char *>(request->payload), request->payload_size);
     }
-    *size = std::min(cap, reply.size());
-    memcpy(out, reply.data(), *size);
+    const size_t from = std::min<size_t>(parsed ? size_t(op["from"] | 0) : 0, reply.size());
+    *size = std::min(cap, reply.size() - from);
+    memcpy(out, reply.data() + from, *size);
     return ESP_OK;
 }
+}  // namespace
 
-// ---- the board's own editor (LVGL task) --------------------------------------------------
-// A full-panel sheet over any app (the top layer): the shortcuts, each one's
-// steps with Run, Test (a dry run) and Delete, and New: lights off, on or
-// toggled for all lights or a room, or a scene, in two taps without a
-// keyboard. More steps are made in Web settings or by Swifty.
-enum class EditorPage : uint8_t { List, Detail, New };
-struct {
-    lv_obj_t *root = nullptr, *page = nullptr, *targets = nullptr;
-    EditorPage go_page = EditorPage::List;
-    uint32_t go_id = 0, delete_armed = 0;
-    int kind = 0;  // New: 0 lights off, 1 on, 2 toggle, 3 a scene
-} E;
-
-void editor_show(EditorPage page, uint32_t id);
-
-// Pages change after the tap that asked (the tapped object is on the old page).
-void editor_go(EditorPage page, uint32_t id = 0)
+// ---- the engine, for the screens (shortcuts_internal.h) ----------------------------------
+std::vector<std::shared_ptr<const Shortcut>> list_copy()
 {
-    E.go_page = page;
-    E.go_id = id;
-    lv_async_call([](void *) {
-        if (E.root) {
-            editor_show(E.go_page, E.go_id);
-        }
-    }, nullptr);
+    std::lock_guard<std::mutex> g(lock);
+    return list;
 }
 
-// What a step does, in words, from here (the LVGL task may ask Home itself).
-std::string describe_here(const Step &s)
+std::shared_ptr<const Shortcut> find(uint32_t id)
 {
-    if (s.kind == Do::Home && home_app_ready()) {
+    std::lock_guard<std::mutex> g(lock);
+    return find_locked(id);
+}
+
+RunStatus status_of(uint32_t id)
+{
+    std::lock_guard<std::mutex> g(lock);
+    auto it = statuses.find(id);
+    return it == statuses.end() ? RunStatus() : it->second;
+}
+
+bool start(uint32_t id, bool dry, Source source)
+{
+    Ptr p = find(id);
+    std::string why;
+    return p && enqueue(p, id, dry, source, nullptr, &why);
+}
+
+void stop(uint32_t id)
+{
+    std::lock_guard<std::mutex> g(lock);
+    for (const Active &a : active)
+        if (a.key == id) {
+            a.stop->store(true);
+        }
+    // One still waiting goes without running.
+    for (auto it = jobs.begin(); it != jobs.end();) {
+        if (it->key == id) {
+            if (it->outcome) {
+                it->outcome->message = "Stopped.";
+                it->outcome->done.store(true);
+            }
+            statuses[id].running = false;
+            it = jobs.erase(it);
+            ++rev;
+        } else {
+            ++it;
+        }
+    }
+}
+
+bool set_enabled(uint32_t id, bool on, std::string &error)
+{
+    return modify(id, error, [on](Shortcut & sc) {
+        sc.enabled = on;
+    });
+}
+
+bool set_tile(uint32_t id, bool on, std::string &error)
+{
+    return modify(id, error, [on](Shortcut & sc) {
+        auto &ts = sc.triggers;
+        ts.erase(std::remove_if(ts.begin(), ts.end(), [](const Trigger & t) {
+            return t.kind == On::Tile;
+        }), ts.end());
+        if (on) {
+            ts.insert(ts.begin(), Trigger());
+        }
+    });
+}
+
+bool erase(uint32_t id, std::string &name)
+{
+    return remove_one(id, name);
+}
+
+bool add_made(Shortcut sc, std::string &error)
+{
+    uint32_t id = 0;
+    return store(std::move(sc), error, &id, false);
+}
+
+bool name_taken(const std::string &name)
+{
+    std::lock_guard<std::mutex> g(lock);
+    return std::any_of(list.begin(), list.end(), [&](const Ptr & p) {
+        return !strcasecmp(p->name.c_str(), name.c_str());
+    });
+}
+
+std::string action_words(const Action &a)
+{
+    if (a.kind == Do::Home && home_app_ready()) {
         std::string what, resolved;
-        home_app_resolve(s.verb.c_str(), s.target.c_str(), s.value.c_str(), what, resolved);
+        home_app_resolve(a.verb.c_str(), a.target.c_str(), a.value.c_str(), what, resolved);
         if (!what.empty()) {
             return what;
         }
     }
-    return describe(s, false);
+    return action_text(a);
 }
 
-std::string steps_text(const Shortcut &sc, const char *joint)
+std::string home_choices()
 {
-    std::string text;
-    for (size_t i = 0; i < sc.steps.size(); ++i) {
-        text += (i ? joint : "") + describe_here(sc.steps[i]);
+    return home_app_choices_json();
+}
+
+std::string next_text(const Shortcut &sc)
+{
+    const time_t now = time(nullptr);
+    if (now < CLOCK_SET) {
+        return "";
     }
-    return text;
-}
-
-lv_obj_t *round_button(lv_obj_t *parent, int x, int y, const char *glyph, lv_event_cb_t cb, void *user = nullptr)
-{
-    lv_obj_t *b = box(parent, x, y, 48, 48, 24);
-    lv_obj_set_style_bg_color(b, lv_color_hex(FIELD), 0);
-    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-    lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
-    press_fx(b);
-    icon(b, glyph, 12, 12, 24, TEXT, 2.2f);
-    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, user);
-    return b;
-}
-
-lv_obj_t *scroller(lv_obj_t *parent, int y, int h)
-{
-    lv_obj_t *s = box(parent, 40, y, PANEL - 80, h);
-    lv_obj_add_flag(s, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(s, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(s, LV_SCROLLBAR_MODE_OFF);
-    return s;
-}
-
-// A row in a list: a badge with a glyph, a title and a line under it.
-lv_obj_t *row(lv_obj_t *list, int y, const char *glyph, const Accent &a, const std::string &title, const std::string &sub,
-              lv_event_cb_t cb, void *user)
-{
-    const int w = PANEL - 80, h = sub.empty() ? 56 : 66;
-    lv_obj_t *r = glass(list, 0, y, w, h, 20, a);
-    lv_obj_add_flag(r, LV_OBJ_FLAG_CLICKABLE);
-    press_fx(r);
-    lv_obj_t *badge = box(r, 10, (h - 40) / 2, 40, 40, 20);
-    lv_obj_set_style_bg_color(badge, lv_color_hex(a.glow), 0);
-    lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
-    icon(badge, glyph, 9, 9, 22, a.ink, 2.2f);
-    lv_obj_t *t = label(r, title.c_str(), 62, sub.empty() ? (h - 22) / 2 : 11, w - 76, TEXT, 17, true);
-    lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_DOTS);
-    if (!sub.empty()) {
-        lv_obj_t *d = label(r, sub.c_str(), 62, 37, w - 76, TEXT3, 13);
-        lv_label_set_long_mode(d, LV_LABEL_LONG_MODE_DOTS);
-    }
-    lv_obj_add_event_cb(r, cb, LV_EVENT_CLICKED, user);
-    return r;
-}
-
-lv_obj_t *page_frame(const char *title, bool back)
-{
-    if (E.page) {
-        lv_obj_delete(E.page);
-    }
-    E.targets = nullptr;
-    E.page = box(E.root, 0, 0, PANEL, PANEL);
-    lv_obj_t *t = label(E.page, title, 48, 44, back ? 300 : 320, TEXT, 26, true);
-    lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_DOTS);
-    round_button(E.page, PANEL - 96, 36, back ? "back" : "x", [](lv_event_t *e) {
-        const bool back = lv_event_get_user_data(e) != nullptr;
-        if (back) {
-            editor_go(EditorPage::List);
-        } else {
-            lv_async_call([](void *) {
-                if (E.root) {
-                    lv_obj_delete(E.root);
-                    E.root = E.page = E.targets = nullptr;
-                }
-            }, nullptr);
-        }
-    }, back ? reinterpret_cast<void *>(1) : nullptr);
-    return E.page;
-}
-
-void list_page()
-{
-    lv_obj_t *p = page_frame("Shortcuts", false);
-    std::vector<Shortcut> copy;
+    Location loc;
     {
         std::lock_guard<std::mutex> g(lock);
-        copy = list;
+        loc = location;
     }
-    lv_obj_t *s = scroller(p, 100, 286);
-    int y = 0;
-    for (const Shortcut &sc : copy) {
-        row(s, y, sc.icon.c_str(), *ACCENT_STYLES[sc.accent % 4], sc.name, steps_text(sc, ", then "), [](lv_event_t *e) {
-            editor_go(EditorPage::Detail, uint32_t(uintptr_t(lv_event_get_user_data(e))));
-        }, reinterpret_cast<void *>(uintptr_t(sc.id)));
-        y += 76;
-    }
-    if (copy.empty()) {
-        lv_obj_t *n = label(s, "No shortcuts yet. New makes one; Web settings and Swifty can make longer ones.", 8, 8,
-                            PANEL - 96, TEXT2, 16);
-        wrap_label(n);
-    }
-    lv_obj_t *add = fill_button(p, 96, 400, PANEL - 192, 50, "New shortcut", VIOLET, 17);
-    lv_obj_add_event_cb(add, [](lv_event_t *) {
-        editor_go(EditorPage::New);
-    }, LV_EVENT_CLICKED, nullptr);
-    if (copy.size() >= MAX_COUNT) {
-        lv_obj_add_state(add, LV_STATE_DISABLED);
-    }
-    stagger(s, 0, 24);
-}
-
-void detail_page(uint32_t id)
-{
-    Shortcut sc;
-    if (!find_copy(id, sc)) {
-        return list_page();
-    }
-    lv_obj_t *p = page_frame(sc.name.c_str(), true);
-    lv_obj_t *steps = label(p, steps_text(sc, "\n").c_str(), 48, 104, PANEL - 96, TEXT2, 17);
-    wrap_label(steps);
-    lv_obj_set_height(steps, 150);
-    void *user = reinterpret_cast<void *>(uintptr_t(id));
-    lv_obj_t *run = fill_button(p, 48, 280, 184, 52, "Run", *ACCENT_STYLES[sc.accent % 4], 17);
-    lv_obj_add_event_cb(run, [](lv_event_t *e) {
-        shortcuts_run(uint32_t(uintptr_t(lv_event_get_user_data(e))));
-    }, LV_EVENT_CLICKED, user);
-    lv_obj_t *test = field_button(p, 248, 280, 184, 52, "Test (dry run)", 16);
-    lv_obj_add_event_cb(test, [](lv_event_t *e) {
-        shortcuts_run(uint32_t(uintptr_t(lv_event_get_user_data(e))), true);
-    }, LV_EVENT_CLICKED, user);
-    E.delete_armed = 0;
-    lv_obj_t *del = field_button(p, 48, 348, PANEL - 96, 52, "Delete", 16, RED);
-    lv_obj_add_event_cb(del, [](lv_event_t *e) {
-        const uint32_t id = uint32_t(uintptr_t(lv_event_get_user_data(e)));
-        lv_obj_t *button = static_cast<lv_obj_t *>(lv_event_get_current_target(e));
-        if (E.delete_armed != id) {
-            E.delete_armed = id;  // a second tap deletes
-            lv_obj_t *text = lv_obj_get_child(button, 0);
-            if (text) {
-                set_text(text, "Tap again to delete it and its tile");
-            }
-            return;
-        }
-        std::string name;
-        if (remove(id, name)) {
-            toast(name, "x", 0, Feedback::Done, "Deleted, with its tile");
-        }
-        editor_go(EditorPage::List);
-    }, LV_EVENT_CLICKED, user);
-    label(p, "Edit its steps in Web settings, or ask Swifty.", 48, 416, PANEL - 96, TEXT3, 13, false, LV_TEXT_ALIGN_CENTER);
-}
-
-// New: what (lights off, on, toggled, a scene), then which.
-const char *const KIND_LABELS[] = {"Off", "On", "Toggle", "Scene"};
-
-void fill_targets();
-
-void target_tapped(lv_event_t *e)
-{
-    // The row's user data: "<target>\x1f<title>" (target_keys holds it).
-    const char *packed = static_cast<const char *>(lv_event_get_user_data(e));
-    const char *sep = strchr(packed, '\x1f');
-    if (!sep) {
-        return;
-    }
-    const std::string target(packed, sep), title(sep + 1);
-    Shortcut sc;
-    Step s;
-    s.kind = Do::Home;
-    if (E.kind == 3) {
-        s.verb = "scene";
-        s.value = target;
-        sc.name = title;
-        sc.icon = "house", sc.accent = 1;
-    } else {
-        s.verb = E.kind == 0 ? "lights_off" : E.kind == 1 ? "lights_on" : "lights_toggle";
-        s.target = target;
-        sc.name = title + (E.kind == 0 ? " lights off" : E.kind == 1 ? " lights on" : " lights");
-        if (target == "all") {
-            sc.name = E.kind == 0 ? "All lights off" : E.kind == 1 ? "All lights on" : "All lights";
-        }
-        sc.icon = E.kind == 0 ? "power" : "bulb";
-        sc.accent = E.kind == 0 ? 0 : 2;
-    }
-    sc.name = trimmed(sc.name, MAX_NAME);
-    sc.steps.push_back(s);
-    {
-        std::lock_guard<std::mutex> g(lock);
-        for (const Shortcut &x : list)
-            if (!strcasecmp(x.name.c_str(), sc.name.c_str())) {
-                toast(sc, Feedback::Failed, "There is one with that name");
-                return;
-            }
-    }
-    std::string error;
-    uint32_t id = 0;
-    if (!store(sc, error, &id, false)) {  // the targets came from Home: nothing to resolve
-        toast(sc, Feedback::Failed, error);
-        return;
-    }
-    toast(sc, Feedback::Done, "Added to the home screen");
-    editor_go(EditorPage::List);
-}
-
-std::vector<std::string> target_keys;  // the rows' user data (kept while they are shown)
-
-void fill_targets()
-{
-    if (!E.targets) {
-        return;
-    }
-    lv_obj_clean(E.targets);
-    target_keys.clear();
-    std::vector<std::pair<std::string, std::string>> choices;  // target, title
-    std::string note;
-    if (!home_app_ready()) {
-        note = "Swifty Home has not answered yet (pair it in Home).";
-    } else {
-        JsonDocument doc;
-        deserializeJson(doc, home_app_choices_json());
-        if (E.kind == 3) {
-            for (JsonObjectConst sc : doc["scenes"].as<JsonArrayConst>()) {
-                choices.push_back({sc["id"] | "", sc["name"] | (sc["id"] | "")});
-            }
-            if (choices.empty()) {
-                note = "Swifty Home has no scenes.";
-            }
-        } else {
-            if (doc["lights"].as<JsonArrayConst>().size()) {
-                choices.push_back({"all", "All lights"});
-            }
-            for (JsonObjectConst r : doc["rooms"].as<JsonArrayConst>())
-                if ((r["lights"] | 0) > 0) {
-                    choices.push_back({r["id"] | "", r["name"] | ""});
-                }
-            if (choices.empty()) {
-                note = "Swifty Home has no lights.";
-            }
+    time_t best = 0;
+    for (const Trigger &t : sc.triggers) {
+        const time_t at = next_fire(t, now, loc);
+        if (at && (!best || at < best)) {
+            best = at;
         }
     }
-    target_keys.reserve(choices.size());
-    int y = 0;
-    const Accent &a = E.kind == 3 ? CYAN : E.kind == 0 ? VIOLET : AMBER;
-    const char *glyph = E.kind == 3 ? "house" : E.kind == 0 ? "power" : "bulb";
-    for (const auto &[target, title] : choices) {
-        target_keys.push_back(target + '\x1f' + title);
-        row(E.targets, y, glyph, a, title, "", target_tapped, const_cast<char *>(target_keys.back().c_str()));
-        y += 64;
-    }
-    if (!note.empty()) {
-        lv_obj_t *n = label(E.targets, note.c_str(), 8, 8, PANEL - 96, TEXT2, 16);
-        wrap_label(n);
-    }
+    return when_text(best);
 }
 
-void new_page()
+uint32_t revision()
 {
-    lv_obj_t *p = page_frame("New shortcut", true);
-    lv_obj_t *c = capsule(p, 40, 102, PANEL - 80, 46, KIND_LABELS, 4, E.kind, VIOLET, 16);
-    lv_obj_add_event_cb(c, [](lv_event_t *e) {
-        E.kind = capsule_selected(static_cast<lv_obj_t *>(lv_event_get_current_target(e)));
-        fill_targets();
-    }, LV_EVENT_VALUE_CHANGED, nullptr);
-    E.targets = scroller(p, 164, 238);
-    fill_targets();
-    label(p, "Longer ones: Web settings, or ask Swifty.", 48, 416, PANEL - 96, TEXT3, 13, false, LV_TEXT_ALIGN_CENTER);
+    return rev.load();
 }
 
-void editor_show(EditorPage page, uint32_t id)
+void board_wake()
 {
-    E.go_page = page;  // the page in view (Back reads it)
-    E.go_id = id;
-    if (page == EditorPage::Detail) {
-        detail_page(id);
-    } else if (page == EditorPage::New) {
-        new_page();
-    } else {
-        list_page();
-    }
-    if (T.pill) {
-        lv_obj_move_foreground(T.pill);  // a toast stays over the sheet
-    }
+    always_on_wake();
 }
-}  // namespace
+
+void board_buzz()
+{
+    haptics_pulse(HapticPulse::Tap);
+}
+
+void board_chime()
+{
+    glimdock_app_play_reminder();
+}
+}  // namespace shortcuts
+
+using namespace shortcuts;
 
 void shortcuts_start(const ShortcutHooks &hooks)
 {
@@ -1665,64 +2082,81 @@ void shortcuts_start(const ShortcutHooks &hooks)
     esp_iris_rpc_register(0x4744, 55, rpc, nullptr);
     // Runs wait and block (the Interaction board), never on the LVGL task.
     // Below LVGL's drawing (3); HTTP is Home's own worker, and nothing here
-    // writes flash, so the stack can be in PSRAM.
-    xTaskCreatePinnedToCoreWithCaps(runner_task, "shortcuts", 10240, nullptr, 2, &runner, tskNO_AFFINITY,
-                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    // writes flash, so the stacks can be in PSRAM. Three, so that a long
+    // automation (a wait of minutes) leaves taps free.
+    static const char *const NAMES[RUNNERS] = {"shortcuts", "shortcuts2", "shortcuts3"};
+    for (int i = 0; i < RUNNERS; ++i) {
+        xTaskCreatePinnedToCoreWithCaps(runner_task, NAMES[i], 16384, nullptr, 2, &runners[i], tskNO_AFFINITY,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
     lv_timer_create(check, 1000, nullptr);
 }
 
 void shortcuts_editor_open()
 {
-    if (E.root) {
-        return;
-    }
-    E.root = box(lv_layer_top(), 0, 0, PANEL, PANEL);
-    lv_obj_set_style_bg_color(E.root, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(E.root, LV_OPA_COVER, 0);
-    lv_obj_add_flag(E.root, LV_OBJ_FLAG_CLICKABLE);  // takes the taps meant for the app under it
-    E.kind = 0;
-    editor_show(EditorPage::List, 0);
+    ui_editor_open();
 }
 
 bool shortcuts_editor_back()
 {
-    if (!E.root) {
-        return false;
-    }
-    if (E.go_page != EditorPage::List) {
-        editor_show(EditorPage::List, 0);
-    } else {
-        lv_obj_delete(E.root);
-        E.root = E.page = E.targets = nullptr;
-    }
-    return true;
+    return ui_editor_back();
 }
 
 bool shortcuts_run(uint32_t id, bool dry_run)
 {
-    return queue_run(id, dry_run, nullptr);
+    return start(id, dry_run, Source::Tile);
 }
 
 std::string shortcuts_web_list()
 {
     JsonDocument doc;
+    JsonArray arr = doc["shortcuts"].to<JsonArray>();
+    for (const auto &p : list_copy()) {
+        JsonObject o = arr.add<JsonObject>();
+        shortcut_json(*p, o);
+        status_json(p->id, o["last"].to<JsonObject>());
+        const std::string next = next_text(*p);
+        if (!next.empty() && p->enabled) {
+            o["next"] = next;
+        }
+    }
     {
         std::lock_guard<std::mutex> g(lock);
-        JsonArray arr = doc["shortcuts"].to<JsonArray>();
-        for (const Shortcut &sc : list) {
-            shortcut_json(sc, arr.add<JsonObject>());
+        if (location.set) {
+            doc["location"]["lat"] = location.lat;
+            doc["location"]["lon"] = location.lon;
         }
-        doc["last"] = last_result;
     }
     doc["dry_run"] = dry_all.load();
-    std::string choices = "{}";
+    std::string choices = "{}", states = "[]";
     on_ui([&] {
         choices = home_app_choices_json();
+        if (home_app_ready()) {
+            states = home_app_states_json();
+        }
     });
-    JsonDocument home;
+    JsonDocument home, devices;
     deserializeJson(home, choices);
+    deserializeJson(devices, states);
+    // Home's commands: these, and any more Home lists itself.
+    JsonArray verbs = doc["verbs"].to<JsonArray>();
+    names_json(verbs, HOME_VERBS);
+    for (JsonVariantConst v : home["verbs"].as<JsonArrayConst>())
+        if (v.is<const char *>() && index_of(HOME_VERBS, v.as<const char *>()) < 0) {
+            verbs.add(v.as<const char *>());
+        }
     doc["home"] = home;
-    names_json(doc["verbs"].to<JsonArray>(), HOME_VERBS);
+    // Names for conditions and triggers: devices that switch or report a temperature, and rooms.
+    JsonArray names = doc["devices"].to<JsonArray>();
+    for (JsonObjectConst d : devices.as<JsonArrayConst>()) {
+        if (d["on"].is<bool>() || d["temp"].is<float>()) {
+            JsonObject n = names.add<JsonObject>();
+            n["name"] = d["name"] | "";
+            n["room"] = d["room"] | "";
+            n["switch"] = d["on"].is<bool>();
+            n["temp"] = d["temp"].is<float>();
+        }
+    }
     names_json(doc["ir_keys"].to<JsonArray>(), IR_KEYS);
     names_json(doc["board_modes"].to<JsonArray>(), BOARD_MODES);
     names_json(doc["apps"].to<JsonArray>(), APPS);
@@ -1730,9 +2164,9 @@ std::string shortcuts_web_list()
     names_json(doc["icons"].to<JsonArray>(), ICONS);
     names_json(doc["accents"].to<JsonArray>(), ACCENTS);
     doc["max"] = MAX_COUNT;
-    std::string text;
-    serializeJson(doc, text);
-    return text;
+    doc["max_steps"] = MAX_NODES;
+    doc["max_depth"] = MAX_DEPTH;
+    return json_text(doc);
 }
 
 std::string shortcuts_web_apply(const char *json, size_t length, bool *ok)

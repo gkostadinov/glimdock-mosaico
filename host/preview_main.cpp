@@ -28,6 +28,7 @@
 #include "weather.h"
 void weather_host_demo(int which);  // weather_host.cpp: which made-up forecast shows
 #include "games_app.h"
+#include "shortcuts_internal.h"
 // games_ui.cpp: the preview's synchronous frames and screens
 extern "C" void games_app_preview_frame(void);
 extern "C" void games_app_preview_mode(int mode);
@@ -583,6 +584,49 @@ void render_launcher(int radius)
     launcher_ui_calibration(false, radius);
 }
 
+// The shortcuts' screens (shortcuts_ui.cpp over host/shortcuts_host.cpp's
+// demo shortcuts): the editor's list, a shortcut's page and its run's log,
+// New, the card that asks before an automation, a message and a toast.
+void render_shortcuts()
+{
+    lv_display_t *display = lv_display_get_default();
+    lv_obj_t *screen = lv_obj_create(nullptr);
+    lv_obj_remove_style_all(screen);
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+    lv_screen_load(screen);
+    shortcuts::ui_editor_open();
+    save("shortcuts-list", display);
+    tap({240, 100 + 76 + 33});  // Evening, the second row
+    run_for(300);
+    save("shortcuts-detail", display);
+    lv_obj_t *s = scroller(lv_layer_top());
+    if (s) {
+        lv_obj_scroll_to_y(s, 2000, LV_ANIM_OFF);
+    }
+    save("shortcuts-detail-log", display);
+    shortcuts::ui_editor_back();
+    tap({240, 100 + 2 * 76 + 33});  // Hall motion: an automation that is off
+    run_for(300);
+    save("shortcuts-automation", display);
+    shortcuts::ui_editor_back();
+    tap({240, 425});  // New shortcut
+    run_for(300);
+    save("shortcuts-new", display);
+    shortcuts::ui_editor_back();
+    shortcuts::ui_editor_back();
+    shortcuts::ui_ask("Evening", "Swifty wants this to run by itself: 15 min before sunset; At 19:30 on weekdays.\n"
+                      "If Desk lamp is off:\n   Living room lights on\nRepeat 3 times:", "Allow", 60, [](bool) {});
+    save("shortcuts-ask", display);
+    tap({128, 72 + 262 + 25});  // Not now
+    run_for(300);
+    shortcuts::ui_message("Hall motion", "Someone is in the hall: the lights stay on for two minutes.", 3, true, false);
+    save("shortcuts-message", display);
+    shortcuts::ui_toast("Movie", "tv", 1, shortcuts::Feedback::Failed, "Step 2: No Interaction board found");
+    save("shortcuts-toast", display);
+    run_for(13000);  // the message and the toast go
+}
+
 }  // namespace
 
 int main(int argc, char **argv)
@@ -610,6 +654,7 @@ int main(int argc, char **argv)
     loadFixture(data, networkState);
     publishedSnapshot = &data;
     render_launcher(radius);
+    render_shortcuts();
     {
         tools_hooks_t th = {};
         th.gravity = [](float * x, float * y, float * z) {

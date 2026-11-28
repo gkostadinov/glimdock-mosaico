@@ -48,6 +48,7 @@ struct Snapshot {
     int slot = -1, light = -1, light_raw = 0;
     int64_t motion_at = 0;  // the last motion, esp_timer microseconds (0: none yet)
     uint32_t leds[LEDS] = {};
+    uint32_t left_presses = 0, right_presses = 0, motions = 0;  // rising edges, for shortcuts
 };
 
 std::mutex lock;
@@ -58,6 +59,7 @@ std::atomic<uint32_t> flash_colour{0};
 std::atomic<int64_t> flash_at{0};
 constexpr int64_t FLASH_US = 450000;
 std::atomic<int64_t> wanted_until{0};  // Swifty asked: look for the board until then
+std::atomic<bool> watched{false};      // shortcuts start on its motion or buttons
 std::atomic<int> mode{OFF};
 std::atomic<uint32_t> colour{PALETTE[0]};
 std::atomic<uint32_t> ir_request{0};  // 0x10000 | address << 8 | command
@@ -73,7 +75,7 @@ Snapshot read_snapshot()
 
 bool searching()
 {
-    return visible || gaming || mode != OFF || esp_timer_get_time() < wanted_until;
+    return visible || gaming || watched || mode != OFF || esp_timer_get_time() < wanted_until;
 }
 
 uint32_t hue_rgb(float h)  // h in degrees, full saturation and value
@@ -186,6 +188,9 @@ void worker(void *)
         const bool read = mosaico_interact_read_inputs(board, &in) == ESP_OK;
         if (read) {
             std::lock_guard<std::mutex> g(lock);
+            snap.left_presses += in.left_pressed && !snap.left;
+            snap.right_presses += in.right_pressed && !snap.right;
+            snap.motions += in.motion_detected && !snap.motion;
             snap.left = in.left_pressed;
             snap.right = in.right_pressed;
             snap.motion = in.motion_detected;
@@ -612,4 +617,27 @@ extern "C" bool tools_board_ir(const char *key, int address, int command, char *
         snprintf(out, cap, "Could not send: %s", read_snapshot().present ? "the infrared LED failed." : "no Interaction board is plugged in.");
     }
     return ok;
+}
+
+// ---- Shortcuts (any task) --------------------------------------------------------------------
+extern "C" void tools_board_watch(bool on)
+{
+    interact::watched = on;
+}
+
+extern "C" bool tools_board_inputs(tools_board_inputs_t *out, int wait_ms)
+{
+    using namespace interact;
+    const Snapshot s = wait_ms > 0 ? settle(wait_ms) : read_snapshot();
+    *out = {};
+    out->light = -1;
+    out->motion_age_s = -1;
+    if (!s.present) {
+        return false;
+    }
+    out->left = s.left, out->right = s.right, out->motion = s.motion;
+    out->light = s.light;
+    out->motion_age_s = s.motion_at ? int32_t((esp_timer_get_time() - s.motion_at) / 1000000) : -1;
+    out->left_presses = s.left_presses, out->right_presses = s.right_presses, out->motions = s.motions;
+    return true;
 }

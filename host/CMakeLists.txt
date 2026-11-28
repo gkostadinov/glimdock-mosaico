@@ -107,3 +107,13 @@ target_link_libraries(mosaico-preview PRIVATE lvgl Threads::Threads)
 # the migration from before widgets were items (run build-host/launcher-layout-test).
 add_executable(launcher-layout-test launcher_layout_test.cpp "${IDEA}/components/mosaico_shell/src/launcher_layout.cpp")
 target_include_directories(launcher-layout-test PRIVATE "${IDEA}/components/mosaico_shell/src")
+
+# The shortcuts' screens over a stand-in engine, and the host tests of their
+# programs (run build-host/shortcuts-test).
+target_sources(mosaico-preview PRIVATE
+    "${IDEA}/components/mosaico_shell/src/shortcuts_ui.cpp"
+    "${IDEA}/components/mosaico_shell/src/shortcuts_program.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/shortcuts_host.cpp")
+add_executable(shortcuts-test shortcuts_test.cpp "${IDEA}/components/mosaico_shell/src/shortcuts_program.cpp")
+target_include_directories(shortcuts-test PRIVATE "${IDEA}/components/mosaico_shell/src" "${ARDUINOJSON}")
+target_compile_definitions(shortcuts-test PRIVATE ARDUINOJSON_ENABLE_ARDUINO_STRING=0 ARDUINOJSON_ENABLE_ARDUINO_STREAM=0)

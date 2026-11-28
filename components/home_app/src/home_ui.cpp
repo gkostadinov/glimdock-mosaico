@@ -2944,3 +2944,54 @@ std::string home_app_choices_json()
     serializeJson(doc, out);
     return out;
 }
+
+std::string home_app_states_json()
+{
+    using namespace home;
+    JsonDocument doc;
+    JsonArray out = doc.to<JsonArray>();
+    if (hub.devices) {
+        JsonObjectConst readings = hub.state ? (*hub.state)["devices"].as<JsonObjectConst>() : JsonObjectConst();
+        for (JsonObjectConst dev : (*hub.devices)["devices"].as<JsonArrayConst>()) {
+            if (dev["enabled"] == false) {
+                continue;
+            }
+            const char *target = dev["target"] | "";
+            JsonObjectConst r = readings[target].as<JsonObjectConst>();
+            JsonObjectConst st = r["state"].as<JsonObjectConst>();
+            JsonObject o = out.add<JsonObject>();
+            o["target"] = target;
+            o["name"] = r["name"] | (dev["name"] | target);
+            o["room"] = room_of(target)["name"] | "";
+            o["class"] = dev["class"] | "";
+            o["known"] = r["available"] == true && st.size() > 0;
+            if (st["on"].is<bool>()) {
+                o["on"] = st["on"].as<bool>();
+            }
+            // The first temperature it reports: indoor (air conditioners), then a sensor's.
+            for (const char *key : {"indoor", "temperature", "temp", "current_temperature"}) {
+                if (st[key].is<float>() || st[key].is<long>()) {
+                    o["temp"] = st[key].as<float>();
+                    break;
+                }
+            }
+        }
+    }
+    std::string text;
+    serializeJson(doc, text);
+    return text;
+}
+
+bool home_app_asks_first(const char *verb, const char *target, const char *value)
+{
+    using namespace home;
+    Plan plan;
+    if (!hub.paired() || !plan_command(verb ? verb : "", target ? target : "", value ? value : "", plan)) {
+        return false;
+    }
+    for (const Planned &p : plan.acts)
+        if (hub.flow(p.action) == "prepare_confirm") {
+            return true;
+        }
+    return false;
+}
