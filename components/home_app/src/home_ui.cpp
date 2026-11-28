@@ -13,6 +13,7 @@
 #include <memory>
 
 #include "display_clock.h"
+#include "home_actions.h"
 #include "home_app.h"
 #include "home_icons.h"
 #include "home_model.h"
@@ -88,7 +89,8 @@ const lv_font_t *font(float size, bool semi)
 }
 
 // ---- app state ---------------------------------------------------------------
-enum class Page { Pair, Edit, Home, Lights, Music, Pets, Confirm, Settings };
+// New pages go at the end: the host preview opens pages by number.
+enum class Page { Pair, Edit, Home, Lights, Music, Pets, Confirm, Settings, Climate, Printer, Device };
 struct EditState {
     std::string title, text, mode = "lower";
     bool upper_only = false;
@@ -102,7 +104,19 @@ struct {
     bool has_rendered = false;
     DocPtr prep;
     std::string prep_name, prep_target, noresp, last_scene, pending_pets;
+    std::string focus;  // the device the Climate or Device page shows
     std::map<std::string, int> drag;
+    // An air conditioner's temperature being stepped: shown at once and sent
+    // once the taps stop (web cards/aircon.js), so each tap is not a trip to
+    // the vendor's cloud. step < 0: none.
+    struct {
+        std::string target;
+        int value = -1;
+        uint32_t generation = 0;
+    } step;
+    bool estop_armed = false;  // the printer's emergency stop takes a second tap
+    std::map<std::string, int> values;  // a plugin action's number being set, by action
+    float mark_y = 0;  // where Home's switches start (the host preview scrolls there)
     struct {
         std::string text, kind;
         uint32_t at = 0;
@@ -422,6 +436,13 @@ lv_obj_t *scroller(lv_obj_t *root, float y)
     return G.scroller;
 }
 
+// Room after a page's last line, so scrolling brings it clear of the panel's
+// rounded bottom corners.
+void end_space(lv_obj_t *sc, float y)
+{
+    plain(sc, 0, y, 1, 40);
+}
+
 // An lv_slider used only for its drag gesture: invisible, over a drawn fill.
 struct Drag {
     std::function<void(int, bool)> fn;
@@ -496,19 +517,20 @@ RunHandler after_run(const std::string &name, const std::string &target = std::s
     };
 }
 
-// Runs an action by its catalog flow: direct, or prepare -> confirm page.
-void act(const std::string &action, const std::string &target, JsonDocument params, const std::string &label,
-         const std::string &name = std::string())
+// Runs an action (home_actions.h) by its catalog flow: direct, or prepare ->
+// confirm page. A display may not do what its catalog does not list.
+void act(Command c, const std::string &label, const std::string &name = std::string())
 {
-    const std::string flow = hub.flow(action);
+    const std::string flow = hub.flow(c.action);
     const std::string who = name.empty() ? label : name;
-    if (!hub.can(action)) {
+    const std::string target = c.target;
+    if (!hub.can(c.action)) {
         lean_settle(target, false);
         toast("This display may not do that.", "fail");
         return;
     }
     if (flow == "prepare_confirm") {
-        hub.prepare(action, target, std::move(params), [who, target](const DocPtr & prep, const std::string & error) {
+        hub.prepare(c.action, target, std::move(c.params), [who, target](const DocPtr & prep, const std::string & error) {
             if (!prep) {
                 lean_settle(target, false);
                 toast(error, "fail");
@@ -520,36 +542,19 @@ void act(const std::string &action, const std::string &target, JsonDocument para
             open(Page::Confirm);
         });
     } else if (flow == "direct") {
-        hub.execute(action, target, std::move(params), after_run(who, target));
+        hub.execute(c.action, target, std::move(c.params), after_run(who, target));
     } else {
         lean_settle(target, false);
         toast("That needs a passkey. Use your phone.", "fail");
     }
 }
 
-JsonDocument param(const char *key, bool value)
+std::string lowered(std::string s)
 {
-    JsonDocument d;
-    d[key] = value;
-    return d;
-}
-JsonDocument param(const char *key, int value)
-{
-    JsonDocument d;
-    d[key] = value;
-    return d;
-}
-JsonDocument param(const char *key, const std::string &value)
-{
-    JsonDocument d;
-    d[key] = value;
-    return d;
-}
-JsonDocument no_params()
-{
-    JsonDocument d;
-    d.to<JsonObject>();
-    return d;
+    for (char &ch : s) {
+        ch = char(tolower(uint8_t(ch)));
+    }
+    return s;
 }
 
 // ---- rooms ---------------------------------------------------------------------------
@@ -709,19 +714,13 @@ void tile(lv_obj_t *root, float x, float y, float w, float h, bool lights)
             }
             if (!here.isNull()) {
                 const std::string id = here["id"] | "";
-                if (v == 0) {
-                    act("room.power", id, param("on", false), "lights");
-                } else {
-                    act("room.brightness", id, param("percent", v), "lights");
-                }
-            } else if (v == 0) {
-                act("lights.power", "all_bulbs", param("on", false), "lights");
+                act(v == 0 ? cmd::room_power(id, false) : cmd::room_brightness(id, v), "lights");
             } else {
-                act("lights.brightness", "all_bulbs", param("percent", std::max(1, v)), "lights");
+                act(v == 0 ? cmd::lights_power(false) : cmd::lights_brightness(v), "lights");
             }
         } else if (G.d.speaker) {
             lean(G.d.speaker->target, "vol", v);
-            act("speaker.volume", G.d.speaker->target, param("level", v), "speaker");
+            act(cmd::speaker_volume(G.d.speaker->target, v), "speaker");
         }
     });
     lv_obj_t *open_area = plain(cardo, w - 40, 0, 40, 36);
@@ -735,16 +734,13 @@ void tile(lv_obj_t *root, float x, float y, float w, float h, bool lights)
 float scenes_bar(lv_obj_t *root, float y)
 {
     JsonObjectConst room = picked_room();
+    // level: a room's brightness (0 turns it off); -1 a scene of the house's.
     struct Scene {
-        const char *label, *action, *target;
+        const char *label, *target;
         int level;
     };
-    static const Scene all[] = {{"Movie", "scene.movie", "movie", -1}, {"Evening", "scene.apply", "evening", -1},
-        {"Lights off", "scene.apply", "all_off", -1}
-    };
-    static const Scene in_room[] = {{"Bright", "room.brightness", "", 100}, {"Relax", "room.brightness", "", 35},
-        {"Off", "room.power", "", 0}, {"Movie", "scene.movie", "movie", -1}
-    };
+    static const Scene all[] = {{"Movie", cmd::MOVIE, -1}, {"Evening", "evening", -1}, {"Lights off", "all_off", -1}};
+    static const Scene in_room[] = {{"Bright", "", 100}, {"Relax", "", 35}, {"Off", "", 0}, {"Movie", cmd::MOVIE, -1}};
     const std::string room_id = room.isNull() ? "" : std::string(room["id"] | "");
     const std::string room_name = room.isNull() ? "" : std::string(room["name"] | "");
     const bool tv_here = !room.isNull() && G.d.tv && room_id == (room_of(G.d.tv->target)["id"] | "");
@@ -764,17 +760,32 @@ float scenes_bar(lv_obj_t *root, float y)
             const Scene s = names[mui::capsule_selected(bar)];
             G.last_scene = room_id + "/" + s.label;
             if (s.level > 0) {
-                act(s.action, room_id, param("percent", s.level), room_name + " " + s.label, "lights");
+                act(cmd::room_brightness(room_id, s.level), room_name + " " + s.label, "lights");
             } else if (s.level == 0) {
-                act(s.action, room_id, param("on", false), room_name + " " + s.label, "lights");
+                act(cmd::room_power(room_id, false), room_name + " " + s.label, "lights");
             } else
             {
-                act(s.action, s.target, no_params(), s.label, "lights");
+                act(!strcmp(s.target, cmd::MOVIE) ? cmd::scene_movie() : cmd::scene_apply(s.target), s.label, "lights");
             }
         }};
     lv_obj_add_event_cb(bar, run_change, LV_EVENT_VALUE_CHANGED, ch);
     lv_obj_add_event_cb(bar, free_change, LV_EVENT_DELETE, ch);
     return y + 48;
+}
+
+// Whether this TV takes the remote's key (its keys capability lists them; a
+// TV that does not say takes the hub's whole list).
+bool tv_key_offered(JsonObjectConst dev, const char *key)
+{
+    JsonArrayConst keys = capability(dev, "keys")["keys"].as<JsonArrayConst>();
+    if (keys.isNull()) {
+        return true;
+    }
+    for (JsonVariantConst k : keys)
+        if (strcmp(k | "", key) == 0) {
+            return true;
+        }
+    return false;
 }
 
 float tv_bar(lv_obj_t *root, float y)
@@ -801,14 +812,15 @@ float tv_bar(lv_obj_t *root, float y)
         if (!strcmp(k.icon, "power")) {
             RoundOpts r;
             r.active = on;
+            r.disabled = !hub.can("tv.power", target);
             round_button(bar, x, 7, size, "power", [target, on] {
-                act("tv.power", target, param("on", !on), on ? "Turn off the TV" : "Turn on the TV", "TV");
+                act(cmd::tv_power(target, !on), on ? "Turn off the TV" : "Turn on the TV", "TV");
             }, r);
         } else {
             RoundOpts r;
-            r.disabled = !on;
+            r.disabled = !on || !tv_key_offered(tv->dev, k.key);
             const std::string key = k.key;
-            round_button(bar, x, 7, size, k.icon, [target, key] { act("tv.key", target, param("key", key), "TV", "TV"); }, r);
+            round_button(bar, x, 7, size, k.icon, [target, key] { act(cmd::tv_key(target, key), "TV", "TV"); }, r);
         }
         x += size + gap;
     }
@@ -825,23 +837,74 @@ void cap_button(lv_obj_t *root, float x, float y, float w, const char *icon_name
     click(pressable(b), std::move(fn));
 }
 
-float plug_row(lv_obj_t *root, float y, const Item &item, const char *action, const std::string &words)
+// A switch's state in a word, or what it is waiting for.
+std::string switch_words(const Item &item)
+{
+    if (!item.known) {
+        return item.reason.empty() ? "Not reporting" : item.reason;
+    }
+    if (leaning(item.target)) {
+        return item.on ? "Turning on\xE2\x80\xA6" : "Turning off\xE2\x80\xA6";
+    }
+    return item.on ? "On" : "Off";
+}
+
+// A toggle that switches a device with plug.power or ac.power, holding the
+// new state until the device agrees.
+void power_toggle(lv_obj_t *parent, float x, float y, const Item &item, bool is_ac)
+{
+    const std::string target = item.target, name = item.name;
+    const bool on = item.on;
+    const char *action = is_ac ? "ac.power" : "plug.power";
+    toggle(parent, x, y, on, [target, name, on, is_ac] {
+        lean(target, "on", !on);
+        act(is_ac ? cmd::ac_power(target, !on) : cmd::plug_power(target, !on), name, lowered(name));
+    }, !item.known || !hub.can(action, target));
+}
+
+// One switch across the page (web pages/home.js plugTile).
+float switch_row(lv_obj_t *root, float y, const Item &item)
 {
     const float w = VIEW - 2 * PAD;
     lv_obj_t *cardo = card(root, PAD, y, w, 58);
     text(cardo, item.name, 14, 10, w - 80, c.text, 12, semi());
-    dot(cardo, 14, 37, 6, item.on ? c.ok : c.dot_off);
-    text(cardo, words, 26, 33, w - 90, c.text2, 10);
-    const std::string target = item.target, name = item.name, act_name = action;
-    const bool on = item.on;
-    std::string lower = name;
-    for (auto &ch : lower) {
-        ch = char(tolower((unsigned char)ch));
+    dot(cardo, 14, 37, 6, item.known && item.on ? c.ok : c.dot_off);
+    text(cardo, switch_words(item), 26, 33, w - 90, c.text2, 10);
+    power_toggle(cardo, w - 58, 16, item, false);
+    return y + 66;
+}
+
+// Two or more switches: tiles two to a row, the name over the state and toggle.
+void switch_tile(lv_obj_t *root, float x, float y, float w, const Item &item)
+{
+    lv_obj_t *cardo = card(root, x, y, w, 70);
+    text(cardo, item.name, 12, 10, w - 24, c.text, fit(item.name, w - 24, 12, true, 10), semi());
+    dot(cardo, 12, 47, 6, item.known && item.on ? c.ok : c.dot_off);
+    text(cardo, switch_words(item), 23, 43, w - 23 - 58, c.text2, 10);
+    power_toggle(cardo, w - 54, 34, item, false);
+}
+
+// An air conditioner (web acTile): power here; the rest on its Climate page.
+float ac_row(lv_obj_t *root, float y, const Item &a)
+{
+    const float w = VIEW - 2 * PAD;
+    lv_obj_t *cardo = card(root, PAD, y, w, 58);
+    lv_obj_t *opener = plain(cardo, 0, 0, w - 66, 58);
+    icon(opener, "snow", 13, 9, 16, c.tint_soft, 1.4f);
+    text(opener, a.name, 34, 10, w - 120, c.text, 12, semi());
+    std::string words = leaning(a.target) && a.known ? std::string("Changing\xE2\x80\xA6") : ac_words(a);
+    if (a.known && !a.indoor.empty()) {
+        words += " \xC2\xB7 " + a.indoor + "\xC2\xB0 inside";
     }
-    toggle(cardo, w - 58, 16, on, [target, name, lower, on, act_name] {
-        lean(target, "on", !on);
-        act(act_name, target, param("on", !on), name, lower);
-    }, !hub.can(action) || !item.known);
+    dot(opener, 14, 37, 6, a.known && a.on ? c.ok : c.dot_off);
+    text(opener, words, 26, 33, w - 104, c.text2, 10);
+    icon(opener, "chev", w - 84, 22, 13, c.text3, 1.4f);
+    const std::string target = a.target;
+    click(opener, [target] {
+        G.focus = target;
+        open(Page::Climate);
+    });
+    power_toggle(cardo, w - 58, 16, a, true);
     return y + 66;
 }
 
@@ -925,20 +988,26 @@ void home_page()
         y += 124;
     }
     y = tv_bar(sc, y);
+    // Switches: one across the page, more two to a row.
+    G.mark_y = y;
+    std::vector<const Item *> switches;
     for (const Item &p : G.d.plugs)
         if (in_view(p.target)) {
-            y = plug_row(sc, y, p, "plug.power", p.known ? (p.on ? "On" : "Off") : (p.reason.empty() ? "Not reporting" : p.reason));
+            switches.push_back(&p);
         }
-    for (const Item &a : G.d.acs) {
-        if (!in_view(a.target)) {
-            continue;
+    if (switches.size() == 1) {
+        y = switch_row(sc, y, *switches[0]);
+    } else if (!switches.empty()) {
+        const float half = (full - 8) / 2;
+        for (size_t i = 0; i < switches.size(); ++i) {
+            switch_tile(sc, PAD + (i % 2) * (half + 8), y + (i / 2) * 78, half, *switches[i]);
         }
-        std::string words = a.known ? (a.on ? (a.mode.empty() ? "On" : a.mode) + (a.temp.empty() ? "" : " to " + a.temp + "\xC2\xB0") : "Off") : "Not reporting";
-        if (a.known && !a.indoor.empty()) {
-            words += " \xC2\xB7 " + a.indoor + "\xC2\xB0 inside";
-        }
-        y = plug_row(sc, y, a, "ac.power", words);
+        y += ((switches.size() + 1) / 2) * 78;
     }
+    for (const Item &a : G.d.acs)
+        if (in_view(a.target)) {
+            y = ac_row(sc, y, a);
+        }
     struct Small {
         const char *icon;
         std::string label, word;
@@ -963,10 +1032,14 @@ void home_page()
     if (G.d.printer && in_view(G.d.printer->target)) {
         const Item &p = *G.d.printer;
         std::string word = !p.known ? "not reporting" : p.state == "printing" ? std::to_string(int(floor(p.pct + 0.5))) + "% done" : p.state;
-        smalls.push_back({"printer", "Printer", word, [] {}, false});
+        smalls.push_back({"printer", "Printer", word, [] { open(Page::Printer); }, false});
     }
     for (const Item &o : G.d.others)
-        if (in_view(o.target)) smalls.push_back({"tech", o.name, o.known ? "" : "not reporting", [] {}, false});
+        if (in_view(o.target)) {
+            std::string word = !o.known ? "not reporting" : o.readings.empty() ? "" : o.readings[0].second;
+            const std::string target = o.target;
+            smalls.push_back({"tech", o.name, word, [target] { G.focus = target; open(Page::Device); }, false});
+        }
     const float half = (full - 8) / 2;
     for (size_t i = 0; i < smalls.size(); ++i) {
         cap_button(sc, PAD + (i % 2) * (half + 8), y + (i / 2) * 52, half, smalls[i].icon, smalls[i].label, smalls[i].word, smalls[i].fn, smalls[i].alert);
@@ -979,7 +1052,9 @@ void home_page()
     }
     if (!hub.status.connected && !hub.status.message.empty()) {
         text(sc, hub.status.message, PAD + 2, y + 4, full, c.amber, 10, wrapped());
+        y += 24;
     }
+    end_space(sc, y);
 }
 
 // ---- sub-pages ---------------------------------------------------------------------------
@@ -989,6 +1064,57 @@ struct Hue {
 };
 const Hue HUES[] = {{"Warm", 34}, {"Cool", 210}, {"Red", 0}, {"Orange", 28}, {"Yellow", 52}, {"Green", 120}, {"Blue", 225}, {"Purple", 270}, {"Pink", 320}};
 
+// The hub's scenes as a row of pills: on All, the house's (Focus too, which
+// Home's bar leaves out); in a room, the scenes saved for it (room.scene).
+float scene_pills(lv_obj_t *sc, float y, JsonObjectConst room)
+{
+    struct Choice {
+        std::string label;
+        Command command;
+    };
+    std::vector<Choice> choices;
+    const std::string room_id = room.isNull() ? std::string() : std::string(room["id"] | "");
+    if (room.isNull()) {
+        JsonArrayConst scenes = hub.scenes ? (*hub.scenes)["scenes"].as<JsonArrayConst>() : JsonArrayConst();
+        for (JsonObjectConst s : scenes) {
+            const std::string id = s["id"] | "", name = s["name"] | (s["id"] | "");
+            const bool movie = id == cmd::MOVIE;
+            if (hub.can(movie ? "scene.movie" : "scene.apply", id)) {
+                choices.push_back({name, movie ? cmd::scene_movie() : cmd::scene_apply(id)});
+            }
+        }
+    } else if (hub.can("room.scene", room_id)) {
+        for (JsonObjectConst s : room["scenes"].as<JsonArrayConst>()) {
+            const std::string name = s["name"] | "";
+            if (!name.empty()) {
+                choices.push_back({name, cmd::room_scene(room_id, name)});
+            }
+        }
+    }
+    if (choices.empty()) {
+        return y;
+    }
+    lv_obj_t *row = plain(sc, PAD, y, VIEW - 2 * PAD, 38, 2);
+    lv_obj_set_scrollbar_mode(row, LV_SCROLLBAR_MODE_OFF);
+    float x = 0;
+    for (const Choice &ch : choices) {
+        const float wpx = text_w(ch.label, 12, true) + 30;
+        const std::string key = room_id + "/" + ch.label;
+        PillOpts p;
+        p.size = 12;
+        p.on = G.last_scene == key;
+        const Command command = ch.command;
+        const std::string label = ch.label;
+        pill(row, x, 1, wpx, 34, label, [key, command, label] {
+            G.last_scene = key;
+            act(command, "the " + label + " scene", "lights");
+            dirty();
+        }, p);
+        x += wpx + 6;
+    }
+    return y + 44;
+}
+
 void lights_page()
 {
     JsonObjectConst room = picked_room();
@@ -996,19 +1122,17 @@ void lights_page()
     lv_obj_t *sc = scroller(G.root, 40);
     float y = 4;
     const auto bulbs = room_bulbs(room);
+    y = scene_pills(sc, y, room);
     for (const Item &b : bulbs) {
         const float w = VIEW - 2 * PAD;
         lv_obj_t *cardo = card(sc, PAD, y, w, b.color ? 128 : 96);
         text(cardo, b.name, 14, 10, w - 80, c.text, 12, semi());
         text(cardo, b.known ? (b.on ? std::to_string(b.bri) + "%" : "Off") : "Not reporting", 14, 28, w - 80, c.text2, 10);
-        std::string lower = b.name;
-        for (auto &ch : lower) {
-            ch = char(tolower((unsigned char)ch));
-        }
+        const std::string lower = lowered(b.name);
         const std::string target = b.target, name = b.name;
         const bool on = b.on;
-        toggle(cardo, w - 58, 12, on, [ = ] { lean(target, "on", !on); act("light.power", target, param("on", !on), name, lower); },
-               !b.known || !hub.can("light.power"));
+        toggle(cardo, w - 58, 12, on, [ = ] { lean(target, "on", !on); act(cmd::light_power(target, !on), name, lower); },
+               !b.known || !hub.can("light.power", target));
         const float bw = w - 28;
         BoxOpts track_o;
         track_o.bg = c.field;
@@ -1049,12 +1173,12 @@ void lights_page()
             lean(target, "on", nv > 0);
             if (nv > 0) {
                 lean(target, "bri", nv);
-                act("light.brightness", target, param("percent", std::max(10, nv)), name, lower);
+                act(cmd::light_brightness(target, std::max(10, nv)), name, lower);
             } else {
-                act("light.power", target, param("on", false), name, lower);
+                act(cmd::light_power(target, false), name, lower);
             }
         });
-        if (b.color && hub.can("light.hue")) {
+        if (b.color && hub.can("light.hue", target)) {
             const float cw = (bw - 8 * 4) / 9;
             for (int i = 0; i < 9; ++i) {
                 const Hue h = HUES[i];
@@ -1070,7 +1194,7 @@ void lights_page()
                     lv_obj_set_style_outline_color(chip, lv_color_hex(c.text), 0);
                 }
                 const int hue = h.hue;
-                click(chip, [ = ] { lean(target, "hue", hue); act("light.hue", target, param("hue", hue), name, lower); });
+                click(chip, [ = ] { lean(target, "hue", hue); act(cmd::light_hue(target, hue), name, lower); });
             }
         }
         y += b.color ? 136 : 104;
@@ -1131,7 +1255,7 @@ void music_page()
             G.drag.erase("music");
             dirty();
             lean(target, "vol", nv);
-            act("speaker.volume", target, param("level", nv), "Volume", "speaker");
+            act(cmd::speaker_volume(target, nv), "Volume", "speaker");
         });
         const float bwid = (bw - 18) / 4;
         struct B {
@@ -1141,15 +1265,17 @@ void music_page()
         };
         const bool mute = sp.mute, night = sp.night;
         const B buttons[] = {
-            {mute ? "Unmute" : "Mute", [ = ] { lean(target, "mute", !mute); act("speaker.mute", target, param("muted", !mute), "Mute", "speaker"); }, mute},
-            {"Night", [ = ] { act("speaker.night", target, param("on", !night), "Night mode", "speaker"); }, night},
-            {"Play", [ = ] { act("speaker.play", target, no_params(), "Play", "speaker"); }, sp.playing},
-            {"Pause", [ = ] { act("speaker.pause", target, no_params(), "Pause", "speaker"); }, false},
+            {mute ? "Unmute" : "Mute", [ = ] { lean(target, "mute", !mute); act(cmd::speaker_mute(target, !mute), "Mute", "speaker"); }, mute},
+            {"Night", [ = ] { act(cmd::speaker_night(target, !night), "Night mode", "speaker"); }, night},
+            {"Play", [ = ] { act(cmd::speaker_play(target), "Play", "speaker"); }, sp.playing},
+            {"Pause", [ = ] { act(cmd::speaker_pause(target), "Pause", "speaker"); }, false},
         };
+        static const char *const actions[] = {"speaker.mute", "speaker.night", "speaker.play", "speaker.pause"};
         for (int i = 0; i < 4; ++i) {
             PillOpts p;
             p.on = buttons[i].on;
             p.size = 10;
+            p.disabled = !sp.known || !hub.can(actions[i], target);
             pill(cardo, 14 + i * (bwid + 6), 80, bwid, 26, buttons[i].label, buttons[i].fn, p);
         }
         y += 120;
@@ -1163,13 +1289,16 @@ void music_page()
         const bool on = tv.on;
         RoundOpts r;
         r.active = on;
-        round_button(cardo, w - 50, 10, 36, "power", [ = ] { act("tv.power", target, param("on", !on), on ? "Turn off the TV" : "Turn on the TV", "TV"); }, r);
+        r.disabled = !tv.known || !hub.can("tv.power", target);
+        round_button(cardo, w - 50, 10, 36, "power", [ = ] { act(cmd::tv_power(target, !on), on ? "Turn off the TV" : "Turn on the TV", "TV"); }, r);
+        const bool keys = on && hub.can("tv.key", target);
         auto key = [&](float x, float yy, const char *label, const char *k, const char *icon_name) {
+            const bool usable = keys && tv_key_offered(tv.dev, k);
             BoxOpts o;
             o.radius = 12;
             o.field = true;
-            o.fill = !strcmp(k, "ok") && on;
-            o.opa = on ? 255 : 110;
+            o.fill = !strcmp(k, "ok") && usable;
+            o.opa = usable ? 255 : 110;
             lv_obj_t *b = pressable(box(cardo, x, yy, 46, 34, o));
             if (icon_name) {
                 icon(b, icon_name, 14, 8, 18, c.text, 1.3f);
@@ -1177,7 +1306,7 @@ void music_page()
                 text(b, label, 0, 9, 46, c.text, 10, semi(LV_TEXT_ALIGN_CENTER));
             }
             const std::string ks = k, ls = label;
-            if (on) click(b, [ = ] { act("tv.key", target, param("key", ks), ls, "TV"); });
+            if (usable) click(b, [ = ] { act(cmd::tv_key(target, ks), ls, "TV"); });
         };
         const float cx = 22, cy = 56;
         key(cx + 50, cy, "Up", "up", "up");
@@ -1201,8 +1330,8 @@ void music_page()
             PillOpts p;
             p.on = on && tv.input == name;
             p.size = 9;
-            p.disabled = !on;
-            pill(cardo, 14 + i * (iw + 4), 182, iw, 28, name, [ = ] { act("tv.input", target, param("input", name), name, "TV"); }, p);
+            p.disabled = !on || !hub.can("tv.input", target);
+            pill(cardo, 14 + i * (iw + 4), 182, iw, 28, name, [ = ] { act(cmd::tv_input(target, name), name, "TV"); }, p);
             ++i;
         }
     }
@@ -1219,9 +1348,16 @@ void pets_page()
         lv_obj_t *cardo = card(sc, PAD, y, w, 120);
         text(cardo, f.name, 14, 10, w - 28, c.text, 12, semi());
         text(cardo, f.known ? (f.last.empty() ? "No feed yet" : "Last fed " + f.last) : "Not reporting", 14, 28, w - 28, c.text2, 10);
+        // The portions the feeder offers, within what the hub's pets.feed takes
+        // (10 to 50 g): a portion outside it would be refused as invalid.
+        int lo = cmd::GRAMS_MIN, hi = cmd::GRAMS_MAX;
+        hub.int_range("pets.feed", "grams", lo, hi);
         std::vector<int> grams;
         for (JsonVariantConst g : capability(f.dev, "dispense")["grams"].as<JsonArrayConst>()) {
-            grams.push_back(g | 0);
+            const int v = g | 0;
+            if (v >= lo && v <= hi && grams.size() < 6) {
+                grams.push_back(v);
+            }
         }
         if (grams.empty()) grams = {10, 20, 30, 40, 50};
         const float gw = (w - 28 - (float(grams.size()) - 1) * 6) / float(grams.size());
@@ -1229,9 +1365,9 @@ void pets_page()
         for (size_t i = 0; i < grams.size(); ++i) {
             const int g = grams[i];
             PillOpts p;
-            p.disabled = !f.known || !hub.can("pets.feed");
+            p.disabled = !f.known || !hub.can("pets.feed", target);
             pill(cardo, 14 + i * (gw + 6), 56, gw, 34, std::to_string(g) + " g",
-                 [ = ] { act("pets.feed", target, param("grams", g), "Feed " + std::to_string(g) + " g", "feeder"); }, p);
+                 [ = ] { act(cmd::pets_feed(target, g), "Feed " + std::to_string(g) + " g", "feeder"); }, p);
         }
         text(cardo, "Feeding asks you to confirm.", 14, 98, w - 28, c.text3, 9);
         y += 128;
@@ -1242,10 +1378,363 @@ void pets_page()
         text(cardo, lb.name, 14, 10, w - 28, c.text, 12, semi());
         text(cardo, lb.known ? (lb.busy ? "Cleaning\xE2\x80\xA6" : lb.last.empty() ? "Ready" : "Last cleaned " + lb.last) : "Not reporting", 14, 28, w - 28, c.text2, 10);
         PillOpts p;
-        p.disabled = !lb.known || lb.busy || !hub.can("pets.clean");
         const std::string target = lb.target;
-        pill(cardo, 14, 50, w - 28, 32, "Clean cycle", [ = ] { act("pets.clean", target, no_params(), "Clean cycle", "litter box"); }, p);
+        p.disabled = !lb.known || lb.busy || !hub.can("pets.clean", target);
+        pill(cardo, 14, 50, w - 28, 32, "Clean cycle", [ = ] { act(cmd::pets_clean(target), "Clean cycle", "litter box"); }, p);
     }
+}
+
+// ---- climate, printer and other devices ------------------------------------------------
+const Item *focused(const std::vector<Item> &list)
+{
+    for (const Item &i : list)
+        if (i.target == G.focus) {
+            return &i;
+        }
+    return nullptr;
+}
+
+// A round button with a sign on it (the temperature's minus and plus).
+void sign_button(lv_obj_t *parent, float x, float y, float size, const char *sign, std::function<void()> fn, bool disabled)
+{
+    BoxOpts o;
+    o.radius = size;
+    o.field = true;
+    o.opa = disabled ? 110 : 255;
+    lv_obj_t *b = box(parent, x, y, size, size, o);
+    text(b, sign, 0, (size - 22 * 1.25f) / 2, size, c.text, 22, semi(LV_TEXT_ALIGN_CENTER));
+    if (fn && !disabled) {
+        click(pressable(b), std::move(fn));
+    }
+}
+
+// The words for the hub's modes and fan speeds (web pages/home.js AC_MODES_SHOWN, AC_FANS_SHOWN).
+std::string ac_label(const std::string &word)
+{
+    static const char *const known[][2] = {
+        {"auto", "Auto"}, {"cool", "Cool"}, {"heat", "Heat"}, {"dry", "Dry"}, {"fan", "Fan"}, {"quiet", "Quiet"},
+        {"low", "Low"}, {"medium_low", "Med-low"}, {"medium", "Medium"}, {"medium_high", "Med-high"}, {"high", "High"}
+    };
+    for (const auto &k : known)
+        if (word == k[0]) {
+            return k[1];
+        }
+    return sentence(word);
+}
+
+// What this unit says it accepts (its capability), within what the hub's
+// action takes: a word outside the catalog's enum would be refused.
+std::vector<std::string> ac_choices(const Item &a, const char *cap, const char *list, const char *action, const char *param)
+{
+    const std::vector<std::string> allowed = hub.enum_values(action, param);
+    std::vector<std::string> out;
+    for (JsonVariantConst v : capability(a.dev, cap)[list].as<JsonArrayConst>()) {
+        const std::string word = v | "";
+        if (allowed.empty() || std::find(allowed.begin(), allowed.end(), word) != allowed.end()) {
+            out.push_back(word);
+        }
+    }
+    return out;
+}
+
+// A row (or rows, per_row to a row) of pills choosing one word; returns the height used.
+float word_pills(lv_obj_t *parent, float x, float y, float w, const std::vector<std::string> &words, const std::string &current,
+                 size_t per_row, bool disabled, const std::function<void(const std::string &)> &pick)
+{
+    const size_t n = words.size();
+    const size_t cols = std::min(per_row, std::max<size_t>(1, n));
+    const float pw = (w - float(cols - 1) * 6) / float(cols);
+    for (size_t i = 0; i < n; ++i) {
+        PillOpts p;
+        p.on = words[i] == current;
+        p.size = 11;
+        p.disabled = disabled;
+        const std::string word = words[i];
+        pill(parent, x + float(i % cols) * (pw + 6), y + float(i / cols) * 36, pw, 30, ac_label(word), [pick, word] { pick(word); }, p);
+    }
+    return float((n + cols - 1) / cols) * 36;
+}
+
+// One air conditioner (web cards/aircon.js): power, the temperature it holds,
+// its mode and fan, in what this unit and this display may use.
+void climate_page()
+{
+    const Item *found = focused(G.d.acs);
+    if (!found) {
+        open(Page::Home);
+        return;
+    }
+    const Item a = *found;
+    const std::string target = a.target, lower = lowered(a.name);
+    heading(G.root, a.name, [] { open(Page::Home); });
+    lv_obj_t *sc = scroller(G.root, 40);
+    float y = 4;
+    const float w = VIEW - 2 * PAD;
+
+    lv_obj_t *power = card(sc, PAD, y, w, 58);
+    icon(power, "snow", 13, 9, 16, c.tint_soft, 1.4f);
+    text(power, "Power", 36, 10, w - 110, c.text, 12, semi());
+    text(power, leaning(target) && a.known ? std::string("Changing\xE2\x80\xA6") : ac_words(a), 36, 30, w - 110, c.text2, 10);
+    power_toggle(power, w - 58, 16, a, true);
+    y += 66;
+
+    const bool usable = a.known;
+    JsonObjectConst temp_cap = capability(a.dev, "temperature");
+    if (!temp_cap.isNull()) {
+        int lo = cmd::AC_MIN, hi = cmd::AC_MAX;
+        hub.int_range("ac.temperature", "celsius", lo, hi);
+        lo = std::max(lo, temp_cap["min"] | lo);
+        hi = std::min(hi, temp_cap["max"] | hi);
+        const bool stepping = G.step.target == target && G.step.value >= 0;
+        const int shown = stepping ? G.step.value : a.target_c;
+        const bool no_target = a.mode == "fan";  // fan only holds no temperature
+        const bool may = usable && !no_target && hub.can("ac.temperature", target) && lo <= hi;
+        lv_obj_t *t = card(sc, PAD, y, w, 104);
+        text(t, "Temperature", 14, 10, w * 0.4f, c.text2, 10);
+        std::string readings;
+        if (!a.indoor.empty()) {
+            readings = a.indoor + "\xC2\xB0 inside";
+        }
+        if (!a.outdoor.empty()) {
+            readings += (readings.empty() ? "" : " \xC2\xB7 ") + a.outdoor + "\xC2\xB0 outside";
+        }
+        text(t, readings, w * 0.4f, 10, w * 0.6f - 14, c.text2, 10, TextOpts{false, false, false, LV_TEXT_ALIGN_RIGHT});
+        const std::string big = !usable ? "\xE2\x80\x94" : no_target ? "Fan only" : (stepping || a.has_target) ? std::to_string(shown) + "\xC2\xB0" : "\xE2\x80\x94";
+        const float size = no_target || !usable ? 16 : 36;
+        text(t, big, 70, 34 + (52 - size * 1.25f) / 2, w - 140, no_target ? c.text2 : c.text, size, semi(LV_TEXT_ALIGN_CENTER));
+        const int start = std::clamp(a.has_target ? a.target_c : 22, lo, hi);
+        auto step = [target, lower, lo, hi, start](int delta) {
+            const int from = G.step.target == target && G.step.value >= 0 ? G.step.value : start;
+            G.step.target = target;
+            G.step.value = std::clamp(from + delta, lo, hi);
+            const uint32_t generation = ++G.step.generation;
+            dirty();
+            hub.after(700, [target, lower, generation] {
+                if (G.step.generation != generation || G.step.target != target || G.step.value < 0) {
+                    return;
+                }
+                const int v = G.step.value;
+                G.step.value = -1;
+                lean(target, "target", v);
+                act(cmd::ac_temperature(target, v), "Temperature", lower);
+                dirty();
+            });
+        };
+        sign_button(t, 14, 34, 52, "\xE2\x88\x92", [step] { step(-1); }, !may || shown <= lo);
+        sign_button(t, w - 66, 34, 52, "+", [step] { step(1); }, !may || shown >= hi);
+        y += 112;
+    }
+
+    const std::vector<std::string> modes = ac_choices(a, "mode", "modes", "ac.mode", "mode");
+    if (!modes.empty()) {
+        const float h = 30 + float((modes.size() + 4) / 5) * 36 + 4;
+        lv_obj_t *m = card(sc, PAD, y, w, h);
+        text(m, "Mode", 14, 10, w - 28, c.text2, 10);
+        word_pills(m, 14, 30, w - 28, modes, a.mode, 5, !usable || !hub.can("ac.mode", target), [target, lower](const std::string & mode) {
+            lean_text(target, "mode", mode);
+            act(cmd::ac_mode(target, mode), ac_label(mode), lower);
+            dirty();
+        });
+        y += h + 8;
+    }
+
+    const std::vector<std::string> fans = ac_choices(a, "fan", "speeds", "ac.fan", "fan");
+    if (!fans.empty()) {
+        const float h = 30 + float((fans.size() + 3) / 4) * 36 + 4;
+        lv_obj_t *f = card(sc, PAD, y, w, h);
+        text(f, "Fan", 14, 10, w - 28, c.text2, 10);
+        word_pills(f, 14, 30, w - 28, fans, a.fan, 4, !usable || !hub.can("ac.fan", target), [target, lower](const std::string & fan) {
+            lean_text(target, "fan", fan);
+            act(cmd::ac_fan(target, fan), "Fan " + ac_label(fan), lower);
+            dirty();
+        });
+        y += h + 8;
+    }
+    text(sc, "Changes can take a few seconds to show.", PAD + 2, y, w, c.text3, 9, wrapped());
+    end_space(sc, y + 16);
+}
+
+// The printer (web cards/printer.js): how the job goes, and pause, resume or
+// start, which ask first. The emergency stop runs at once, so it takes a second tap.
+void printer_page()
+{
+    if (!G.d.printer) {
+        open(Page::Home);
+        return;
+    }
+    const Item p = *G.d.printer;
+    const std::string target = p.target;
+    heading(G.root, p.name.empty() ? "Printer" : p.name, [] {
+        G.estop_armed = false;
+        open(Page::Home);
+    });
+    lv_obj_t *sc = scroller(G.root, 40);
+    float y = 4;
+    const float w = VIEW - 2 * PAD;
+    lv_obj_t *job = card(sc, PAD, y, w, 108);
+    text(job, p.known ? sentence(p.state) : (p.reason.empty() ? "Not reporting" : p.reason), 14, 10, w - 110, c.text, 16, semi());
+    const double pct = std::clamp(p.pct, 0.0, 100.0);
+    if (p.known && p.has_pct) {
+        text(job, std::to_string(int(floor(pct + 0.5))) + "%", w - 104, 8, 90, c.text, 20, TextOpts{true, false, false, LV_TEXT_ALIGN_RIGHT});
+    }
+    BoxOpts track_o;
+    track_o.bg = c.field;
+    track_o.bw = 0;
+    track_o.radius = 6;
+    track_o.field = true;
+    lv_obj_t *track = box(job, 14, 44, w - 28, 12, track_o);
+    BoxOpts fill_o;
+    fill_o.bg = c.fill_a;
+    fill_o.bw = 0;
+    fill_o.radius = 6;
+    fill_o.hidden = !p.known || pct <= 0;
+    glow_fill(box(track, 0, 0, std::max(0.01f, (w - 28) * float(pct) / 100), 12, fill_o), c.fill_a);
+    if (p.known) {
+        if (p.layers > 0) {
+            text(job, "Layer " + std::to_string(p.layer) + " of " + std::to_string(p.layers), 14, 64, w - 28, c.text2, 10);
+        }
+        text(job, "Nozzle " + std::to_string(int(lround(p.nozzle))) + "\xC2\xB0 \xC2\xB7 Bed " + std::to_string(int(lround(p.bed))) + "\xC2\xB0",
+             14, 82, w - 28, c.text2, 10);
+    }
+    y += 116;
+    const bool printing = p.state == "printing", paused = p.state == "paused";
+    const Command job_cmd = printing ? cmd::print_pause(target) : paused ? cmd::print_resume(target) : cmd::print_start(target);
+    const std::string label = printing ? "Pause" : paused ? "Resume" : "Start the loaded job";
+    PillOpts go;
+    go.on = true;
+    go.disabled = !p.known || !hub.can(job_cmd.action, target);
+    pill(sc, PAD, y, w, 40, label, [job_cmd, label] { act(job_cmd, label, "printer"); }, go);
+    y += 48;
+    PillOpts red;
+    red.color = c.red;
+    red.disabled = !p.known || !hub.can("print.estop", target);
+    pill(sc, PAD, y, w, 40, G.estop_armed ? "Tap again to stop everything" : "Emergency stop", [target] {
+        if (!G.estop_armed) {
+            G.estop_armed = true;
+            dirty();
+            hub.after(4000, [] {
+                if (G.estop_armed) {
+                    G.estop_armed = false;
+                    dirty();
+                }
+            });
+            return;
+        }
+        G.estop_armed = false;
+        act(cmd::print_estop(target), "Emergency stop", "printer");
+        dirty();
+    }, red);
+    y += 48;
+    text(sc, "Pause, Resume and Start ask you to confirm. The emergency stop halts the printer and turns its heaters off.",
+         PAD + 2, y, w, c.text3, 9, wrapped());
+    end_space(sc, y + 28);
+}
+
+// A device of a class Home has no card for (web cards/generic.js): its
+// readings, and any action the catalog lets this display run on it whose
+// parameters fit a small screen (none, one switch, one choice or one number).
+void device_page()
+{
+    const Item *found = focused(G.d.others);
+    if (!found) {
+        open(Page::Home);
+        return;
+    }
+    const Item d = *found;
+    const std::string target = d.target, lower = lowered(d.name);
+    heading(G.root, d.name, [] { open(Page::Home); });
+    lv_obj_t *sc = scroller(G.root, 40);
+    float y = 4;
+    const float w = VIEW - 2 * PAD;
+    const size_t n = d.known ? std::min<size_t>(d.readings.size(), 10) : 0;
+    const float h = n ? 16 + float(n) * 24 : 50;
+    lv_obj_t *r = card(sc, PAD, y, w, h);
+    if (!n) {
+        text(r, !d.known ? (d.reason.empty() ? "Not reporting" : d.reason) : "It reports no values.", 14, 16, w - 28, c.text2, 11);
+    }
+    for (size_t i = 0; i < n; ++i) {
+        text(r, sentence(d.readings[i].first), 14, 10 + float(i) * 24, w * 0.5f - 14, c.text2, 11);
+        text(r, d.readings[i].second, w * 0.5f, 10 + float(i) * 24, w * 0.5f - 14, c.text, 11, TextOpts{true, false, false, LV_TEXT_ALIGN_RIGHT});
+    }
+    y += h + 8;
+    JsonArrayConst actions = hub.catalog_doc ? (*hub.catalog_doc)["actions"].as<JsonArrayConst>() : JsonArrayConst();
+    for (JsonObjectConst a : actions) {
+        const std::string id = a["id"] | "";
+        if (id == "state.read" || !hub.can(id, target)) {
+            continue;
+        }
+        const std::string label = a["label"] | id.c_str();
+        JsonArrayConst params = a["params"].as<JsonArrayConst>();
+        const bool may = d.known;
+        if (params.size() == 0) {
+            PillOpts p;
+            p.disabled = !may;
+            pill(sc, PAD, y, w, 40, label, [id, target, label, lower] { act(cmd::make(id.c_str(), target), label, lower); }, p);
+            y += 48;
+            continue;
+        }
+        text(sc, label, PAD + 2, y, w, c.text2, 10);
+        y += 18;
+        JsonObjectConst param = params[0].as<JsonObjectConst>();
+        const std::string name = param["name"] | "";
+        JsonObjectConst schema = param["schema"].as<JsonObjectConst>();
+        const std::string type = schema["type"] | "";
+        auto with = [id, target, name](auto value) {
+            Command c = cmd::make(id.c_str(), target);
+            c.params[name] = value;
+            return c;
+        };
+        if (params.size() > 1 || name.empty() || type == "label") {
+            text(sc, "Set this in the Swifty Home app.", PAD + 2, y, w, c.text3, 10);
+            y += 24;
+        } else if (type == "boolean") {
+            const float half = (w - 8) / 2;
+            PillOpts p;
+            p.disabled = !may;
+            const Command on = with(true), off = with(false);
+            pill(sc, PAD, y, half, 36, "On", [on, label, lower] { act(on, label, lower); }, p);
+            pill(sc, PAD + half + 8, y, half, 36, "Off", [off, label, lower] { act(off, label, lower); }, p);
+            y += 44;
+        } else if (type == "enum") {
+            std::vector<std::string> words;
+            for (JsonVariantConst v : schema["values"].as<JsonArrayConst>()) {
+                words.push_back(v | "");
+            }
+            std::string current;
+            for (const auto &kv : d.readings)
+                if (kv.first == name) {
+                    current = kv.second;
+                }
+            y += word_pills(sc, PAD, y, w, words, current, 3, !may, [with, label, lower](const std::string & word) {
+                act(with(word), label, lower);
+            }) + 6;
+        } else if (type == "integer") {
+            const int lo = schema["min"] | 0, hi = schema["max"] | 100;
+            int value = lo;
+            for (const auto &kv : d.readings)
+                if (kv.first == name && !kv.second.empty() && (isdigit(uint8_t(kv.second[0])) || kv.second[0] == '-')) {
+                    value = atoi(kv.second.c_str());
+                }
+            if (G.values.count(id)) {
+                value = G.values[id];
+            }
+            value = std::clamp(value, lo, hi);
+            lv_obj_t *row = card(sc, PAD, y, w, 56, 28);
+            sign_button(row, 6, 6, 44, "\xE2\x88\x92", [id, value, lo] { G.values[id] = std::max(lo, value - 1); dirty(); }, !may || value <= lo);
+            text(row, std::to_string(value), 56, 14, 60, c.text, 20, semi(LV_TEXT_ALIGN_CENTER));
+            sign_button(row, 122, 6, 44, "+", [id, value, hi] { G.values[id] = std::min(hi, value + 1); dirty(); }, !may || value >= hi);
+            PillOpts set;
+            set.on = true;
+            set.disabled = !may;
+            const Command command = with(value);
+            pill(row, w - 106, 8, 96, 40, "Set", [command, label, lower, id] {
+                G.values.erase(id);
+                act(command, label, lower);
+            }, set);
+            y += 64;
+        }
+    }
+    end_space(sc, y);
 }
 
 // Tier 2: what will happen, its consequences, and Go / Cancel (web core/guards.js).
@@ -1545,6 +2034,9 @@ void render()
     case Page::Pets: pets_page(); break;
     case Page::Confirm: confirm_page(); break;
     case Page::Settings: settings_page(); break;
+    case Page::Climate: climate_page(); break;
+    case Page::Printer: printer_page(); break;
+    case Page::Device: device_page(); break;
     default: home_page(); break;
     }
     draw_toast();
@@ -1575,7 +2067,7 @@ void tick(lv_timer_t *)
     if (changed) {
         G.dirty = true;
     }
-    if (G.page == Page::Home && leans_due()) {
+    if ((G.page == Page::Home || G.page == Page::Climate) && leans_due()) {
         G.dirty = true;
     }
     // Toasts time out; the home page's times are minutes, so a refresh every
@@ -1609,6 +2101,58 @@ void home_preview_theme(int mode)
 void home_preview_toast(const char *message)
 {
     toast(message, "ok");
+    render();
+}
+// The pages a fixture's switches, air conditioner, printer, other devices and
+// rooms add, each saved by name: Home scrolled to the switches, then each page.
+void home_preview_pages(const std::function<void(const char *)> &save)
+{
+    G.page = Page::Home;
+    render();
+    if (G.scroller) {
+        lv_obj_update_layout(G.scroller);
+        lv_obj_scroll_to_y(G.scroller, P(std::max(0.0f, G.mark_y - 8)), LV_ANIM_OFF);
+    }
+    save("home-switches");
+    if (!G.d.acs.empty()) {
+        G.focus = G.d.acs[0].target;
+        G.page = Page::Climate;
+        render();
+        save("home-climate");
+        lv_obj_update_layout(G.scroller);
+        lv_obj_scroll_by(G.scroller, 0, -lv_obj_get_scroll_bottom(G.scroller), LV_ANIM_OFF);
+        save("home-climate-fan");
+        hub.prefs.theme = 0;
+        render();
+        save("light-home-climate");
+        hub.prefs.theme = 1;
+    }
+    if (G.d.printer) {
+        G.page = Page::Printer;
+        render();
+        save("home-printer");
+    }
+    if (!G.d.others.empty()) {
+        G.focus = G.d.others[0].target;
+        G.page = Page::Device;
+        render();
+        save("home-device");
+    }
+    for (JsonObjectConst r : rooms()) {
+        if (r["scenes"].as<JsonArrayConst>().size() == 0) {
+            continue;
+        }
+        hub.prefs.room = r["id"] | "";
+        G.page = Page::Lights;
+        render();
+        save("home-lights-room");
+        G.page = Page::Home;
+        render();
+        save("home-room");
+        hub.prefs.room.clear();
+        break;
+    }
+    G.page = Page::Home;
     render();
 }
 
@@ -1795,10 +2339,10 @@ void put(char *out, size_t cap, const std::string &text)
     strlcpy(out, text.c_str(), cap);
 }
 
-// One hub action a command turns into.
+// One hub action a command turns into (home_actions.h), with what to call it.
 struct Planned {
-    std::string action, target, label, name;
-    JsonDocument params;
+    Command command;
+    std::string label, name;
 };
 
 struct Plan {
@@ -1807,18 +2351,9 @@ struct Plan {
     std::string resolved;  // the target as the hub knows it: a room id, a device target, "all" or a scene id
 };
 
-template <typename T> Planned planned(const char *action, const std::string &target, const char *key, T value,
-                                      const std::string &label, const char *name)
+Planned planned(Command command, const std::string &label, const char *name)
 {
-    Planned p{action, target, label, name, JsonDocument()};
-    p.params[key] = value;
-    return p;
-}
-Planned planned(const char *action, const std::string &target, const std::string &label, const char *name)
-{
-    Planned p{action, target, label, name, JsonDocument()};
-    p.params.to<JsonObject>();
-    return p;
+    return {std::move(command), label, name};
 }
 
 const Item *find_item(const std::vector<Item> &list, const std::string &want, bool exact)
@@ -1884,11 +2419,11 @@ bool plan_command(const std::string &verb, const std::string &target, const std:
         if (bulb) {
             plan.resolved = bulb->target;
             if (dark) {
-                plan.acts.push_back(planned("light.power", bulb->target, "on", false, bulb->name, "light"));
+                plan.acts.push_back(planned(cmd::light_power(bulb->target, false), bulb->name, "light"));
             } else if (verb == "brightness") {
-                plan.acts.push_back(planned("light.brightness", bulb->target, "percent", std::max(10, pct), bulb->name, "light"));
+                plan.acts.push_back(planned(cmd::light_brightness(bulb->target, std::max(10, pct)), bulb->name, "light"));
             } else {
-                plan.acts.push_back(planned("light.power", bulb->target, "on", true, bulb->name, "light"));
+                plan.acts.push_back(planned(cmd::light_power(bulb->target, true), bulb->name, "light"));
             }
             plan.what = bulb->name + (!toggled.empty() ? toggled : dark ? " off" : verb == "brightness" ? " to " + std::to_string(pct) + "%" : " on");
             return true;
@@ -1897,9 +2432,9 @@ bool plan_command(const std::string &verb, const std::string &target, const std:
             const std::string id = room["id"] | "", name = room["name"] | "";
             plan.resolved = id;
             if (dark) {
-                plan.acts.push_back(planned("room.power", id, "on", false, name + " lights", "lights"));
+                plan.acts.push_back(planned(cmd::room_power(id, false), name + " lights", "lights"));
             } else {
-                plan.acts.push_back(planned("room.brightness", id, "percent", pct, name + " lights", "lights"));
+                plan.acts.push_back(planned(cmd::room_brightness(id, pct), name + " lights", "lights"));
             }
             plan.what = name + " lights" + (!toggled.empty() ? toggled : dark ? " off" : verb == "brightness" ? " " + std::to_string(pct) + "%" : " on");
             return true;
@@ -1907,9 +2442,9 @@ bool plan_command(const std::string &verb, const std::string &target, const std:
         if (all) {
             plan.resolved = "all";
             if (dark) {
-                plan.acts.push_back(planned("lights.power", "all_bulbs", "on", false, "lights", "lights"));
+                plan.acts.push_back(planned(cmd::lights_power(false), "lights", "lights"));
             } else {
-                plan.acts.push_back(planned("lights.brightness", "all_bulbs", "percent", std::max(1, pct), "lights", "lights"));
+                plan.acts.push_back(planned(cmd::lights_brightness(pct), "lights", "lights"));
             }
             plan.what = std::string("All lights") + (!toggled.empty() ? toggled : dark ? " off" : verb == "brightness" ? " " + std::to_string(pct) + "%" : " on");
             return true;
@@ -1937,7 +2472,7 @@ bool plan_command(const std::string &verb, const std::string &target, const std:
         for (const Item &b : d.bulbs)
             if ((bulb && &b == bulb) || (!bulb && !room.isNull() && room_of(b.target) == room) || (!bulb && room.isNull() && all))
                 if (b.color) {
-                    plan.acts.push_back(planned("light.hue", b.target, "hue", hue, b.name, "light"));
+                    plan.acts.push_back(planned(cmd::light_hue(b.target, hue), b.name, "light"));
                 }
         if (plan.acts.empty()) {
             return fail("No colour light matches \"" + target + "\".");
@@ -1977,7 +2512,7 @@ bool plan_command(const std::string &verb, const std::string &target, const std:
             return fail("Scenes: " + (names.empty() ? std::string("Movie, Evening, Lights off") : names) + ".");
         }
         plan.resolved = id;
-        plan.acts.push_back(id == "movie" ? planned("scene.movie", id, name, "lights") : planned("scene.apply", id, name, "lights"));
+        plan.acts.push_back(planned(id == cmd::MOVIE ? cmd::scene_movie() : cmd::scene_apply(id), name, "lights"));
         plan.what = "the " + name + " scene";
         return true;
     }
@@ -1988,13 +2523,13 @@ bool plan_command(const std::string &verb, const std::string &target, const std:
         const std::string t = d.speaker->target;
         plan.resolved = t;
         if (verb == "volume") {
-            plan.acts.push_back(planned("speaker.volume", t, "level", std::clamp(number, 0, 100), "Volume", "speaker"));
+            plan.acts.push_back(planned(cmd::speaker_volume(t, number), "Volume", "speaker"));
         } else if (verb == "play") {
-            plan.acts.push_back(planned("speaker.play", t, "Play", "speaker"));
+            plan.acts.push_back(planned(cmd::speaker_play(t), "Play", "speaker"));
         } else if (verb == "pause") {
-            plan.acts.push_back(planned("speaker.pause", t, "Pause", "speaker"));
+            plan.acts.push_back(planned(cmd::speaker_pause(t), "Pause", "speaker"));
         } else {
-            plan.acts.push_back(planned("speaker.mute", t, "muted", verb == "mute", "Mute", "speaker"));
+            plan.acts.push_back(planned(cmd::speaker_mute(t, verb == "mute"), "Mute", "speaker"));
         }
         plan.what = verb == "volume" ? "volume " + std::to_string(std::clamp(number, 0, 100)) : verb;
         return true;
@@ -2005,22 +2540,125 @@ bool plan_command(const std::string &verb, const std::string &target, const std:
         }
         const bool on = verb == "tv_toggle" ? !(d.tv->known && d.tv->on) : verb == "tv_on";
         plan.resolved = d.tv->target;
-        plan.acts.push_back(planned("tv.power", d.tv->target, "on", on, on ? "Turn on the TV" : "Turn off the TV", "TV"));
+        plan.acts.push_back(planned(cmd::tv_power(d.tv->target, on), on ? "Turn on the TV" : "Turn off the TV", "TV"));
         plan.what = verb == "tv_toggle" ? "TV on or off" : on ? "TV on" : "TV off";
         return true;
     }
-    if (verb == "plug_on" || verb == "plug_off" || verb == "plug_toggle") {
+    // A switch is the hub's class "plug": switch_* and plug_* are the same verbs.
+    const bool switch_verb = verb == "switch_on" || verb == "switch_off" || verb == "switch_toggle";
+    if (switch_verb || verb == "plug_on" || verb == "plug_off" || verb == "plug_toggle") {
+        const std::string how = verb.substr(verb.find('_') + 1);
         const Item *p = find_item(d.plugs, target, true);
         if (!p) {
             p = find_item(d.plugs, target, false);
         }
-        if (!p) {
-            return fail("No plug called \"" + target + "\".");
+        if (!p && target.empty() && d.plugs.size() == 1) {
+            p = &d.plugs[0];
         }
-        const bool on = verb == "plug_toggle" ? !(p->known && p->on) : verb == "plug_on";
+        if (!p) {
+            std::string names;
+            for (const Item &i : d.plugs) {
+                names += (names.empty() ? "" : ", ") + i.name;
+            }
+            return fail(d.plugs.empty() ? "This display sees no switch." : target.empty() ? "Which switch: " + names + "?"
+                        : "No switch called \"" + target + "\". Switches: " + names + ".");
+        }
+        const bool on = how == "toggle" ? !(p->known && p->on) : how == "on";
         plan.resolved = p->target;
-        plan.acts.push_back(planned("plug.power", p->target, "on", on, p->name, "plug"));
-        plan.what = p->name + (verb == "plug_toggle" ? " on or off" : on ? " on" : " off");
+        plan.acts.push_back(planned(cmd::plug_power(p->target, on), p->name, "switch"));
+        plan.what = p->name + (how == "toggle" ? " on or off" : on ? " on" : " off");
+        return true;
+    }
+    // The air conditioner: by name, or the only one.
+    if (verb.rfind("ac_", 0) == 0) {
+        const Item *a = target.empty() && !d.acs.empty() ? &d.acs[0] : find_item(d.acs, target, true);
+        if (!a) {
+            a = find_item(d.acs, target, false);
+        }
+        if (!a) {
+            return fail(d.acs.empty() ? "This display sees no air conditioner." : "No air conditioner called \"" + target + "\".");
+        }
+        plan.resolved = a->target;
+        auto offered = [&](const char *cap, const char *list) {
+            std::vector<std::string> words;
+            for (JsonVariantConst v : capability(a->dev, cap)[list].as<JsonArrayConst>()) {
+                words.push_back(v | "");
+            }
+            return words;
+        };
+        auto pick = [&](const std::vector<std::string> &words, std::string & out) {
+            for (const std::string &w : words)
+                if (same_name(w, value) || same_name(sentence(w), value)) {
+                    out = w;
+                }
+            return !out.empty();
+        };
+        if (verb == "ac_on" || verb == "ac_off" || verb == "ac_toggle") {
+            const bool on = verb == "ac_toggle" ? !(a->known && a->on) : verb == "ac_on";
+            plan.acts.push_back(planned(cmd::ac_power(a->target, on), a->name, "air conditioner"));
+            plan.what = a->name + (verb == "ac_toggle" ? " on or off" : on ? " on" : " off");
+            return true;
+        }
+        if (verb == "ac_temp") {
+            JsonObjectConst cap = capability(a->dev, "temperature");
+            const int lo = std::max(cmd::AC_MIN, cap["min"] | cmd::AC_MIN), hi = std::min(cmd::AC_MAX, cap["max"] | cmd::AC_MAX);
+            if (value.empty() || !isdigit(uint8_t(value[0]))) {
+                return fail("Give a temperature from " + std::to_string(lo) + " to " + std::to_string(hi) + ".");
+            }
+            const int celsius = std::clamp(number, lo, hi);
+            plan.acts.push_back(planned(cmd::ac_temperature(a->target, celsius), a->name, "air conditioner"));
+            plan.what = a->name + " to " + std::to_string(celsius) + "\xC2\xB0";
+            return true;
+        }
+        if (verb == "ac_mode" || verb == "ac_fan") {
+            const bool mode = verb == "ac_mode";
+            const std::vector<std::string> words = mode ? offered("mode", "modes") : offered("fan", "speeds");
+            std::string word;
+            if (!pick(words, word)) {
+                std::string list;
+                for (const std::string &w : words) {
+                    list += (list.empty() ? "" : ", ") + w;
+                }
+                return fail(std::string(mode ? "Modes" : "Fan speeds") + ": " + (list.empty() ? "none" : list) + ".");
+            }
+            plan.acts.push_back(planned(mode ? cmd::ac_mode(a->target, word) : cmd::ac_fan(a->target, word), a->name, "air conditioner"));
+            plan.what = a->name + (mode ? " to " : " fan ") + sentence(word);
+            return true;
+        }
+    }
+    // Pets: both ask first (the shortcut's tap confirms them).
+    if (verb == "feed") {
+        if (!d.feeder) {
+            return fail("No feeder.");
+        }
+        std::vector<int> grams;
+        for (JsonVariantConst g : capability(d.feeder->dev, "dispense")["grams"].as<JsonArrayConst>()) {
+            const int v = g | 0;
+            if (v >= cmd::GRAMS_MIN && v <= cmd::GRAMS_MAX) {
+                grams.push_back(v);
+            }
+        }
+        if (grams.empty()) {
+            grams = {10, 20, 30, 40, 50};
+        }
+        // The portion nearest the one asked for, or the smallest (web core/catalog.js portion()).
+        int g = grams[0];
+        for (int v : grams)
+            if (number > 0 && abs(v - number) < abs(g - number)) {
+                g = v;
+            }
+        plan.resolved = d.feeder->target;
+        plan.acts.push_back(planned(cmd::pets_feed(d.feeder->target, g), "Feed " + std::to_string(g) + " g", "feeder"));
+        plan.what = "feed " + std::to_string(g) + " g";
+        return true;
+    }
+    if (verb == "clean") {
+        if (!d.litter) {
+            return fail("No litter box.");
+        }
+        plan.resolved = d.litter->target;
+        plan.acts.push_back(planned(cmd::pets_clean(d.litter->target), "Clean cycle", "litter box"));
+        plan.what = "a clean cycle";
         return true;
     }
     return fail("Unknown action \"" + verb + "\".");
@@ -2066,10 +2704,27 @@ extern "C" void home_app_describe(char *out, size_t capacity)
         t += "TV " + d.tv->name + ": " + (d.tv->on ? "on" : "off") + (d.tv->input.empty() ? "" : ", input " + d.tv->input) + "\n";
     }
     for (const Item &p : d.plugs) {
-        t += "Plug " + p.name + ": " + (p.known ? (p.on ? "on" : "off") : "not reporting") + "\n";
+        t += "Switch " + p.name + ": " + (p.known ? (p.on ? "on" : "off") : "not reporting") + "\n";
     }
     for (const Item &a : d.acs) {
-        t += "Air conditioner " + a.name + ": " + (a.on ? "on " + a.mode + (a.temp.empty() ? "" : " to " + a.temp) : "off") + "\n";
+        t += "Air conditioner " + a.name + ": " + lower(ac_words(a)) + (a.known && a.on && !a.fan.empty() ? ", fan " + a.fan : "") +
+             (a.known && !a.indoor.empty() ? ", " + a.indoor + " degrees inside" : "") + "\n";
+    }
+    if (d.feeder) {
+        t += "Feeder " + d.feeder->name + ": " + (!d.feeder->known ? "not reporting" : d.feeder->last.empty() ? "no feed yet" : "last fed " + d.feeder->last) + "\n";
+    }
+    if (d.litter) {
+        t += "Litter box " + d.litter->name + ": " + (!d.litter->known ? "not reporting" : d.litter->busy ? "cleaning" : "ready") + "\n";
+    }
+    if (d.printer) {
+        t += "Printer " + d.printer->name + ": " + (d.printer->known ? d.printer->state : "not reporting") + "\n";
+    }
+    for (const Item &o : d.others) {
+        std::string values;
+        for (const auto &kv : o.readings) {
+            values += (values.empty() ? "" : ", ") + lower(sentence(kv.first)) + " " + kv.second;
+        }
+        t += o.name + ": " + (o.known ? (values.empty() ? "reporting" : values) : "not reporting") + "\n";
     }
     put(out, capacity, t);
 }
@@ -2085,7 +2740,7 @@ extern "C" void home_app_command(const char *verb_c, const char *target_c, const
         return put(out, capacity, plan.what);
     }
     for (Planned &p : plan.acts) {
-        act(p.action, p.target, std::move(p.params), p.label, p.name);
+        act(std::move(p.command), p.label, p.name);
     }
     put(out, capacity, "Sent: " + plan.what + ". It takes a moment to show.");
 }
@@ -2129,13 +2784,14 @@ bool home_app_run(const char *verb, const char *target, const char *value, bool 
     what = plan.what;
     // Nothing is sent unless every part may be.
     for (const Planned &p : plan.acts) {
-        const std::string flow = hub.flow(p.action);
-        if (!hub.can(p.action)) {
-            what = "This display may not do that (" + p.action + ").";
+        const std::string &action = p.command.action;
+        const std::string flow = hub.flow(action);
+        if (!hub.can(action, p.command.target)) {
+            what = "This display may not do that (" + action + ").";
             return false;
         }
         if (flow != "direct" && flow != "prepare_confirm") {
-            what = "That needs a passkey (" + p.action + ").";
+            what = "That needs a passkey (" + action + ").";
             return false;
         }
     }
@@ -2143,8 +2799,8 @@ bool home_app_run(const char *verb, const char *target, const char *value, bool 
         std::string sends;
         for (const Planned &p : plan.acts) {
             std::string params;
-            serializeJson(p.params, params);
-            sends += (sends.empty() ? "" : "; ") + p.action + " " + p.target + " " + params;
+            serializeJson(p.command.params, params);
+            sends += (sends.empty() ? "" : "; ") + p.command.action + " " + p.command.target + " " + params;
         }
         HOME_LOG("dry-run: %s -> %s", plan.what.c_str(), sends.c_str());
         hub.after(300, [done, sends] {
@@ -2184,7 +2840,7 @@ bool home_app_run(const char *verb, const char *target, const char *value, bool 
     });
     for (Planned &p : plan.acts) {
         auto once = std::make_shared<bool>(false);
-        const std::string who = p.label, target = p.target, name = p.name;
+        const std::string who = p.label, target = p.command.target, name = p.name;
         RunHandler handler = [finish_one, once, who, target, name](const DocPtr & run, const std::string & error) {
             if (*once) {
                 return;
@@ -2204,11 +2860,12 @@ bool home_app_run(const char *verb, const char *target, const char *value, bool 
             lean_settle(target, !failed);
             finish_one(!failed, failed ? "The " + name + " didn't answer." : std::string());
         };
-        if (hub.flow(p.action) == "direct") {
-            hub.execute(p.action, p.target, std::move(p.params), handler);
+        Command &c = p.command;
+        if (hub.flow(c.action) == "direct") {
+            hub.execute(c.action, c.target, std::move(c.params), handler);
         } else {
-            // Asks first (the TV's power, Movie): the shortcut was the tap that confirms.
-            hub.prepare(p.action, p.target, std::move(p.params), [handler](const DocPtr & prep, const std::string & error) {
+            // Asks first (the TV's power, Movie, Feed): the shortcut was the tap that confirms.
+            hub.prepare(c.action, c.target, std::move(c.params), [handler](const DocPtr & prep, const std::string & error) {
                 if (!prep) {
                     handler(nullptr, error);
                 } else {
@@ -2264,6 +2921,24 @@ std::string home_app_choices_json()
     }
     if (d.speaker) {
         doc["speaker"] = d.speaker->name;
+    }
+    // Air conditioners with what each takes, for ac_mode, ac_fan and ac_temp.
+    JsonArray acs = doc["acs"].to<JsonArray>();
+    for (const Item &a : d.acs) {
+        JsonObject o = acs.add<JsonObject>();
+        o["target"] = a.target;
+        o["name"] = a.name;
+        o["modes"] = capability(a.dev, "mode")["modes"];
+        o["fans"] = capability(a.dev, "fan")["speeds"];
+        JsonObjectConst t = capability(a.dev, "temperature");
+        o["min"] = std::max(cmd::AC_MIN, t["min"] | cmd::AC_MIN);
+        o["max"] = std::min(cmd::AC_MAX, t["max"] | cmd::AC_MAX);
+    }
+    if (d.feeder) {
+        doc["feeder"] = d.feeder->name;
+    }
+    if (d.litter) {
+        doc["litter"] = d.litter->name;
     }
     std::string out;
     serializeJson(doc, out);

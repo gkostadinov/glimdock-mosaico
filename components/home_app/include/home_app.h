@@ -42,8 +42,15 @@ void home_app_summary(home_summary_t *out);
 // command. verb: lights_on, lights_off, brightness (value 0-100), color (value
 // a hue 0-359 or a colour name), scene (value: one of the hub's scenes, by
 // name or id), volume (0-100), play, pause, mute, unmute, tv_on, tv_off,
-// plug_on, plug_off. target: a room, light, plug or "all" (may be empty);
-// exact names win over near ones. Writes what was sent or why not.
+// plug_on, plug_off (or switch_on, switch_off: a switch is the hub's "plug"),
+// ac_on, ac_off, ac_mode (value: a mode the unit lists, such as cool),
+// ac_temp (value in degrees Celsius), ac_fan (value: a fan speed it lists),
+// feed (value: grams, the nearest portion the feeder offers) and clean.
+// target: a room, light, switch, air conditioner or "all" (may be empty; an
+// air conditioner or a switch may be left out when there is one); exact
+// names win over near ones. Writes what was sent or why not. The hub decides
+// what a display may run: switches and the air conditioner are the owner's
+// unless the hub shares them with family.
 void home_app_describe(char *out, size_t capacity);
 void home_app_command(const char *verb, const char *target, const char *value, char *out, size_t capacity);
 
@@ -67,8 +74,9 @@ void home_app_pairing_info(home_pairing_info_t *out);
 #include <string>
 
 // For shortcuts (LVGL task, or with the display lock held). Verbs as
-// home_app_command's, plus lights_toggle, plug_toggle and tv_toggle (off when
-// on, else on). A target may also be a room id or a device target.
+// home_app_command's, plus lights_toggle, plug_toggle (switch_toggle),
+// tv_toggle and ac_toggle (off when on, else on). A target may also be a room
+// id or a device target.
 //
 // Home is started, paired and has the hub's lists (rooms, devices, actions).
 bool home_app_ready();
@@ -78,14 +86,18 @@ bool home_app_ready();
 bool home_app_resolve(const char *verb, const char *target, const char *value, std::string &what, std::string &resolved);
 // Sends a command and calls done once, on the LVGL task, when the hub reports
 // how it ended (a failure names the part that did not answer), or after 15 s.
-// Actions that ask first (the TV's power, Movie) are confirmed: the shortcut
-// was the tap. dry_run: resolved and logged, nothing sent. False: it could not
-// start (what says why; done is not called). what: what it does.
+// Actions that ask first (the TV's power, Movie, Feed, Clean cycle) are
+// confirmed: the shortcut was the tap. dry_run: resolved and logged, nothing
+// sent. False: it could not start (what says why; done is not called). what:
+// what it does.
 using HomeRunDone = std::function<void(bool ok, const std::string &message)>;
 bool home_app_run(const char *verb, const char *target, const char *value, bool dry_run, HomeRunDone done, std::string &what);
-// Rooms (with their number of lights), lights, plugs, scenes, the TV and the
-// speaker, as JSON for shortcut editors: {"paired","ready","rooms":[{"id",
-// "name","lights"}],"lights":[{"target","name","color"}],"plugs":[...],
-// "scenes":[{"id","name"}],"tv":"name","speaker":"name"}.
+// Rooms (with their number of lights), lights, switches, scenes, the TV, the
+// speaker, air conditioners and the pets, as JSON for shortcut editors:
+// {"paired","ready","rooms":[{"id","name","lights"}],"lights":[{"target",
+// "name","color"}],"plugs":[{"target","name"}] (the switches),"scenes":[{"id",
+// "name"}],"tv":"name","speaker":"name","acs":[{"target","name","modes":[...],
+// "fans":[...],"min","max"}],"feeder":"name","litter":"name"}. Keys without a
+// device are left out (acs is always there, maybe empty).
 std::string home_app_choices_json();
 #endif

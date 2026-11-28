@@ -134,7 +134,7 @@ void check(Command c, const std::string &expect, const char *flow_override = nul
     const std::string what = body_of(c);
     bool finished = false;
     std::string outcome;
-    RunHandler done = [&](const DocPtr &run, const std::string &error) {
+    RunHandler done = [&](const DocPtr & run, const std::string & error) {
         if (finished) {
             return;
         }
@@ -152,7 +152,7 @@ void check(Command c, const std::string &expect, const char *flow_override = nul
     if (flow == "direct") {
         hub.execute(c.action, c.target, std::move(c.params), done);
     } else if (flow == "prepare_confirm") {
-        hub.prepare(c.action, c.target, std::move(c.params), [&](const DocPtr &prep, const std::string &error) {
+        hub.prepare(c.action, c.target, std::move(c.params), [&](const DocPtr & prep, const std::string & error) {
             if (!prep) {
                 outcome = "refused at prepare: " + error;
                 finished = true;
@@ -168,7 +168,7 @@ void check(Command c, const std::string &expect, const char *flow_override = nul
         outcome = "no answer";
     }
     const bool ok = expect == "ok" ? (outcome == "confirmed" || outcome == "sent" || outcome == "simulated")
-                                   : outcome.find(expect) != std::string::npos;
+                    : outcome.find(expect) != std::string::npos;
     if (!ok) {
         ++failures;
     }
@@ -204,7 +204,7 @@ int main(int argc, char **argv)
     hub.start();
     bool paired = false, answered = false;
     std::string why;
-    hub.pair(url, argv[2], [&](bool ok, const std::string &message) {
+    hub.pair(url, argv[2], [&](bool ok, const std::string & message) {
         paired = ok;
         why = message;
         answered = true;

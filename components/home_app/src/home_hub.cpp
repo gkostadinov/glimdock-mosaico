@@ -190,6 +190,7 @@ void Hub::load_lists()
             catalog[action["id"] | ""] = action["flow"] | "";
         }
         if (fresh("catalog")) {
+            catalog_doc = doc;
             bump();
         }
     });
@@ -293,6 +294,65 @@ std::string Hub::flow(const std::string &action) const
     return it == catalog.end() ? std::string() : it->second;
 }
 
+JsonObjectConst Hub::catalog_entry(const std::string &action) const
+{
+    if (catalog_doc) {
+        for (JsonObjectConst a : (*catalog_doc)["actions"].as<JsonArrayConst>()) {
+            if (action == (a["id"] | "")) {
+                return a;
+            }
+        }
+    }
+    return JsonObjectConst();
+}
+
+JsonObjectConst Hub::catalog_param(const std::string &action, const char *param) const
+{
+    for (JsonObjectConst p : catalog_entry(action)["params"].as<JsonArrayConst>()) {
+        if (strcmp(p["name"] | "", param) == 0) {
+            return p["schema"].as<JsonObjectConst>();
+        }
+    }
+    return JsonObjectConst();
+}
+
+bool Hub::can(const std::string &action, const std::string &target) const
+{
+    if (!can(action)) {
+        return false;
+    }
+    JsonArrayConst targets = catalog_entry(action)["targets"].as<JsonArrayConst>();
+    if (targets.isNull()) {
+        return true;  // a catalog without targets: the hub decides when it runs
+    }
+    for (JsonVariantConst t : targets) {
+        if (target == (t | "")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Hub::int_range(const std::string &action, const char *param, int &lo, int &hi) const
+{
+    JsonObjectConst schema = catalog_param(action, param);
+    if (!schema["min"].is<int>() || !schema["max"].is<int>()) {
+        return false;
+    }
+    lo = schema["min"].as<int>();
+    hi = schema["max"].as<int>();
+    return true;
+}
+
+std::vector<std::string> Hub::enum_values(const std::string &action, const char *param) const
+{
+    std::vector<std::string> out;
+    for (JsonVariantConst v : catalog_param(action, param)["values"].as<JsonArrayConst>()) {
+        out.push_back(v | "");
+    }
+    return out;
+}
+
 std::string Hub::request_id()
 {
     char id[40];
@@ -339,6 +399,7 @@ void Hub::unpair()
     devices.reset();
     rooms.reset();
     scenes.reset();
+    catalog_doc.reset();
     catalog.clear();
     seen_.clear();
     save();
