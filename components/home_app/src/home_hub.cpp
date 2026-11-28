@@ -409,6 +409,12 @@ void Hub::prepare(const std::string &action, const std::string &target, JsonDocu
 
 void Hub::confirm(const DocPtr &prep, RunHandler done)
 {
+    // Exactly the hub's ConfirmRequest (actions.rs): it refuses any other field
+    // (deny_unknown_fields) as 422 invalid_body, "The request body could not be
+    // read". A channel and request_id here made every confirmed action fail:
+    // Feed, Clean cycle, the TV's power and Movie. The channel was fixed when
+    // the action was prepared, and a confirmation is single-use, so it needs
+    // no request id to run once.
     JsonDocument body;
     body["prepared_id"] = (*prep)["prepared_id"];
     body["action"] = (*prep)["action"];
@@ -419,8 +425,6 @@ void Hub::confirm(const DocPtr &prep, RunHandler done)
         body["params"].to<JsonObject>();
     }
     body["confirmation"] = (*prep)["confirmation"];
-    body["channel"] = "panel";
-    body["request_id"] = request_id();
     request("POST", "/actions/confirm", &body, [this, done](int code, const DocPtr & doc, const std::string & error) {
         if ((code == 200 || code == 202) && doc) {
             done(doc, std::string());
