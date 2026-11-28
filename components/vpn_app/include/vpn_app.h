@@ -44,6 +44,7 @@ typedef struct {
     char endpoint[72];  // as configured, "vpn.example.com:51820"
     char error[120];    // in plain words; empty when there is nothing wrong
     int32_t handshake_age_s;  // since the last handshake; -1 none yet
+    uint16_t mtu;             // the tunnel's (configured, or 1280)
     uint64_t rx_bytes, tx_bytes;  // this connection's, as WireGuard sends them
 } vpn_summary_t;
 

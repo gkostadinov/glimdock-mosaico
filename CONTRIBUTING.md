@@ -132,6 +132,16 @@ body; a what's-my-IP address gives the public address the board leaves from.
 Never put a real WireGuard key in a log, a screenshot, an issue or the
 repository.
 
+The tunnel's MTU is 1280 unless the configuration sets one (`mtu`, or `MTU =`
+in a pasted .conf): WireGuard's usual 1420 makes encrypted packets of nearly
+1500 bytes, which paths such as a phone hotspot drop, so TLS handshakes and
+pages stalled while small requests worked. lwIP announces and uses a TCP MSS
+of the interface's MTU less 40 bytes. A split tunnel (AllowedIPs without
+`0.0.0.0/0`) routes only the network around its own address, and uses its DNS
+servers only when they lie inside it; devices on the VPN reach Web settings at
+the tunnel's address when the server forwards between its peers and the
+board's AllowedIPs cover theirs.
+
 The VPN needs `CONFIG_ESP_NETIF_BRIDGE_EN=y` (in `sdkconfig.defaults`; see
 the note there). A build directory made before it keeps its own
 `build/sdkconfig`: delete that file, or set the option in menuconfig, or the

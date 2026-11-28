@@ -75,7 +75,7 @@ bool parse_net(const std::string &text, Net4 *out)
     if (slash != std::string::npos) {
         const std::string p = text.substr(slash + 1);
         if (p.empty() || p.size() > 2 || !isdigit(static_cast<unsigned char>(p[0])) ||
-            (p.size() == 2 && !isdigit(static_cast<unsigned char>(p[1])))) {
+                (p.size() == 2 && !isdigit(static_cast<unsigned char>(p[1])))) {
             return false;
         }
         out->prefix = atoi(p.c_str());
@@ -98,11 +98,21 @@ bool contains(const Net4 &net, uint32_t ip)
 
 int b64_value(char c)
 {
-    if (c >= 'A' && c <= 'Z') return c - 'A';
-    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-    if (c >= '0' && c <= '9') return c - '0' + 52;
-    if (c == '+') return 62;
-    if (c == '/') return 63;
+    if (c >= 'A' && c <= 'Z') {
+        return c - 'A';
+    }
+    if (c >= 'a' && c <= 'z') {
+        return c - 'a' + 26;
+    }
+    if (c >= '0' && c <= '9') {
+        return c - '0' + 52;
+    }
+    if (c == '+') {
+        return 62;
+    }
+    if (c == '/') {
+        return 63;
+    }
     return -1;
 }
 
@@ -234,7 +244,7 @@ bool parse(const Settings &s, Parsed *out, std::string *error)
     }
     if (!have_address) {
         return fail(s.address.empty() ? "No tunnel address: add Address ([Interface]), such as 10.8.0.2/32."
-                                      : "The tunnel address must be an IPv4 address such as 10.8.0.2/24.");
+                    : "The tunnel address must be an IPv4 address such as 10.8.0.2/24.");
     }
     for (const std::string &d : items(s.dns)) {
         uint32_t ip;
@@ -280,7 +290,7 @@ bool parse(const Settings &s, Parsed *out, std::string *error)
     for (char c : p.host) {
         if (!isalnum(static_cast<unsigned char>(c)) && c != '-' && c != '.') {
             return fail(c == ':' ? "IPv6 server addresses are not supported yet: use the server's IPv4 address or name."
-                                 : "The server address (Endpoint) is not a name or an IPv4 address.");
+                        : "The server address (Endpoint) is not a name or an IPv4 address.");
         }
     }
     // AllowedIPs: empty means everything.
@@ -309,6 +319,10 @@ bool parse(const Settings &s, Parsed *out, std::string *error)
     if (s.keepalive < 0 || s.keepalive > 65535) {
         return fail("PersistentKeepalive must be from 0 (off) to 65535 seconds.");
     }
+    if (s.mtu && (s.mtu < MIN_MTU || s.mtu > MAX_MTU)) {
+        return fail("MTU must be from 576 to 1420 (empty: 1280).");
+    }
+    p.mtu = uint16_t(s.mtu ? s.mtu : DEFAULT_MTU);
     // The tunnel interface's subnet: its own prefix, or the widest allowed
     // network around the address (the part of a split tunnel lwIP can route).
     int prefix = p.address.prefix;
@@ -323,6 +337,21 @@ bool parse(const Settings &s, Parsed *out, std::string *error)
     return true;
 }
 
+bool dns_through_tunnel(const Parsed &p)
+{
+    if (p.dns.empty()) {
+        return false;
+    }
+    if (p.full) {
+        return true;
+    }
+    for (uint32_t d : p.dns)
+        if ((d & p.netmask) != (p.address.ip & p.netmask)) {
+            return false;
+        }
+    return true;
+}
+
 bool parse_conf(const std::string &text, Settings *s, std::string *error)
 {
     Settings c;
@@ -330,7 +359,7 @@ bool parse_conf(const std::string &text, Settings *s, std::string *error)
     enum { NONE, INTERFACE, PEER, OTHER } section = NONE;
     bool have_interface = false, have_peer = false;
     int peers = 0;
-    auto add = [](std::string &field, const std::string &v) {
+    auto add = [](std::string & field, const std::string & v) {
         if (!field.empty()) {
             field += ", ";
         }
@@ -372,15 +401,27 @@ bool parse_conf(const std::string &text, Settings *s, std::string *error)
         // Keys keep their '=' padding: split at the first '=' only.
         const std::string value = trim(line.substr(eq + 1));
         if (section == INTERFACE) {
-            if (key == "privatekey") c.private_key = value;
-            else if (key == "address") add(c.address, value);
-            else if (key == "dns") add(c.dns, value);
+            if (key == "privatekey") {
+                c.private_key = value;
+            } else if (key == "address") {
+                add(c.address, value);
+            } else if (key == "dns") {
+                add(c.dns, value);
+            } else if (key == "mtu") {
+                c.mtu = atoi(value.c_str());
+            }
         } else if (section == PEER) {
-            if (key == "publickey") c.public_key = value;
-            else if (key == "presharedkey") c.preshared_key = value;
-            else if (key == "endpoint") c.endpoint = value;
-            else if (key == "allowedips") add(c.allowed_ips, value);
-            else if (key == "persistentkeepalive") c.keepalive = lower(value) == "off" ? 0 : atoi(value.c_str());
+            if (key == "publickey") {
+                c.public_key = value;
+            } else if (key == "presharedkey") {
+                c.preshared_key = value;
+            } else if (key == "endpoint") {
+                c.endpoint = value;
+            } else if (key == "allowedips") {
+                add(c.allowed_ips, value);
+            } else if (key == "persistentkeepalive") {
+                c.keepalive = lower(value) == "off" ? 0 : atoi(value.c_str());
+            }
         }
     }
     if (!have_interface || !have_peer) {

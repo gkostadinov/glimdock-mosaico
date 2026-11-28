@@ -12,7 +12,7 @@
 
 struct WebSettingsInfo {
     bool running;
-    char url[40];    // "http://192.0.2.20"
+    char url[72];    // "http://192.0.2.20", then "  (VPN: 10.8.0.2)" while the VPN is up
     char code[8];    // "482913"
     char note[64];   // why it stopped, or what it needs
 };
