@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "home_model.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -16,6 +17,7 @@ namespace {
 struct Lean {
     double value;
     uint32_t until, since;
+    std::string text;  // a word asked for (a mode, a fan speed); empty for numbers
 };
 std::map<std::string, Lean> leans;
 constexpr uint32_t SETTLED_MS = 10000, HOLD_MS = 90000;
@@ -36,6 +38,20 @@ bool agrees(const char *field, double actual, double want)
 bool expired(const Lean &l, uint32_t now)
 {
     return l.until ? int32_t(now - l.until) > 0 : now - l.since > HOLD_MS;
+}
+
+std::string leaned_text(const std::string &target, const char *field, const std::string &actual)
+{
+    auto it = leans.find(target + "." + field);
+    if (it == leans.end()) {
+        return actual;
+    }
+    const Lean &l = it->second;
+    if (expired(l, now_ms()) || (l.until && actual == l.text)) {
+        leans.erase(it);
+        return actual;
+    }
+    return l.text;
 }
 
 double leaned(const std::string &target, const char *field, double actual)
@@ -60,7 +76,22 @@ int number_or(JsonVariantConst v, int fallback)
 
 void lean(const std::string &target, const char *field, double value)
 {
-    leans[target + "." + field] = {value, 0, now_ms()};
+    leans[target + "." + field] = {value, 0, now_ms(), std::string()};
+}
+
+void lean_text(const std::string &target, const char *field, const std::string &value)
+{
+    leans[target + "." + field] = {0, 0, now_ms(), value};
+}
+
+bool leaning(const std::string &target)
+{
+    const std::string prefix = target + ".";
+    for (const auto &kv : leans)
+        if (kv.first.compare(0, prefix.size(), prefix) == 0 && !kv.second.until) {
+            return true;
+        }
+    return false;
 }
 
 void lean_settle(const std::string &target, bool ok)
@@ -106,6 +137,42 @@ std::string to_text(JsonVariantConst v)
         return v.as<bool>() ? "true" : "false";
     }
     return std::string();
+}
+
+std::string sentence(const std::string &word)
+{
+    std::string out = word;
+    for (char &ch : out)
+        if (ch == '_') {
+            ch = ' ';
+        }
+    if (!out.empty()) {
+        out[0] = char(toupper(uint8_t(out[0])));
+    }
+    return out;
+}
+
+std::string ac_words(const Item &ac)
+{
+    if (!ac.known) {
+        return ac.reason.empty() ? "Not reporting" : ac.reason;
+    }
+    if (!ac.on) {
+        return "Off";
+    }
+    // web pages/home.js acWord: what it is doing, and the target unless it has none.
+    static const char *const doing[][2] = {
+        {"auto", "Automatic"}, {"cool", "Cooling"}, {"heat", "Heating"}, {"dry", "Drying"}, {"fan", "Fan only"}
+    };
+    std::string words = "On";
+    for (const auto &d : doing)
+        if (ac.mode == d[0]) {
+            words = d[1];
+        }
+    if (ac.mode != "fan" && ac.has_target) {
+        words += " to " + std::to_string(ac.target_c) + "\xC2\xB0";
+    }
+    return words;
 }
 
 JsonObjectConst capability(const JsonObjectConst &dev, const char *name)
@@ -174,21 +241,40 @@ Derived build()
             item.on = leaned(target, "on", st["on"] == true) != 0;
             d.plugs.push_back(item);
         } else if (c == "aircon") {
+            // plugin-api state.rs State::Aircon: on, mode, target, fan, indoor, outdoor.
             item.on = leaned(target, "on", st["on"] == true) != 0;
-            item.mode = to_text(st["mode"]);
-            item.temp = to_text(st["target"]);
+            item.mode = leaned_text(target, "mode", to_text(st["mode"]));
+            item.fan = leaned_text(target, "fan", to_text(st["fan"]));
+            item.has_target = st["target"].is<long>() || leans.count(std::string(target) + ".target");
+            item.target_c = int(leaned(target, "target", number_or(st["target"], 0)));
+            item.temp = item.has_target ? std::to_string(item.target_c) : std::string();
             item.indoor = to_text(st["indoor"]);
+            item.outdoor = to_text(st["outdoor"]);
             d.acs.push_back(item);
-        } else if (c == "printer") {
+        } else if (c == "printer" && !d.printer) {
             item.state = to_text(st["state"]);
             item.has_pct = st["pct"].is<double>() || st["pct"].is<long>();
             item.pct = st["pct"] | 0.0;
+            item.nozzle = st["nozzle"] | 0.0;
+            item.bed = st["bed"] | 0.0;
+            item.layer = number_or(st["layer"], 0);
+            item.layers = number_or(st["layers"], 0);
             d.printer = item;
         } else if (c != "telemetry" && c != "vm" && c != "host" && c != "bridge" && c != "router" &&
                    c != "service" && c != "speaker" && c != "tv" && c != "camera" && c != "feeder" &&
                    c != "litter" && c != "printer" && c != "light") {
             // web cards/index.js: only classes without a card of their own (a
             // Hue bridge is a "bridge": listed with devices, never on Home).
+            // Its readings, as the web's generic card shows them: a plugin's
+            // own fields, or every plain value of a state Home knows.
+            JsonObjectConst fields = !strcmp(st["kind"] | "", "custom") ? st["fields"].as<JsonObjectConst>() : st;
+            for (JsonPairConst kv : fields) {
+                if (!strcmp(kv.key().c_str(), "kind") || kv.value().is<JsonObjectConst>() || kv.value().is<JsonArrayConst>()) {
+                    continue;
+                }
+                std::string value = kv.value().isNull() ? "\xE2\x80\x94" : kv.value().is<bool>() ? (kv.value().as<bool>() ? "Yes" : "No") : to_text(kv.value());
+                item.readings.push_back({kv.key().c_str(), value});
+            }
             d.others.push_back(item);
         }
     }
