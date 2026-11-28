@@ -2382,6 +2382,7 @@ void build_ui(lv_obj_t *s)
     // Filter strip above the shutter (shown with the filter button).
     G.strip = box(s, 30, 312, 420, 48);
     lv_obj_add_flag(G.strip, lv_obj_flag_t(LV_OBJ_FLAG_SCROLLABLE));
+    lv_obj_add_flag(G.strip, LV_OBJ_FLAG_CLICKABLE);  // a drag on text or a gap scrolls too
     lv_obj_set_scroll_dir(G.strip, LV_DIR_HOR);
     lv_obj_set_scrollbar_mode(G.strip, LV_SCROLLBAR_MODE_OFF);
     int x = 0;

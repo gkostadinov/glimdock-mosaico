@@ -1057,6 +1057,7 @@ void build_picker(lv_obj_t *s)
     // the cards scroll under the title
     lv_obj_t *list = box(G.picker, 0, 84, PANEL, PANEL - 84);
     lv_obj_add_flag(list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(list, LV_OBJ_FLAG_CLICKABLE);  // a drag on text or a gap scrolls too
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_pad_bottom(list, 40, 0);  // the last card clears the rounded corners

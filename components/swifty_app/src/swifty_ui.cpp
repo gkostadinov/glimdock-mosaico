@@ -1009,6 +1009,7 @@ void build(lv_obj_t *s)
 
     U.chat = box(s, CHAT_X, CHAT_Y, CHAT_W, CHAT_H);
     lv_obj_add_flag(U.chat, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(U.chat, LV_OBJ_FLAG_CLICKABLE);  // a drag on text or a gap scrolls too
     lv_obj_set_scroll_dir(U.chat, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(U.chat, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_flex_flow(U.chat, LV_FLEX_FLOW_COLUMN);

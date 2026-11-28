@@ -291,6 +291,7 @@ void list_page()
     });
     W.list = box(p, 40, 218, PANEL - 80, PANEL - 218 - 24);
     lv_obj_add_flag(W.list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(W.list, LV_OBJ_FLAG_CLICKABLE);  // a drag on text or a gap scrolls too
     lv_obj_set_scroll_dir(W.list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(W.list, LV_SCROLLBAR_MODE_OFF);
     update_status();

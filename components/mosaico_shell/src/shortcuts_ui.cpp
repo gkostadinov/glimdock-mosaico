@@ -162,6 +162,7 @@ lv_obj_t *scroller(lv_obj_t *parent, int y, int h)
 {
     lv_obj_t *s = box(parent, 40, y, PANEL - 80, h);
     lv_obj_add_flag(s, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s, LV_OBJ_FLAG_CLICKABLE);  // a drag on text or a gap scrolls too
     lv_obj_set_scroll_dir(s, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(s, LV_SCROLLBAR_MODE_OFF);
     return s;

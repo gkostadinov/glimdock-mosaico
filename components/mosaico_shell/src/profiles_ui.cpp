@@ -54,6 +54,7 @@ struct {
     lv_timer_t *timer = nullptr;
     bool busy = false;          // a hash is running
     bool face_running = false;
+    bool full_after_face = false;  // the full mode switch asked for a face: on once it is added
     bool saving = false;        // our own save: the change listener leaves the page alone
     bool off_armed = false, delete_armed = false;
     uint32_t generation = 0;    // bumps with every page: late callbacks see it moved on
@@ -263,6 +264,7 @@ lv_obj_t *settings_frame(Page page, const char *title, lv_event_cb_t back)
     lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_DOTS);
     U.scroller = box(pg, 0, LIST_Y, PANEL, PANEL - LIST_Y);
     lv_obj_add_flag(U.scroller, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(U.scroller, LV_OBJ_FLAG_CLICKABLE);  // a drag on text or a gap scrolls too
     lv_obj_set_scroll_dir(U.scroller, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(U.scroller, LV_SCROLLBAR_MODE_OFF);
     // Rows fade out where the circle narrows (taps pass through the fade).
@@ -1186,7 +1188,18 @@ void enroll_done(face_id_result_t result, void *user)
         return;
     }
     if (result == FACE_ID_OK) {
-        profiles_ui_note("Face added");
+        profile_t q{};
+        if (U.full_after_face && load_target(q)) {
+            q.elevated = true;
+            q.signin = PROFILE_SIGNIN_FACE_PIN;
+            U.saving = true;
+            const profile_result_t r = profiles_save(&q, PROFILE_BY_SESSION);
+            U.saving = false;
+            profiles_ui_note(r == PROFILE_OK ? "Face added. Full mode is on" : profiles_result_text(r));
+        } else {
+            profiles_ui_note("Face added");
+        }
+        U.full_after_face = false;
         go(Page::Edit);
         return;
     }
@@ -1229,6 +1242,7 @@ void enroll_page()
     U.status = centered(pg, "", 346, TEXT2, 15, true, 320);
     lv_obj_t *cancel = field_button(pg, (PANEL - 140) / 2, 384, 140, 44, "Cancel", 16, TEXT2);
     on(cancel, [](lv_event_t *) {
+        U.full_after_face = false;
         go(Page::Edit);
     });
     start_enroll();
@@ -1324,6 +1338,22 @@ void edit_page()
                 return;
             }
             q.elevated = toggle_on(lv_event_get_current_target_obj(e));
+            if (q.elevated && !profiles_face_enrolled(q.id)) {
+                // Full mode signs in with face and PIN: without a face the save
+                // would only be refused, so add the face first and full mode
+                // turns on once it is in (enroll_done).
+                if (!q.has_pin) {
+                    profiles_ui_note("Set a PIN first, then add your face");
+                } else if (!face_id_available()) {
+                    profiles_ui_note("Full mode needs the camera module for your face");
+                } else {
+                    U.full_after_face = true;
+                    go(Page::Enroll);
+                    return;
+                }
+                rebuild_keeping_scroll();  // the switch goes back off
+                return;
+            }
             if (q.elevated) {
                 q.signin = PROFILE_SIGNIN_FACE_PIN;
             }
