@@ -774,6 +774,10 @@ void stop_listening()
                 set_pill(nullptr, false);
                 return;
             }
+            if (!error.empty())
+            {
+                add_note(error + " Sent what I heard until then.");
+            }
             send(text, true, draft && lv_obj_is_valid(draft) ? draft : nullptr);
         });
         vTaskDeleteWithCaps(nullptr);  // its stack is in PSRAM

@@ -47,8 +47,9 @@ Swifty) an empty string clears it.
               (a path, ~ allowed, owned by you, mode 0600) that replaces the
               whole configuration; or the fields private_key, address, dns,
               public_key (the server's), preshared_key, endpoint (host:port),
-              allowed_ips (empty: 0.0.0.0/0, everything) and
-              persistent_keepalive (seconds); auto_connect (true/false:
+              allowed_ips (empty: 0.0.0.0/0, everything),
+              persistent_keepalive (seconds) and mtu (576 to 1420; 0: 1280,
+              the default); auto_connect (true/false:
               connect at start-up); on (true/false: connect or disconnect
               now). Applies at once; --status shows the state and the board's
               public key, never a key.
@@ -113,6 +114,7 @@ SECTIONS = {
         "endpoint",
         "allowed_ips",
         "persistent_keepalive",
+        "mtu",
         "auto_connect",
         "on",
     ),
@@ -266,6 +268,9 @@ def load(path: str) -> dict:
                 elif key == "persistent_keepalive":
                     if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 65535:
                         raise ValueError("vpn.persistent_keepalive: seconds from 0 (off) to 65535")
+                elif key == "mtu":
+                    if isinstance(v, bool) or not isinstance(v, int) or not (v == 0 or 576 <= v <= 1420):
+                        raise ValueError("vpn.mtu: 576 to 1420 (0: the default, 1280)")
                 elif not isinstance(v, str):
                     raise ValueError(f"vpn.{key}: expected a string")
             conf = section.get("conf_file")

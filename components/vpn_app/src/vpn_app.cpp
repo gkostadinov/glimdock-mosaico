@@ -82,6 +82,7 @@ void load()
                 settings.endpoint = doc["ep"] | "";
                 settings.allowed_ips = doc["aips"] | "";
                 settings.keepalive = doc["ka"] | 0;
+                settings.mtu = doc["mtu"] | 0;
                 // The document's copies of the keys.
                 for (JsonPair kv : doc.as<JsonObject>())
                     if (kv.value().is<const char *>()) {
@@ -113,6 +114,9 @@ bool save(const vpn::Settings &s)
         doc["ep"] = s.endpoint;
         doc["aips"] = s.allowed_ips;
         doc["ka"] = s.keepalive;
+        if (s.mtu) {
+            doc["mtu"] = s.mtu;
+        }
         serializeJson(doc, text);
     }
     nvs_handle_t h;
@@ -194,6 +198,7 @@ extern "C" void vpn_app_summary(vpn_summary_t *out)
         out->on = on;
         out->auto_connect = settings.auto_connect;
         out->full_tunnel = configured && parsed.full;
+        out->mtu = configured ? parsed.mtu : uint16_t(vpn::DEFAULT_MTU);
         strlcpy(out->endpoint, settings.endpoint.c_str(), sizeof(out->endpoint));
     }
     vpn::tunnel_status(out);
@@ -238,9 +243,9 @@ extern "C" void vpn_app_report(char *out, size_t capacity)
     if (s.state == VPN_CONNECTED || s.state == VPN_CONNECTING || s.state == VPN_ERROR || s.state == VPN_WAITING) {
         text += std::string(" Through ") + s.endpoint + " as " + (s.address[0] ? s.address : "-") + " (" +
                 (s.full_tunnel ? "all traffic" : "only the tunnel's network") + ", DNS " +
-                (s.tunnel_dns ? "through the tunnel" : "the network's") + "); ";
+                (s.tunnel_dns ? "through the tunnel" : "the network's") + ", MTU " + std::to_string(s.mtu) + "); ";
         text += s.handshake_age_s < 0 ? std::string("no handshake yet")
-                                      : "last handshake " + std::to_string(s.handshake_age_s) + " s ago";
+                : "last handshake " + std::to_string(s.handshake_age_s) + " s ago";
         text += "; " + bytes_text(s.rx_bytes) + " in, " + bytes_text(s.tx_bytes) + " out.";
     }
     text += std::string(" Connects at start-up: ") + (s.auto_connect ? "yes." : "no.");
@@ -254,7 +259,8 @@ extern "C" const char *vpn_app_config_apply(const char *json, size_t length)
         return "expected an object";
     }
     static const char *const STRINGS[] = {"private_key", "address", "dns", "public_key", "preshared_key", "endpoint",
-                                          "allowed_ips", "conf"};
+                                          "allowed_ips", "conf"
+                                         };
     for (JsonPair kv : doc.as<JsonObject>()) {
         const char *k = kv.key().c_str();
         bool known = false;
@@ -273,6 +279,12 @@ extern "C" const char *vpn_app_config_apply(const char *json, size_t length)
             if (v < 0 || v > 65535) {
                 return "persistent_keepalive: seconds from 0 (off) to 65535";
             }
+        } else if (!strcmp(k, "mtu")) {
+            known = true;
+            const int v = kv.value().is<int>() ? kv.value().as<int>() : -1;
+            if (v != 0 && (v < vpn::MIN_MTU || v > vpn::MAX_MTU)) {
+                return "mtu: 0 (automatic, 1280) or 576 to 1420";
+            }
         } else if (!strcmp(k, "auto_connect") || !strcmp(k, "on")) {
             known = true;
             if (!kv.value().is<bool>()) {
@@ -282,7 +294,7 @@ extern "C" const char *vpn_app_config_apply(const char *json, size_t length)
         }
         if (!known) {
             return "unknown key (use conf, private_key, address, dns, public_key, preshared_key, endpoint, allowed_ips, "
-                   "persistent_keepalive, auto_connect, on)";
+                   "persistent_keepalive, mtu, auto_connect, on)";
         }
     }
     vpn::Settings next;
@@ -325,6 +337,10 @@ extern "C" const char *vpn_app_config_apply(const char *json, size_t length)
         }
     if (!doc["persistent_keepalive"].isNull()) {
         next.keepalive = doc["persistent_keepalive"].as<int>();
+        changed = true;
+    }
+    if (!doc["mtu"].isNull()) {
+        next.mtu = doc["mtu"].as<int>();
         changed = true;
     }
     if (!doc["auto_connect"].isNull()) {
@@ -385,6 +401,8 @@ extern "C" void vpn_app_config_status(char *json, size_t capacity)
         doc["endpoint"] = settings.endpoint;
         doc["allowed_ips"] = settings.allowed_ips;
         doc["persistent_keepalive"] = settings.keepalive;
+        doc["mtu"] = settings.mtu;  // 0: automatic
+        doc["mtu_in_use"] = configured ? parsed.mtu : vpn::DEFAULT_MTU;
         doc["auto_connect"] = settings.auto_connect;
         doc["on"] = on;
     }

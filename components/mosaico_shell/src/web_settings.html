@@ -658,7 +658,7 @@ function renderVpn() {
     s.append(el("label", {}, "This board's public key (the server's [Peer] PublicKey for it)", el("div", { className: "row" }, key)));
   }
   // A whole configuration file.
-  const conf = el("textarea", { spellcheck: false, placeholder: "[Interface]\nPrivateKey = ...\nAddress = 10.8.0.2/32\nDNS = 10.8.0.1\n\n[Peer]\nPublicKey = ...\nEndpoint = vpn.example.com:51820\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 25" });
+  const conf = el("textarea", { spellcheck: false, placeholder: "[Interface]\nPrivateKey = ...\nAddress = 10.8.0.2/32\nDNS = 10.8.0.1\nMTU = 1280\n\n[Peer]\nPublicKey = ...\nEndpoint = vpn.example.com:51820\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 25" });
   s.append(el("label", {}, "Paste a WireGuard configuration (.conf)", el("div", { className: "row top" }, conf)));
   const file = el("input", { type: "file", accept: ".conf,text/plain" });
   file.onchange = async () => { if (file.files[0]) { conf.value = await file.files[0].text(); conf.dispatchEvent(new Event("input", { bubbles: true })); } };
@@ -680,6 +680,7 @@ function renderVpn() {
     endpoint: field("text", "Endpoint", v.endpoint, "vpn.example.com:51820"),
     allowed_ips: field("text", "Allowed IPs", v.allowed_ips, "Empty: 0.0.0.0/0 (everything)"),
     persistent_keepalive: field("text", "Persistent keepalive (s)", v.persistent_keepalive ? String(v.persistent_keepalive) : "", "0: off; 25 behind NAT"),
+    mtu: field("text", "MTU", v.mtu ? String(v.mtu) : "", "Empty: 1280 (lower if pages or speech stall)"),
   };
   Object.values(f).forEach(x => grid.append(x.box));
   s.append(grid);
@@ -690,6 +691,11 @@ function renderVpn() {
       const n = Number(change.persistent_keepalive || 0);
       if (!Number.isInteger(n) || n < 0 || n > 65535) throw new Error("Keepalive: seconds from 0 to 65535");
       change.persistent_keepalive = n;
+    }
+    if ("mtu" in change) {
+      const n = Number(change.mtu || 0);
+      if (!Number.isInteger(n) || (n !== 0 && (n < 576 || n > 1420))) throw new Error("MTU: 576 to 1420, or empty for 1280");
+      change.mtu = n;
     }
     if (await saveSection("vpn", change, say)) await reload();
   });

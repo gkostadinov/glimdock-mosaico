@@ -76,6 +76,12 @@ CONFIG_LV_FONT_DEFAULT_MONTSERRAT_16=y
 # Collector, agents, private reader, setup portal, captive DNS, hub, ESP-Iris.
 CONFIG_LWIP_MAX_SOCKETS=16
 CONFIG_LWIP_SNTP_MAX_SERVERS=2
+# Room for 16 KB unacknowledged per TCP connection (default 5.6 KB). A
+# connection sends at most this much per round trip: speech streams 32 KB/s,
+# which 5.6 KB only carried while round trips stayed under ~170 ms, not over a
+# phone hotspot and the VPN. The queued data lives in PSRAM
+# (CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP) and only while it waits.
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
 # The VPN's WireGuard interface is a plain lwIP netif that keeps its own state
 # in netif->state. ESP-NETIF must then keep its pointer in the netif's client
 # data instead, which ESP-IDF does when bridge support is built in (no bridge

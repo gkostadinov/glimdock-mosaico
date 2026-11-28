@@ -3,7 +3,9 @@
 // in 80 ms chunks to a Qwen/DashScope-style realtime ASR WebSocket
 // (run-task, binary audio, finish-task; result-generated sentences), as in
 // ESP-Claw's asr_provider_qwen. Audio is captured from the press, before the
-// socket is up, so the first words are not lost.
+// socket is up, so the first words are not lost. A dictation may last up to
+// five minutes: when the connection drops on the way, a new one picks up from
+// the last final words.
 #pragma once
 
 #include <functional>
@@ -18,10 +20,11 @@ struct AsrEvents {
 
 // Starts listening (returns false if the microphone or configuration is missing).
 bool asr_start(const AsrEvents &events);
-// Stops the microphone, waits for the final words (up to a few seconds) and
-// returns them; empty with error set when recognition failed.
+// Stops the microphone, waits for the final words and returns them. error is
+// set when recognition failed: with no words, or with the words heard before
+// it did (they may be cut short).
 std::string asr_finish(std::string *error);
-// Drops everything without waiting.
+// Drops everything without waiting (the connection closes in the background).
 void asr_cancel();
 bool asr_active();
 // While Swifty is open: keep a connection ready so a press does not wait for
