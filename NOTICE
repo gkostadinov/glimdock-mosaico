@@ -74,4 +74,11 @@ implementation and its X25519, linked into the firmware:
   libsodium, Copyright (c) 2013-2026 Frank Denis, ISC License; its ESP-IDF
   packaging, Copyright (c) 2021 Otto Winter, MIT License.
 
+Face ID (components/face_id) links ESP-DL and embeds its face models' weights
+in the firmware:
+
+  espressif/esp-dl 3.3, espressif/human_face_detect 0.5 and
+  espressif/human_face_recognition 0.3 (https://github.com/espressif/esp-dl),
+  Copyright (c) 2021 Espressif Systems (Shanghai) Co., Ltd. MIT License.
+
 "WireGuard" is a registered trademark of Jason A. Donenfeld.

@@ -80,6 +80,8 @@ add_executable(mosaico-preview
     "${CMAKE_CURRENT_LIST_DIR}/vpn_host.cpp"
     "${IDEA}/components/mosaico_shell/src/wifi_settings.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/board_wifi_host.cpp"
+    "${IDEA}/components/face_id/src/face_preview.cpp"
+    "${IDEA}/components/face_id/host/face_id_host.cpp"
     ${font_sources}
     ${HOME_SOURCES})
 target_include_directories(mosaico-preview PRIVATE
@@ -91,6 +93,7 @@ target_include_directories(mosaico-preview PRIVATE
     "${IDEA}/components/mosaico_ui/include"
     "${IDEA}/components/tools_app/include" "${IDEA}/components/files_app/include"
     "${IDEA}/components/vpn_app/include"
+    "${IDEA}/components/face_id/include" "${IDEA}/components/face_id/src"
     "${IDEA}/components/games_app/include" "${IDEA}/components/games_app/src"
     "${CMAKE_CURRENT_LIST_DIR}/shims"
     "${ARDUINOJSON}" "${CMAKE_BINARY_DIR}")

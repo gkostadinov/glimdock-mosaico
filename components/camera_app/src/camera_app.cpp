@@ -1613,6 +1613,108 @@ void webcam_frame(const mosaico_camera_frame_t &frame)
     webcam_encode(slot);
 }
 
+// ---- Face ID frames (camera_app_borrow) ----------------------------------------------------
+// One borrower, and only while no other mode wants the camera: the Camera
+// screen, Swifty's photos, the webcam and the torch take it back (each sets
+// its own flag first, then borrow_preempt, so a borrow racing it either sees
+// the flag or is ended). The capture task converts a frame into rgb and hands
+// it over with lock held, so ending the borrow waits for a frame in progress
+// and never frees rgb under the PPA.
+struct {
+    std::mutex lock;
+    camera_borrow_t cfg = {};
+    volatile bool on = false, paused = false;
+    uint8_t *rgb = nullptr;  // PPA output, DMA-capable PSRAM
+    size_t rgb_bytes = 0;
+} B;
+
+bool borrow_streams()
+{
+    return B.on && !B.paused;
+}
+
+void borrow_preempt()
+{
+    camera_borrow_t cfg = {};
+    {
+        std::lock_guard<std::mutex> guard(B.lock);
+        if (!B.on) {
+            return;
+        }
+        cfg = B.cfg;
+        B.on = false;
+        B.cfg = {};
+    }
+    ESP_LOGI(TAG, "face ID gives the camera back to another mode");
+    if (cfg.lost) {
+        cfg.lost(cfg.user);
+    }
+}
+
+// Upright in the UI's rotation as the person sees it: the front camera
+// mirrored, the rear as a window, whatever the Camera's flip button says.
+uint8_t borrow_setting()
+{
+    if (ppa_probed) {
+        const Mat want = want_mat(int(bsp_display_get_rotation()), G.back, false);
+        for (uint8_t i = 0; i < 16; ++i)
+            if (ppa_mats[i] == want) {
+                return i;
+            }
+    }
+    return G.fallback;
+}
+
+void borrow_frame(const mosaico_camera_frame_t &frame)
+{
+    std::lock_guard<std::mutex> guard(B.lock);
+    if (!B.on || !B.cfg.frame || !G.ppa || frame.pixel_format != V4L2_PIX_FMT_UYVY || frame.width < CROP ||
+            frame.height < CROP) {
+        return;
+    }
+    const int size = B.cfg.size;
+    const size_t bytes = (size_t(size) * size * 3 + ALIGN - 1) & ~size_t(ALIGN - 1);
+    if (B.rgb_bytes < bytes) {
+        heap_caps_free(B.rgb);
+        B.rgb = static_cast<uint8_t *>(
+                    heap_caps_aligned_calloc(ALIGN, 1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
+        B.rgb_bytes = B.rgb ? bytes : 0;
+        if (!B.rgb) {
+            ESP_LOGW(TAG, "face ID: no memory for frames");
+            return;
+        }
+    }
+    const uint32_t bpl = frame.bytes_per_line ? frame.bytes_per_line : frame.width * 2;
+    esp_cache_msync(B.rgb, B.rgb_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    ppa_srm_oper_config_t op = {};
+    op.in.buffer = frame.data;
+    op.in.pic_w = bpl / 2;
+    op.in.pic_h = frame.height;
+    op.in.block_w = CROP;
+    op.in.block_h = CROP;
+    op.in.block_offset_x = ((frame.width - CROP) / 2) & ~1u;
+    op.in.block_offset_y = ((frame.height - CROP) / 2) & ~1u;
+    op.in.srm_cm = PPA_SRM_COLOR_MODE_YUV422_UYVY;
+    op.in.yuv_range = PPA_COLOR_RANGE_LIMIT;
+    op.in.yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601;
+    op.out.buffer = B.rgb;
+    op.out.buffer_size = B.rgb_bytes;
+    op.out.pic_w = size;
+    op.out.pic_h = size;
+    op.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+    const uint8_t setting = borrow_setting();
+    op.rotation_angle = ppa_srm_rotation_angle_t(setting & PPA_ANGLE);
+    op.scale_x = op.scale_y = float(size) / CROP;  // size / 40 sixteenths: exact for the PPA
+    op.mirror_x = setting & PPA_MX;
+    op.mirror_y = setting & PPA_MY;
+    op.mode = PPA_TRANS_MODE_BLOCKING;
+    if (ppa_do_scale_rotate_mirror(G.ppa, &op) != ESP_OK) {
+        return;
+    }
+    esp_cache_msync(B.rgb, B.rgb_bytes, ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+    B.cfg.frame(B.rgb, size, G.back, B.cfg.user);
+}
+
 void capture_task(void *)
 {
     static bool photos_loaded = false;  // once: the task ends and starts again with the camera
@@ -1625,13 +1727,14 @@ void capture_task(void *)
         // A photo open in the gallery stops the stream too: it frees the
         // NAND's DMA channel, so saved photos can be read.
         const bool webcam = G.webcam_sink != nullptr;
-        if (G.shutdown || !(G.active || G.headless || webcam) || (G.gallery >= 0 && !G.headless && !webcam)) {
+        const bool face = borrow_streams();  // face ID's frames
+        if (G.shutdown || !(G.active || G.headless || webcam || face) || (G.gallery >= 0 && !G.headless && !webcam)) {
             stream(false);
             // Idle for a while (not the torch, not a photo open): close the
             // camera, which gives back the internal DMA memory its driver
             // keeps; without it the speech socket's TLS could not start.
             static TickType_t idle_since = 0;
-            if (G.camera && !G.torch_only && G.gallery < 0 && !G.active && !G.headless && !webcam) {
+            if (G.camera && !G.torch_only && G.gallery < 0 && !G.active && !G.headless && !webcam && !face) {
                 if (!idle_since) {
                     idle_since = xTaskGetTickCount();
                 }
@@ -1659,7 +1762,7 @@ void capture_task(void *)
             // under the same lock, none is missed.
             if (!G.camera && !G.torch_only) {
                 std::unique_lock<std::mutex> guard(G.task_lock);
-                if (!(G.active || G.headless || G.webcam_sink || G.torch_only)) {
+                if (!(G.active || G.headless || G.webcam_sink || G.torch_only || borrow_streams())) {
                     G.task_running = false;
                     guard.unlock();
                     ESP_LOGI(TAG, "camera idle: capture task ends");
@@ -1686,8 +1789,9 @@ void capture_task(void *)
             continue;
         }
         // The flash set to always on, or the Tools torch (lit while the camera
-        // streams too, e.g. for the USB webcam).
-        set_torch(G.flash_mode == 2 || G.torch_only);
+        // streams too, e.g. for the USB webcam). Never in a face for face ID alone.
+        const bool face_only = face && !G.active && !G.headless && !webcam;
+        set_torch((G.flash_mode == 2 && !face_only) || G.torch_only);
         if (G.capture) {
             G.capture = false;
             capture_now();
@@ -1707,6 +1811,12 @@ void capture_task(void *)
         // stream stopped now (the loop's top does it), not one more frame drawn.
         if (webcam && !G.shutdown) {
             webcam_frame(frame);
+        }
+        // Face ID alone: its small frame only, no viewfinder or facing checks.
+        if (face && !G.active && !G.headless && !webcam && !G.shutdown) {
+            borrow_frame(frame);
+            mosaico_camera_return_frame(G.camera, &frame);
+            continue;
         }
         if ((G.gallery >= 0 && !G.headless) || G.shutdown || (webcam && !G.active && !G.headless)) {
             mosaico_camera_return_frame(G.camera, &frame);  // the webcam alone needs no viewfinder
@@ -2422,6 +2532,7 @@ extern "C" int camera_app_take_photo(uint32_t timeout_ms)
     }
     const TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
     G.headless = true;
+    borrow_preempt();
     ensure_capture_task();
     while (!G.streaming && xTaskGetTickCount() < until) {
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -2457,6 +2568,7 @@ extern "C" bool camera_app_torch(bool on)
     if (!on) {
         return true;
     }
+    borrow_preempt();
     ensure_capture_task();
     for (int i = 0; i < 100 && G.torch_only && !G.torch_lit; ++i) {
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -2584,6 +2696,7 @@ extern "C" void camera_app_set_active(bool active)
     }
     G.active = active && G.started;
     if (G.active) {
+        borrow_preempt();
         ensure_capture_task();
     }
     if (!G.active && G.gallery >= 0) {
@@ -2606,6 +2719,7 @@ extern "C" void camera_app_set_frame_sink(void (*sink)(const unsigned char *jpeg
     }
     G.webcam_sink = sink;
     if (sink) {
+        borrow_preempt();
         ensure_capture_task();
     }
     ESP_LOGI(TAG, "webcam frames %s", sink ? "on" : "off");
@@ -2641,6 +2755,55 @@ extern "C" void camera_app_set_auto_facing(bool on)
 extern "C" bool camera_app_auto_facing(void)
 {
     return G.auto_facing;
+}
+
+extern "C" camera_borrow_result_t camera_app_borrow(const camera_borrow_t *borrow)
+{
+    if (!borrow || !borrow->frame || borrow->size < 80 || borrow->size > CROP || borrow->size % 40) {
+        return CAMERA_BORROW_INVALID;
+    }
+    if (!G.started) {
+        return CAMERA_BORROW_NOT_STARTED;
+    }
+    {
+        std::lock_guard<std::mutex> guard(B.lock);
+        if (G.shutdown || G.active || G.headless || G.webcam_sink || G.torch_only) {
+            return CAMERA_BORROW_BUSY;
+        }
+        B.cfg = *borrow;
+        B.paused = false;
+        B.on = true;
+    }
+    ensure_capture_task();
+    ESP_LOGI(TAG, "face ID borrows the camera (%d px frames)", borrow->size);
+    return CAMERA_BORROW_OK;
+}
+
+extern "C" void camera_app_borrow_pause(bool paused)
+{
+    B.paused = paused;
+    if (!paused && B.on) {
+        ensure_capture_task();    // it ends while nothing streams
+    }
+}
+
+extern "C" void camera_app_borrow_end(void)
+{
+    std::lock_guard<std::mutex> guard(B.lock);
+    if (B.on) {
+        ESP_LOGI(TAG, "face ID returns the camera");
+    }
+    B.on = false;
+    B.paused = false;
+    B.cfg = {};
+    heap_caps_free(B.rgb);
+    B.rgb = nullptr;
+    B.rgb_bytes = 0;
+}
+
+extern "C" int camera_app_present(void)
+{
+    return !G.probed ? -1 : G.present ? 1 : 0;
 }
 
 extern "C" void camera_app_shutdown(void)
