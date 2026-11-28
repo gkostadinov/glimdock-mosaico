@@ -61,6 +61,7 @@ add_executable(mosaico-preview
     "${IDEA}/components/mosaico_ui/src/keyboard.cpp"
     "${IDEA}/components/glimdock_port/src/glimdock_summary.cpp"
     "${IDEA}/components/swifty_app/src/swifty_figure.cpp"
+    "${IDEA}/components/swifty_app/src/swifty_paseo_ui.cpp"
     "${IDEA}/components/tools_app/src/tools_app.cpp"
     "${IDEA}/components/games_app/src/games_ui.cpp"
     "${IDEA}/components/games_app/src/games_common.cpp"

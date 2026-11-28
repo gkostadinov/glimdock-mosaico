@@ -221,6 +221,13 @@ const SIMPLE = [
     ["asr_key", "Speech key", "secret"],
     ["asr_ca", "Speech server certificate (PEM)", "pem", "Only for a privately signed speech server"],
   ] },
+  // Swifty's link to Paseo agents: more of Swifty's own keys.
+  { name: "swifty", title: "Paseo", note: "Swifty's link to your agents; applies at once", fields: [
+    ["paseo_url", "Paseo daemon URL", "url", "http://paseo-host:6767"],
+    ["paseo_token", "Daemon password", "secret", "Not set: a daemon without a password"],
+    ["paseo_provider", "Provider for new agents", "text", "e.g. codex/gpt-5.4; empty: Swifty starts none"],
+    ["paseo_ca", "Daemon certificate (PEM)", "pem", "Only for a privately signed https:// daemon"],
+  ] },
   { name: "glimdock", title: "Glimdock", note: "Saving restarts the board", fields: [
     ["endpoint", "Collector URL", "url", "https://collector/api/v1/snapshot"],
     ["token", "Display token", "secret"],

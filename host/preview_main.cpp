@@ -31,6 +31,7 @@ extern "C" void games_app_preview_frame(void);
 extern "C" void games_app_preview_mode(int mode);
 extern "C" void games_app_preview_best(int game, uint32_t score);
 #include "swifty_figure.h"
+#include "swifty_paseo_ui.h"
 #include "mui.h"
 #include "home_app.h"
 #include "home_hub.h"
@@ -555,6 +556,35 @@ int main(int argc, char **argv)
             }
         }
         tools_app_set_active(false);
+    }
+    {
+        // Swifty asks before a Paseo agent acts (swifty_paseo_ui.cpp).
+        lv_obj_t *swifty = lv_obj_create(nullptr);
+        lv_obj_remove_style_all(swifty);
+        lv_obj_set_style_bg_color(swifty, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(swifty, LV_OPA_COVER, 0);
+        lv_screen_load(swifty);
+        const swifty::PaseoAsk demos[] = {
+            {
+                "Send to Homelab audit?", "working, active 5 min ago, in homelab (codex)",
+                "Also check the NAS disks' SMART data and tell me which one to replace first.", "Send"
+            },
+            {
+                "Start an agent in Glimdock firmware for the round display?", "codex/gpt-5.4",
+                "Find why the always-on clock drifts by a minute a day, fix it, and write a short note on what changed and how "
+                "you tested it on the board.", "Start"
+            },
+        };
+        const char *const names[] = {"swifty-paseo-confirm", "swifty-paseo-start"};
+        for (int i = 0; i < 2; ++i) {
+            lv_obj_t *ask = swifty::paseo_confirm_card(lv_layer_top(), demos[i], nullptr, nullptr);
+            for (int k = 0; k < 10; ++k) {
+                nativeClock += 60;
+                (lv_timer_handler)();
+            }
+            save(names[i], lv_display_get_default());
+            lv_obj_delete(ask);
+        }
     }
     {
         void vpn_host_demo(bool on);
