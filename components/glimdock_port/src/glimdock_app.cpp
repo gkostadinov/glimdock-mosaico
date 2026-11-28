@@ -67,6 +67,11 @@ extern "C" void glimdock_app_set_active(bool value)
 
 extern "C" void glimdock_app_note_touch(bool) {}
 
+extern "C" void glimdock_app_set_access(bool read_only, bool collector_changes)
+{
+    glim_ui_set_access(read_only, collector_changes);
+}
+
 namespace {
 String saved(Preferences &p, const char *key)
 {

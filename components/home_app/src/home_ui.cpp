@@ -496,10 +496,28 @@ RunHandler after_run(const std::string &name, const std::string &target = std::s
     };
 }
 
+// Read-only for the profile signed in on the board (home_app_set_read_only):
+// pages show, actions are refused with a note.
+bool read_only = false;
+const char *READ_ONLY_NOTE = "Read-only for this profile";
+
+// Read-only: says so and refuses (true).
+bool refused_read_only()
+{
+    if (read_only) {
+        toast(READ_ONLY_NOTE, "fail");
+    }
+    return read_only;
+}
+
 // Runs an action by its catalog flow: direct, or prepare -> confirm page.
 void act(const std::string &action, const std::string &target, JsonDocument params, const std::string &label,
          const std::string &name = std::string())
 {
+    if (refused_read_only()) {
+        lean_settle(target, false);
+        return;
+    }
     const std::string flow = hub.flow(action);
     const std::string who = name.empty() ? label : name;
     if (!hub.can(action)) {
@@ -1323,7 +1341,7 @@ void settings_page()
     PillOpts red;
     red.color = c.red;
     pill(sc, PAD, y, w, 40, G.confirm_unpair ? "Tap again to unpair" : "Unpair this display", [] {
-        if (G.confirm_unpair) {
+        if (G.confirm_unpair && !refused_read_only()) {
             G.confirm_unpair = false;
             hub.unpair();
             open(Page::Pair);
@@ -1613,6 +1631,11 @@ void home_preview_toast(const char *message)
 }
 
 }  // namespace home
+
+extern "C" void home_app_set_read_only(bool on)
+{
+    home::read_only = on;
+}
 
 extern "C" void home_app_set_exit_handler(void (*exit_to_launcher)())
 {

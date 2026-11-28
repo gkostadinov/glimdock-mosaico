@@ -177,6 +177,9 @@ Shortcut *find_shortcut(const std::string &key)
 
 L::Kind kind(const std::string &key)
 {
+    if (ui.hooks.visible && !ui.hooks.visible(key.c_str())) {
+        return L::Kind::Pending;  // not for this profile: keeps its place, takes no cell
+    }
     if (launcher_app(key.c_str()) || find_shortcut(key)) {
         return L::Kind::Shown;
     }
@@ -821,6 +824,9 @@ void open_hidden()
     });
     label(o, "Hidden apps", 112, 18, 0, TEXT, 30, true);
     ui.sheet_keys = ui.layout.hidden;
+    ui.sheet_keys.erase(std::remove_if(ui.sheet_keys.begin(), ui.sheet_keys.end(), [](const std::string & k) {
+        return ui.hooks.visible && !ui.hooks.visible(k.c_str());
+    }), ui.sheet_keys.end());
     const std::vector<std::string> &hidden = ui.sheet_keys;
     if (hidden.empty()) {
         lv_obj_t *t = label(o, "Nothing hidden. Hold an icon on the home screen, then tap \xE2\x88\x92 to hide it.",
@@ -1485,6 +1491,9 @@ lv_obj_t *launcher_ui_build(const LauncherHooks &hooks, int radius, int brightne
     ui.jiggle = lv_timer_create(jiggle_cb, 40, nullptr);
     lv_timer_pause(ui.jiggle);
     build_settings(brightness, haptics, auto_rotate);
+    if (hooks.decorate) {
+        hooks.decorate(ui.status, ui.settings);
+    }
     stagger(ui.pages[0], 0, 12);
     return s;
 }
@@ -1609,6 +1618,15 @@ void launcher_ui_set_layout(const char *text)
     normalize();
     apply_layout(false);
     save_layout();
+}
+
+void launcher_ui_refilter()
+{
+    if (!ui.built || ui.drag) {
+        return;
+    }
+    normalize();
+    apply_layout(false);
 }
 
 void launcher_ui_calibration(bool visible, int radius)

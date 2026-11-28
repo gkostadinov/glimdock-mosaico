@@ -58,6 +58,14 @@ struct LauncherHooks {
     void (*shortcuts)();
     // Settings > Wi-Fi (optional): the Wi-Fi card opens it.
     void (*wifi)();
+    // Profiles (optional, profiles.h): whether the home screen shows this key
+    // (an app's or a shortcut tile's) to whoever is signed in. One it hides
+    // keeps its place for those who see it; launcher_ui_refilter() applies a
+    // change.
+    bool (*visible)(const char *key);
+    // Profiles (optional): called once with the status bar and the Settings
+    // sheet, to put the profile's badge on each.
+    void (*decorate)(lv_obj_t *status_bar, lv_obj_t *settings);
 };
 
 // portrait: a still of Swifty (unused; may be null).
@@ -86,6 +94,9 @@ void launcher_ui_hidden_apps(bool visible);
 size_t launcher_ui_layout(char *out, size_t capacity);
 // Replaces the layout (launcher_layout.h's text form; "" the default) and saves it.
 void launcher_ui_set_layout(const char *layout);
+// Shows and hides icons again after hooks.visible changed its mind (another
+// profile signed in). The layout itself is unchanged.
+void launcher_ui_refilter();
 
 // ---- Shortcut tiles ------------------------------------------------------------------
 // A tile on the home screen that runs an action instead of opening an app. The

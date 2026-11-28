@@ -42,6 +42,7 @@ struct Job {
 
 std::mutex lock;  // history
 std::vector<Msg> history;
+std::atomic<unsigned> conversation{0};  // bumped by agent_reset: a reply from before it is not kept
 std::atomic<bool> busy{false}, stop{false};
 QueueHandle_t jobs = nullptr;
 std::string model_cache;
@@ -66,6 +67,21 @@ const char *SYSTEM =
     "Begin a reply with exactly one mood tag when it fits: [pleased] for good news or thanks, [sorry] when you "
     "cannot help or something failed, [confused] when the request is unclear. Otherwise no tag.";
 
+// Developer mode (swifty_policy_t.developer: the owner in full mode): code
+// first, longer answers, the same tools.
+const char *DEVELOPER =
+    "You are Swifty in developer mode, on an ESP-Mosaico (an ESP32-S31 board with a 480x480 round-cornered touch "
+    "screen, a camera and Wi-Fi), working with its owner, who signed in with face and PIN. Help with code, "
+    "systems and the homelab: write complete, working code in fenced blocks that name the language (```cpp, "
+    "```python, ```bash, ```yaml), keep lines short (about 40 characters fit the screen's width), and explain "
+    "briefly before or after it. Be precise and technical; longer answers are fine when the task needs them "
+    "(up to about 600 words besides code). Use Markdown: short paragraphs, lists, `inline code`. No emoji.\n"
+    "The board's tools work as always (the homelab with glimdock, the home, files in your Swifty folder, "
+    "web_search for anything current). Use them to answer and to act when asked; say what you did. Ask before "
+    "anything that cannot be undone.\n"
+    "Begin a reply with exactly one mood tag when it fits: [pleased], [sorry] or [confused]. Otherwise no tag.";
+constexpr int DEVELOPER_MAX_TOKENS = 4096;
+
 const char *TOOLS = R"([
 {"type":"function","function":{"name":"take_photo","description":"Take a photo with the board's camera now and look at it. The photo is attached in the next message.","parameters":{"type":"object","properties":{},"required":[]}}},
 {"type":"function","function":{"name":"show_photo","description":"Show one of the camera's photos on the screen, in the chat.","parameters":{"type":"object","properties":{"index":{"type":"integer","description":"1 is the oldest photo; 0 or omitted is the newest."}},"required":[]}}},
@@ -81,6 +97,19 @@ struct Ext {
 };
 std::mutex ext_lock;
 std::vector<Ext> ext_tools;
+swifty_policy_t policy = {};  // under ext_lock
+
+bool tool_allowed(const char *name)
+{
+    std::lock_guard<std::mutex> g(ext_lock);
+    return !policy.tool_allowed || policy.tool_allowed(name);
+}
+
+bool developer()
+{
+    std::lock_guard<std::mutex> g(ext_lock);
+    return policy.developer && policy.developer();
+}
 
 std::string base_url(const Config &c)
 {
@@ -161,15 +190,28 @@ std::string model(const Config &c, std::string *error)
 
 std::string build_request(const std::string &model_name)
 {
+    const bool dev = developer();
     JsonDocument doc;
     doc["model"] = model_name;
     doc["stream"] = true;
-    doc["temperature"] = 0.6;
-    JsonDocument tools;
-    deserializeJson(tools, TOOLS);
+    doc["temperature"] = dev ? 0.3 : 0.6;
+    if (dev) {
+        doc["max_tokens"] = DEVELOPER_MAX_TOKENS;
+    }
+    // Only the tools the person signed in may use (the policy, swifty_app.h).
+    JsonDocument builtin, tools;
+    deserializeJson(builtin, TOOLS);
+    JsonArray offered = tools.to<JsonArray>();
+    for (JsonVariant t : builtin.as<JsonArray>())
+        if (tool_allowed(t["function"]["name"] | "")) {
+            offered.add(t);
+        }
     {
         std::lock_guard<std::mutex> g(ext_lock);
         for (const Ext &e : ext_tools) {
+            if (policy.tool_allowed && !policy.tool_allowed(e.name.c_str())) {
+                continue;
+            }
             JsonObject t = tools.add<JsonObject>();
             t["type"] = "function";
             t["function"]["name"] = e.name;
@@ -191,7 +233,19 @@ std::string build_request(const std::string &model_name)
     strftime(now, sizeof(now), "%A %d %B %Y, %H:%M", &local);
     JsonObject sys = messages.add<JsonObject>();
     sys["role"] = "system";
-    sys["content"] = std::string(SYSTEM) + "\nIt is " + now + ".";
+    std::string system = std::string(dev ? DEVELOPER : SYSTEM) + "\nIt is " + now + ".";
+    {
+        // Who is signed in and what they may not do.
+        char who[480] = "";
+        std::lock_guard<std::mutex> g(ext_lock);
+        if (policy.describe) {
+            policy.describe(who, sizeof(who));
+        }
+        if (who[0]) {
+            system += std::string("\n") + who;
+        }
+    }
+    sys["content"] = system;
     std::lock_guard<std::mutex> g(lock);
     // Only the newest photos travel as images; older ones are mentioned.
     int photos_left = KEEP_PHOTOS;
@@ -472,6 +526,11 @@ std::string web_search(const std::string &query)
 
 std::string run_tool(const Call &call, const AgentEvents &ev, Jpeg *photo)
 {
+    // Refused here too: a model may call a tool it was not offered.
+    if (!tool_allowed(call.name.c_str())) {
+        ESP_LOGW(TAG, "tool %s refused for this profile", call.name.c_str());
+        return "Not allowed for the profile signed in on the board. Tell the person, briefly.";
+    }
     JsonDocument args;
     deserializeJson(args, call.args.empty() ? "{}" : call.args);
     if (call.name == "take_photo") {
@@ -585,11 +644,17 @@ void trim_history()
 void run(Job &job)
 {
     const Config c = config();
+    unsigned started;
     {
         std::lock_guard<std::mutex> g(lock);
+        started = conversation;
         history.push_back({"user", job.text, "", "", job.photos});
         trim_history();
     }
+    // A reset meanwhile (another person signed in): nothing more goes into the history.
+    const auto ours = [&] {
+        return conversation == started;
+    };
     std::string error;
     const std::string name = c.llm_ready() ? model(c, &error) : "";
     if (!c.llm_ready()) {
@@ -625,6 +690,9 @@ void run(Job &job)
         serializeJson(doc, serialized);
         {
             std::lock_guard<std::mutex> g(lock);
+            if (!ours()) {
+                break;
+            }
             history.push_back({"assistant", text, serialized, "", {}});
         }
         std::vector<Jpeg> seen;
@@ -635,11 +703,18 @@ void run(Job &job)
                 seen.push_back(photo);
             }
             std::lock_guard<std::mutex> g(lock);
-            history.push_back({"tool", result, "", call.id, {}});
+            if (ours()) {
+                history.push_back({"tool", result, "", call.id, {}});
+            }
         }
         if (!seen.empty()) {
             std::lock_guard<std::mutex> g(lock);
-            history.push_back({"user", "The photo you just took with the camera.", "", "", seen});
+            if (ours()) {
+                history.push_back({"user", "The photo you just took with the camera.", "", "", seen});
+            }
+        }
+        if (!ours()) {
+            break;
         }
     }
     Shot mood = Shot::Hello;
@@ -647,15 +722,17 @@ void run(Job &job)
     if (error.empty()) {
         mood = take_mood(shown);
         std::lock_guard<std::mutex> g(lock);
-        history.push_back({"assistant", text, "", "", {}});
+        if (ours()) {
+            history.push_back({"assistant", text, "", "", {}});
+        }
     } else {
         ESP_LOGW(TAG, "reply failed: %s", error.c_str());
         // Keep the question out of the history, so a retry asks it afresh.
         std::lock_guard<std::mutex> g(lock);
-        while (!history.empty() && history.back().role != "user") {
+        while (ours() && !history.empty() && history.back().role != "user") {
             history.pop_back();
         }
-        if (!history.empty()) {
+        if (ours() && !history.empty()) {
             history.pop_back();
         }
     }
@@ -712,13 +789,25 @@ bool agent_busy()
     return busy;
 }
 
+bool agent_developer()
+{
+    return developer();
+}
+
 void agent_reset()
 {
     std::lock_guard<std::mutex> g(lock);
     history.clear();
+    ++conversation;
 }
 
 }  // namespace swifty
+
+extern "C" void swifty_app_set_policy(const swifty_policy_t *p)
+{
+    std::lock_guard<std::mutex> g(swifty::ext_lock);
+    swifty::policy = p ? *p : swifty_policy_t{};
+}
 
 extern "C" void swifty_app_add_tool(const char *name, const char *description, const char *parameters_json, swifty_tool_fn fn)
 {

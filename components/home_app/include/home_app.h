@@ -49,6 +49,9 @@ void home_app_command(const char *verb, const char *target, const char *value, c
 
 // Settings offers "Exit to Mosaico launcher"; the shell provides the action.
 void home_app_set_exit_handler(void (*exit_to_launcher)(void));
+// Read-only for the profile signed in (the shell's profiles): pages show,
+// lights, music, scenes and unpairing are refused with a note.
+void home_app_set_read_only(bool read_only);
 
 // Pairs with a Swifty Home hub using a one-time display code, as the Pair
 // page does (LVGL task; Home must be started). The outcome shows in

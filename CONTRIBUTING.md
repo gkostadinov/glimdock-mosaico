@@ -119,8 +119,18 @@ The shell registers RPCs on service `0x4744` (18244), callable with
 
 | 53 | none / `00` / `01` then text / `02` / `03` / `04` / `05` / `06` | The home screen: page, editing and layout (pages split by `\|`, keys by commas, hidden keys after `#`). `00` resets the layout, `01` sets it from the text, `02` and `03` start and end editing, `04` shows the hidden apps, `05` shows Settings and `06` opens Settings > Wi-Fi. The reply comes before the change. |
 | 56 | `00` / `01` / `02` ssid `00` password / `03` ssid | The board's Wi-Fi (`board_wifi.h`) as JSON: the network, whether it is connected, its address and signal, whether it is saved or Vibe Mode's, the last join's result and the networks from the last scan. `01` scans first (read again for the results), `02` joins (no password: the saved one), `03` forgets a saved network. Passwords are never in the reply. |
+| 54 · 60 | none or `{"op":"list","from":N}`; or JSON: `{"op":"setup","name":"Owner","pin":"2468"}`, `{"op":"save","profile":{"id":N,"name":"Partner","signin":"pin","caps":["home_control"],"apps":{"glimdock":"hidden","home":"full"}}}` (no id: a new one), `{"op":"delete","id":N}`, `{"op":"lock"}`, `{"op":"switch","id":N,"pin":"1357"}`, `{"op":"settings","default":0,"lock_s":300,"elevated_lock_s":120}` | Profiles (`profiles.h`) as JSON, a page at a time (read again from `next`): who is signed in, full mode, whether the camera can sign in, the lock times, and each profile's sign-in, PIN and face (set or not), wrong tries, capabilities (bits in `profile_cap_t`'s order) and apps (one digit per slot, the slot a `ShellApp` value, 31 Settings: 0 hidden, 1 read-only, 2 full). Never a PIN or its hash. A change replies `{"reply":"ok"}` or `{"error":...}`, with a trusted computer's rights but the model's rules: a manager needs a PIN, full mode a face and a PIN (enrolled on the board), one manager stays. `switch` cannot enter full mode: that takes the face at the board. |
+| 54 · 61 | `{"op":"set_pin","id":N,"pin":"135790"}` / `{"op":"unblock","id":N}` / `{"op":"off"}` | Recovery for a forgotten PIN, over USB only (refused over the network, even from a paired computer): a new PIN for a profile (its wrong tries forgotten), the wrong tries forgotten, or every profile and face gone, so the board behaves as before profiles. Anyone with the board on USB can do this, as they could reinstall the firmware. |
 
 While the USB webcam is on, ESP-Iris is stopped: read 44–46 after it ends.
+
+Profiles (`components/profiles`) gate the apps and Swifty's tools through
+`profiles_can()` and `profiles_app_access()`; with none set up the board
+behaves as it always has. A forgotten PIN is reset with RPC 54 · 61 over USB,
+for example `python mosaico.py iris rpc --project projects/glimdock 18244 54
+--payload-hex` with `3d` (61) followed by the JSON's bytes. The model's host
+tests run with
+`cmake -S components/profiles/test -B build-host/profiles-test && cmake --build build-host/profiles-test && build-host/profiles-test/profiles-test`.
 
 The VPN's settings and its switch are the `vpn` section of the configuration
 (RPC 40, which `tools/mosaico-config.py` drives: `{"vpn": {"on": true}}`

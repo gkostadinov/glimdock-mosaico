@@ -46,6 +46,9 @@
 #include "orientation.h"
 #include "frame_sync.h"
 #include "perf.h"
+#include "profiles.h"
+#include "profiles_glue.h"
+#include "profiles_ui.h"
 #include "sdkconfig.h"
 #include "shell_internal.h"
 #include "time_zone.h"
@@ -69,6 +72,7 @@ struct {
               *files_screen = nullptr, *tools_screen = nullptr, *gallery_screen = nullptr, *vpn_screen = nullptr,
                *games_screen = nullptr;
     lv_obj_t *home_screen = nullptr, *home_frame = nullptr;
+    lv_obj_t *home_note = nullptr;  // "Read-only for this profile" over Home
     lv_indev_read_cb_t touch_read = nullptr;
     esp_lcd_touch_handle_t touch = nullptr;
     bool touch_pressed = false;
@@ -420,6 +424,19 @@ void refresh_launcher(lv_timer_t *)
     swifty_app_summary(&swifty);
     files_summary_t files;
     files_app_summary(&files);
+    // The widgets show nothing of an app the profile signed in may not see.
+    if (profiles_app_access(ShellApp::Glimdock) == PROFILE_ACCESS_HIDDEN) {
+        glim = glimdock_summary_t{};
+        glim.cpu = glim.memory = NAN;
+        strlcpy(glim.status, "Homelab monitor", sizeof(glim.status));
+    }
+    if (profiles_app_access(ShellApp::Home) == PROFILE_ACCESS_HIDDEN) {
+        home = home_summary_t{};
+        strlcpy(home.title, "Swifty Home", sizeof(home.title));
+    }
+    if (profiles_app_access(ShellApp::Swifty) == PROFILE_ACCESS_HIDDEN) {
+        swifty = swifty_summary_t{};
+    }
     read_battery();
     char zone_text[64];
     time_zone_text(zone_text, sizeof(zone_text));
@@ -438,6 +455,10 @@ void refresh_launcher(lv_timer_t *)
 
 void go_launcher_async(void *)
 {
+    // The profiles' screens are over any app: Back there first.
+    if (profiles_ui_back()) {
+        return;
+    }
     // On the launcher the AI key is Back: it closes what is open on it (Wi-Fi,
     // the shortcuts' editor, a sheet, Settings) one level at a time.
     if (shell.current == ShellApp::Launcher && (wifi_settings_back() || shortcuts_editor_back() || launcher_ui_back())) {
@@ -598,6 +619,10 @@ void home_status(char *out, size_t capacity)
 std::atomic<bool> ai_holding{false};
 void swifty_listen_async(void *on)
 {
+    if (on && profiles_app_access(ShellApp::Swifty) == PROFILE_ACCESS_HIDDEN) {
+        profiles_ui_note("Swifty is not available for this profile");
+        return;
+    }
     if (on) {
         const int64_t t0 = esp_timer_get_time();
         if (shell.current != ShellApp::Swifty) {
@@ -695,6 +720,16 @@ static bool camera_screen()
 
 void shell_show(ShellApp app)
 {
+    // Every way in (a tile, RPC 30, Swifty, a shortcut, the last app at start)
+    // comes here: an app the profile signed in may not see opens the launcher.
+    if (app != ShellApp::Launcher && profiles_app_access(app) == PROFILE_ACCESS_HIDDEN) {
+        ESP_LOGI(TAG, "%s is not for this profile", shell_app_name(app));
+        profiles_ui_note("Not available for this profile");
+        if (shell.current == ShellApp::Launcher) {
+            return;
+        }
+        app = ShellApp::Launcher;
+    }
     const ShellApp previous = shell.current;
     launcher_ui_calibration(false, shell.radius);
     if (app != ShellApp::Launcher) {
@@ -831,6 +866,10 @@ void open_app(const char *a, char *out, size_t cap)
     }
     for (int i = 0; i < SHELL_APPS; ++i)
         if (name == shell_app_name(ShellApp(i))) {
+            if (profiles_app_access(i) == PROFILE_ACCESS_HIDDEN) {
+                snprintf(out, cap, "%s is not available for the profile signed in.", name.c_str());
+                return;
+            }
             on_ui([i, tool_index] {
                 if (i == int(ShellApp::Tools) && tool_index >= 0) tools_app_select(tool_index);
                 lv_async_call(open_async, reinterpret_cast<void *>(uintptr_t(i)));
@@ -1013,6 +1052,10 @@ void vpn(const char *a, char *out, size_t cap)
 {
     const JsonDocument d = args(a);
     const std::string action = d["action"] | "status";
+    if ((action == "on" || action == "off") && !profiles_can(PROFILE_CAP_SETTINGS_NETWORK)) {
+        snprintf(out, cap, "Switching the VPN is not allowed for the profile signed in.");
+        return;
+    }
     if (action == "on" || action == "off") {
         vpn_summary_t s;
         vpn_app_summary(&s);
@@ -1438,6 +1481,58 @@ void usb_kick(void *)
     vTaskDelete(nullptr);
 }
 
+// ---- profiles: what the shell does when someone else signs in -----------------------------
+// After any change of who is signed in or of what they may do (profiles_glue.cpp).
+static void apply_profile()
+{
+    static uint8_t applied = 0xFD;  // nobody yet
+    const uint8_t now = profiles_current();
+    const bool someone_else = now != applied;
+    applied = now;
+    launcher_ui_refilter();
+    glimdock_app_set_access(profiles_app_access(ShellApp::Glimdock) == PROFILE_ACCESS_READ,
+                            profiles_can(PROFILE_CAP_GLIMDOCK_ACTIONS));
+    const bool home_read = profiles_app_access(ShellApp::Home) == PROFILE_ACCESS_READ;
+    home_app_set_read_only(home_read);
+    if (shell.home_note) {
+        mui::set_hidden(shell.home_note, !home_read);
+    }
+    if (someone_else) {
+        // Another person: not the last one's chat, nor their web session.
+        swifty_app_new_conversation();
+        WebSettingsInfo web;
+        web_settings_info(&web);
+        if (web.running) {
+            web_settings_stop("Turned off: another profile signed in");
+        }
+    }
+    if (!profiles_can(PROFILE_CAP_SETTINGS_NETWORK)) {
+        wifi_settings_close();
+    }
+    for (int i = 0; i < 4 && !profiles_can(PROFILE_CAP_SHORTCUTS_EDIT) && shortcuts_editor_back(); ++i) {
+    }
+    if (shell.current != ShellApp::Launcher && profiles_app_access(shell.current) == PROFILE_ACCESS_HIDDEN) {
+        shell_show(ShellApp::Launcher);
+    }
+    refresh_launcher(nullptr);
+}
+
+// The profile's badge in the status bar (left of the battery, which
+// launcher_ui.cpp puts as far out as the corner's curve allows at its height)
+// and at the top right of Settings, mirroring its back button.
+static void decorate_launcher(lv_obj_t *status, lv_obj_t *settings)
+{
+    const int r = shell.radius;
+    int inset = 0;
+    if (r > 14) {
+        const float d = float(r - 14);
+        inset = int(ceilf(float(r) - sqrtf(float(r * r) - d * d)));
+    }
+    const int edge = std::max(20, inset + 10);
+    profiles_ui_badge(status, PANEL - edge - 33 - 36, 8, 26);
+    profiles_ui_badge(settings, PANEL - 56 - 44, 14, 44, true);
+}
+
 // The always-on display (always_on.cpp): what keeps the screen up, the app
 // that pauses under the clock, and the panel's light.
 namespace aod {
@@ -1520,6 +1615,9 @@ extern "C" esp_err_t mosaico_shell_start(void)
     boot_stage("prefs");
     load_prefs();
     adopt_amoled_once();
+    // Who is signed in, before any app or the launcher reads it (with no
+    // profiles set up: the one owner, everything as before).
+    profiles_init();
     boot_stage("display start");
     // Glimdock's loop() and the TrueType rasterizer run on the LVGL task; the
     // adapter's default 8 KB stack overflowed (CPU lockup resets). Every app
@@ -1588,6 +1686,13 @@ extern "C" esp_err_t mosaico_shell_start(void)
         swifty_app_config_section("display", always_on_config_apply, always_on_config_status);
         swifty_app_config_section("vpn", vpn_app_config_apply, vpn_app_config_status);
         agent_tools::register_all();
+        // Only the tools the person signed in may use, and their limits in
+        // Swifty's prompt (profiles_glue.cpp); developer mode in full mode.
+        static const swifty_policy_t policy = {profiles_tool_allowed, profiles_describe, [] {
+                return profiles_can(PROFILE_CAP_SWIFTY_ADVANCED);
+            }
+        };
+        swifty_app_set_policy(&policy);
         reminders_start();
     }
     // Files, Tools, the Gallery and Games: plain black full-panel screens.
@@ -1658,6 +1763,7 @@ extern "C" esp_err_t mosaico_shell_start(void)
     const int home_x = int(lroundf(shell.radius * 0.15f)), home_y = int(lroundf(shell.radius * 0.1f));
     shell.home_screen =
         app_screen(&shell.home_frame, home_x, home_y, PANEL - 2 * home_x, PANEL - 2 * home_y, 0x000000);
+    shell.home_note = profiles_ui_ribbon(shell.home_screen, "Read-only for this profile");
     int widgets[2] = {-1, -1};
     char layout[512] = "";  // the home screen's pages (launcher_layout.h's text)
     {
@@ -1689,7 +1795,10 @@ extern "C" esp_err_t mosaico_shell_start(void)
     camera_app_set_auto_facing,
     [](bool on)
     {
-        if (on) {
+        // Web settings edit the board's URLs and keys: Wi-Fi and VPN rights.
+        if (on && !profiles_can(PROFILE_CAP_SETTINGS_NETWORK)) {
+            profiles_ui_note("Not available for this profile");
+        } else if (on) {
             web_settings_start();
         } else {
             web_settings_stop("");
@@ -1708,10 +1817,30 @@ extern "C" esp_err_t mosaico_shell_start(void)
         ESP_LOGI(TAG, "home screen: %s", text);
     },
     [] { haptics_pulse(HapticPulse::Tap); },
-    shortcuts_editor_open, wifi_settings_open},
+    []
+    {
+        if (profiles_can(PROFILE_CAP_SHORTCUTS_EDIT)) {
+            shortcuts_editor_open();
+        } else {
+            profiles_ui_note("Editing shortcuts is not allowed for this profile");
+        }
+    },
+    []
+    {
+        if (profiles_can(PROFILE_CAP_SETTINGS_NETWORK)) {
+            wifi_settings_open();
+        } else {
+            profiles_ui_note("Wi-Fi settings are not allowed for this profile");
+        }
+    },
+    profiles_key_visible, decorate_launcher},
     shell.radius, shell.brightness, haptics_enabled(), orientation_enabled(),
          swifty_app_portrait(168), widgets[0], widgets[1], layout);
     home_app_set_exit_handler([] { shell_show(ShellApp::Launcher); });
+    // Profiles: the lock screen, RPC 54 · 60/61, the auto-lock and Swifty's
+    // policy; apply_profile once now for the profile the board starts on.
+    profiles_glue_start(apply_profile);
+    apply_profile();
     web_settings_set_restart(restart_board);  // a save that applies after a restart
     always_on_start({aod::busy, aod::pause, aod::light, aod::brightness, aod::info, aod::no_clock});
     {
@@ -1794,7 +1923,8 @@ extern "C" esp_err_t mosaico_shell_start(void)
     lv_timer_t *later = lv_timer_create([](lv_timer_t *t) {
         lv_timer_delete(t);
         start_apps();
-        if (resume != ShellApp::Launcher) {
+        // Quietly not an app the profile the board starts on may not see.
+        if (resume != ShellApp::Launcher && profiles_app_access(resume) != PROFILE_ACCESS_HIDDEN) {
             ESP_LOGI(TAG, "resuming the last app");
             shell_show(resume);
         }

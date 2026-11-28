@@ -196,6 +196,17 @@ string pct(float v)
     return isfinite(v) ? fmt("%d%%", int(lroundf(v))) : string(DASH);
 }
 
+// ---- the profile's access (glimdock_app_set_access) -----------------------------
+// Read-only shows every page and changes nothing; collector changes (the
+// connection, the collector's nodes) need more than full access.
+bool read_only = false, collector_changes = true;
+const char *READ_ONLY_NOTE = "Read-only for this profile";
+
+bool may_change_collector()
+{
+    return !read_only && collector_changes;
+}
+
 // ---- state of the feed -----------------------------------------------------------
 bool stale()
 {
@@ -319,6 +330,7 @@ void sample_history()
 void open_page(Page p);
 void rebuild();
 void close_overlay();
+void note_card(const string &text, uint32_t color = TEXT2);
 void nodes_cb(lv_event_t *);
 void poll_operations();
 bool redirect = false;
@@ -406,6 +418,11 @@ void setup_card()
     // old screens; only show other messages (errors) here.
     if (G.net.message[0] && !strstr(G.net.message, "Not configured")) {
         label(c, G.net.message, 22, 128, 416, WARN, 14);
+    }
+    if (!may_change_collector()) {
+        label(c, read_only ? READ_ONLY_NOTE : "Setting up Glimdock needs full mode", 22, 174, 416, WARN, 15, true);
+        Y += 244;
+        return;
     }
     lv_obj_t *b = fill_button(c, 22, 160, 200, 50, "Set up", ACC, 17);
     on(b, goto_settings);
@@ -1135,7 +1152,9 @@ void open_form()
 
 void form_cb(lv_event_t *)
 {
-    open_form();
+    if (may_change_collector()) {
+        open_form();
+    }
 }
 
 void sound_cb(lv_event_t *e)
@@ -1169,11 +1188,19 @@ void page_settings()
         label(cc, c.message, 20, 138, 420, c.saved ? OK : WARN, 13);
     }
     Y += ch + GAP;
-    lv_obj_t *edit = fill_button(C, 0, Y, HALF, 52, "Connection", ACC, 17);
-    on(edit, form_cb);
-    lv_obj_t *nodes = field_button(C, HALF + GAP, Y, HALF, 52, "Collector nodes", 17);
-    on(nodes, nodes_cb);
-    Y += 52 + GAP;
+    if (read_only) {
+        note_card(string(READ_ONLY_NOTE) + ": the collector's settings, sample data and sounds stay as they are.", WARN);
+        return;
+    }
+    if (collector_changes) {
+        lv_obj_t *edit = fill_button(C, 0, Y, HALF, 52, "Connection", ACC, 17);
+        on(edit, form_cb);
+        lv_obj_t *nodes = field_button(C, HALF + GAP, Y, HALF, 52, "Collector nodes", 17);
+        on(nodes, nodes_cb);
+        Y += 52 + GAP;
+    } else {
+        note_card("Changing the collector or its nodes needs full mode.");
+    }
     lv_obj_t *demo = card(76);
     label(demo, "Sample data", 20, 14, 280, TEXT, 17, true);
     label(demo, G.demo ? "Showing demo systems" : "Preview Glimdock without a collector", 20, 42, 300, TEXT3, 13);
@@ -1219,7 +1246,7 @@ void page_header(const char *title, const char *detail, lv_event_cb_t back)
     Y += 52;
 }
 
-void note_card(const string &text, uint32_t color = TEXT2)
+void note_card(const string &text, uint32_t color)
 {
     lv_obj_t *c = card(10);
     lv_obj_t *l = label(c, text.c_str(), 20, 14, 420, color, 15);
@@ -2459,6 +2486,9 @@ void rebuild()
 // the rebuild happens on the next poll.
 void open_page(Page p)
 {
+    if (!may_change_collector() && (p == NODES || p == NODE_FORM)) {
+        p = SETTINGS;  // its note says why
+    }
     if (p != AGENTS) {
         close_chat();
     }
@@ -2588,6 +2618,22 @@ void glim_ui_select(int page)
     if (page >= SYSTEMS && page <= AGENTS && G.started) {
         open_page(Page(page));
     }
+}
+
+void glim_ui_set_access(bool ro, bool collector)
+{
+    if (ro == read_only && collector == collector_changes) {
+        return;
+    }
+    read_only = ro;
+    collector_changes = collector;
+    if (!may_change_collector()) {
+        close_overlay();  // a connection form or editor that was open
+        if (G.page == NODES || G.page == NODE_FORM) {
+            G.page = SETTINGS;
+        }
+    }
+    G.dirty = true;
 }
 
 void glim_ui_set_active(bool active)

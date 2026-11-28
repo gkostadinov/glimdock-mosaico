@@ -14,6 +14,8 @@ void glim_ui_start(lv_obj_t *screen);
 void glim_ui_set_active(bool active);
 // Opens a page (0 Systems, 1 Clock, 2 Settings, 3 Overview, ...), as its tab.
 void glim_ui_select(int page);
+// The profile's access (glimdock_app_set_access).
+void glim_ui_set_access(bool read_only, bool collector_changes);
 
 // Host preview only.
 void glim_ui_preview(int page, int node, bool demo);

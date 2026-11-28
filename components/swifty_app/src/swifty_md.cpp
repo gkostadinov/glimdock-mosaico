@@ -260,9 +260,14 @@ void md_render(lv_obj_t *parent, const std::string &text, int width, const Image
         const std::string t = trim(raw);
         if (t.compare(0, 3, "```") == 0) {  // code block, to the closing fence (or the end while streaming)
             flush_para();
+            const std::string lang = trim(t.substr(3));  // ```cpp: named above the code
             std::string code;
             for (++i; i < lines.size() && trim(lines[i]).compare(0, 3, "```") != 0; ++i) {
                 code += (code.empty() ? "" : "\n") + lines[i];
+            }
+            // Tabs as four spaces: the label would draw them as one narrow glyph.
+            for (size_t at = code.find('\t'); at != std::string::npos; at = code.find('\t', at + 4)) {
+                code.replace(at, 1, "    ");
             }
             lv_obj_t *box_ = lv_obj_create(parent);
             lv_obj_remove_style_all(box_);
@@ -271,10 +276,23 @@ void md_render(lv_obj_t *parent, const std::string &text, int width, const Image
             lv_obj_set_style_bg_opa(box_, LV_OPA_COVER, 0);
             lv_obj_set_style_radius(box_, 10, 0);
             lv_obj_set_style_pad_all(box_, 10, 0);
+            // A bar down the left, as editors mark a block.
+            lv_obj_set_style_border_side(box_, LV_BORDER_SIDE_LEFT, 0);
+            lv_obj_set_style_border_width(box_, 3, 0);
+            lv_obj_set_style_border_color(box_, lv_color_hex(CODE_INK), 0);
+            lv_obj_set_style_border_opa(box_, LV_OPA_40, 0);
             lv_obj_remove_flag(box_, lv_obj_flag_t(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
+            if (!lang.empty() && lang.size() < 16) {
+                lv_obj_set_flex_flow(box_, LV_FLEX_FLOW_COLUMN);
+                lv_obj_set_style_pad_row(box_, 4, 0);
+                lv_obj_t *caption = lv_label_create(box_);
+                lv_label_set_text(caption, lang.c_str());
+                lv_obj_set_style_text_font(caption, font(11, true), 0);
+                lv_obj_set_style_text_color(caption, lv_color_hex(TEXT3), 0);
+            }
             lv_obj_t *l = lv_label_create(box_);
             lv_label_set_text(l, code.c_str());
-            lv_obj_set_width(l, width - 20);
+            lv_obj_set_width(l, width - 23);  // inside the padding and the bar
             lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
             lv_obj_set_style_text_font(l, font(13, true), 0);
             lv_obj_set_style_text_color(l, lv_color_hex(CODE_INK), 0);

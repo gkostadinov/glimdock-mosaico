@@ -69,6 +69,11 @@ button:disabled { opacity: 0.4; cursor: default; }
 .step .ctl button { padding: 8px 10px; }
 @media (max-width: 560px) { .step { grid-template-columns: 1fr 1fr; } }
 button.danger { color: var(--red); }
+details.profile { border: 1px solid var(--edge); border-radius: 16px; padding: 12px 14px; margin-top: 12px; }
+details.profile summary { font-weight: 600; cursor: pointer; }
+h3 { font-size: 14px; margin: 16px 0 0; color: var(--text2); }
+label.check { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+label.check input { width: auto; margin: 0; }
 </style>
 </head>
 <body>
@@ -682,13 +687,139 @@ function renderVpn() {
   return s;
 }
 
+// Profiles: who uses the board and what each may do. Changes take the rights
+// of whoever is signed in on the board; a PIN is only ever stored hashed there.
+let profiles = null;
+const ACCESS = ["Hidden", "Read-only", "Full"];
+const SIGNIN = { none: "No sign-in", pin: "PIN", face: "Face", face_pin: "Face and PIN" };
+
+async function profilesDo(change, said) {
+  const r = await api("/api/profiles", change);
+  toast(said || "Saved");
+  profiles = await api("/api/profiles");
+  const old = $("#profiles");
+  if (old) old.replaceWith(renderProfiles());
+  return r;
+}
+
+function pinPair() {
+  const a = el("input", { type: "password", inputMode: "numeric", autocomplete: "new-password", maxLength: 6, placeholder: "4 to 6 digits" });
+  const b = el("input", { type: "password", inputMode: "numeric", autocomplete: "new-password", maxLength: 6, placeholder: "Again" });
+  const value = () => {
+    if (!/^[0-9]{4,6}$/.test(a.value)) throw new Error("A PIN is 4 to 6 digits");
+    if (a.value !== b.value) throw new Error("The PINs differ");
+    const v = a.value;
+    a.value = b.value = "";
+    return v;
+  };
+  return { box: el("div", { className: "grid" }, el("label", {}, "PIN", a), el("label", {}, "PIN again", b)), value };
+}
+
+function profileCard(p, data) {
+  const c = el("details", { className: "profile" });
+  const mode = p.elevated ? SIGNIN.face_pin + " · full mode" : SIGNIN[p.signin] || p.signin;
+  c.append(el("summary", { textContent: p.name + (p.id === data.current ? " (signed in)" : "") + " · " + mode +
+    (p.wait_s ? " · locked for " + p.wait_s + " s" : "") }));
+  const apps = (data.app_names || []).map(a => {
+    const sel = el("select", { disabled: !data.manage });
+    const read = ["glimdock", "home", "swifty"].includes(a.key);
+    ACCESS.forEach((t, i) => { if (i !== 1 || read) sel.append(el("option", { value: String(i), textContent: t })); });
+    sel.value = p.apps[a.slot] === "1" && !read ? "2" : p.apps[a.slot];
+    return [a, sel];
+  });
+  const grid = el("div", { className: "grid" });
+  apps.forEach(([a, sel]) => grid.append(el("label", {}, a.name, sel)));
+  c.append(el("h3", { textContent: "Apps" }), grid);
+  const caps = (data.cap_keys || []).map((k, bit) => {
+    const box = el("input", { type: "checkbox", checked: !!(p.caps & (1 << bit)), disabled: !data.manage });
+    return [bit, box, el("label", { className: "check" }, box, " " + k.title + (k.elevated ? " (full mode)" : ""))];
+  }).filter(([bit]) => p.id !== 0 || !(data.cap_keys[bit].elevated || data.cap_keys[bit].key === "settings_profiles"));
+  c.append(el("h3", { textContent: "Permissions" }), el("div", { className: "grid" }, ...caps.map(x => x[2])));
+  if (!data.manage) return c;
+  const save = el("button", { type: "button", className: "primary", textContent: "Save" });
+  save.onclick = async () => {
+    const digits = p.apps.split("");
+    apps.forEach(([a, sel]) => { digits[a.slot] = sel.value; });
+    let bits = 0;
+    caps.forEach(([bit, box]) => { if (box.checked) bits |= 1 << bit; });
+    try { await profilesDo({ op: "save", profile: { id: p.id, apps: digits.join(""), caps: bits } }); }
+    catch (e) { toast(e.message); }
+  };
+  const row = el("div", { className: "actions" }, save);
+  if (p.wait_s) {
+    const unblock = el("button", { type: "button", textContent: "Forget wrong tries" });
+    unblock.onclick = () => profilesDo({ op: "unblock", id: p.id }, "Done").catch(e => toast(e.message));
+    row.append(unblock);
+  }
+  if (p.id !== 0) {
+    const del = el("button", { type: "button", className: "danger", textContent: "Delete" });
+    del.onclick = async () => {
+      if (!confirm("Delete " + p.name + "?")) return;
+      try { await profilesDo({ op: "delete", id: p.id }, "Deleted"); } catch (e) { toast(e.message); }
+    };
+    row.append(del);
+  }
+  c.append(row);
+  if (p.id !== 0 && !p.elevated) {
+    const pin = pinPair();
+    const set = el("button", { type: "button", textContent: p.pin ? "Change PIN" : "Set PIN" });
+    set.onclick = async () => {
+      try { await profilesDo({ op: "set_pin", id: p.id, pin: pin.value() }, "PIN saved"); } catch (e) { toast(e.message); }
+    };
+    c.append(el("h3", { textContent: "PIN" }), pin.box, el("div", { className: "actions" }, set));
+  }
+  return c;
+}
+
+function renderProfiles() {
+  const data = profiles;
+  if (!data) return el("span", { id: "profiles" });
+  const s = sectionBox("Profiles", data.configured ? data.profiles.length + " profiles" : "Off: every app for everyone");
+  s.id = "profiles";
+  if (!data.configured) {
+    s.append(el("p", { className: "note", textContent:
+      "Set up an owner with a PIN; then give others their own apps and permissions on the board (Settings, the badge at the top). Full mode adds the owner's face, on the board." }));
+    const name = field("text", "Owner's name", "Owner");
+    const pin = pinPair();
+    s.append(el("div", { className: "grid" }, name.box), pin.box);
+    actions(s, "Set up profiles", async () => {
+      await profilesDo({ op: "setup", name: name.value() || "Owner", pin: pin.value() }, "Profiles are on");
+    }).button.disabled = false;
+    return s;
+  }
+  if (!data.manage) s.append(el("p", { className: "note", textContent: "The profile signed in on the board can't change profiles: sign in with one that can (full mode, once a profile has it)." }));
+  data.profiles.forEach(p => s.append(profileCard(p, data)));
+  if (data.manage) {
+    const lock = el("select"), full = el("select"), def = el("select");
+    [[0, "Never"], [60, "1 min"], [120, "2 min"], [300, "5 min"], [600, "10 min"]].forEach(([v, t]) => lock.append(el("option", { value: String(v), textContent: t })));
+    [[60, "1 min"], [120, "2 min"], [300, "5 min"]].forEach(([v, t]) => full.append(el("option", { value: String(v), textContent: t })));
+    data.profiles.filter(p => p.signin === "none" && !p.elevated).forEach(p => def.append(el("option", { value: String(p.id), textContent: p.name })));
+    lock.value = String(data.lock_s); full.value = String(data.elevated_lock_s); def.value = String(data.default);
+    s.append(el("h3", { textContent: "Locking" }), el("div", { className: "grid" },
+      el("label", {}, "Lock after", lock), el("label", {}, "Full mode locks after", full), el("label", {}, "When locked", def)));
+    const name = el("input", { type: "text", placeholder: "Partner", maxLength: 19 });
+    const add = el("button", { type: "button", textContent: "Add profile" });
+    add.onclick = () => profilesDo({ op: "save", profile: { name: name.value.trim() || "New profile" } }, "Added").catch(e => toast(e.message));
+    const saveLock = el("button", { type: "button", className: "primary", textContent: "Save locking" });
+    saveLock.onclick = () => profilesDo({ op: "settings", lock_s: +lock.value, elevated_lock_s: +full.value, default: +def.value }).catch(e => toast(e.message));
+    const off = el("button", { type: "button", className: "danger", textContent: "Turn off profiles" });
+    off.onclick = async () => {
+      if (!confirm("Turn off profiles? Every profile and face goes; everyone sees every app again.")) return;
+      try { await profilesDo({ op: "off" }, "Profiles are off"); } catch (e) { toast(e.message); }
+    };
+    s.append(el("div", { className: "actions" }, saveLock), el("div", { className: "row" }, name, add), el("div", { className: "actions" }, off));
+  }
+  return s;
+}
+
 function render() {
-  $("#sections").replaceChildren(...SIMPLE.map(renderSimple), renderHome(), renderShortcuts(), renderFiles(), renderVpn(), renderDisplay());
+  $("#sections").replaceChildren(...SIMPLE.map(renderSimple), renderHome(), renderShortcuts(), renderFiles(), renderVpn(), renderDisplay(), renderProfiles());
 }
 
 async function reload() {
   status = await api("/api/status");
   shortcuts = await api("/api/shortcuts").catch(e => { if (e.message === "sign in") throw e; return null; });
+  profiles = await api("/api/profiles").catch(e => { if (e.message === "sign in") throw e; return null; });
   render();
   show("main");
 }

@@ -69,6 +69,18 @@ void swifty_app_add_tool(const char *name, const char *description, const char *
 // A still of Swifty (ARGB8888, size x size) for the launcher; rendered once.
 const lv_image_dsc_t *swifty_app_portrait(int size);
 
+// Who is signed in (the shell's profiles), so Swifty offers and runs only the
+// tools they may use and knows their limits. Copied; any member may be null.
+typedef struct {
+    bool (*tool_allowed)(const char *name);        // any task: offer and run this tool
+    void (*describe)(char *out, size_t capacity);  // any task: a line for the system prompt
+    bool (*developer)(void);                       // any task: developer mode (code, longer answers)
+} swifty_policy_t;
+void swifty_app_set_policy(const swifty_policy_t *policy);
+// A new conversation, as the + button: the chat and what the model was told
+// go (another person signed in). Stops a reply under way. LVGL task.
+void swifty_app_new_conversation(void);
+
 #ifdef __cplusplus
 }
 #endif

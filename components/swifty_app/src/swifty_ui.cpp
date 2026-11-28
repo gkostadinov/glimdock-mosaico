@@ -203,6 +203,7 @@ struct {
     std::vector<Jpeg> attached;
     bool listening = false, recognizing = false, ai_key = false;
     std::string status = "Ready", last;
+    unsigned conversation = 0;  // a new one (another person) drops replies still coming
     // posted from other tasks
     std::mutex lock;
     std::vector<std::function<void()>> posts;
@@ -624,8 +625,10 @@ void send(const std::string &text, bool spoken, lv_obj_t *draft)
     U.status = "Thinking";
     set_pill("Stop", false);
     AgentEvents ev;
-    ev.text = [](const std::string & t) {
-        post([t] {
+    const unsigned conversation = U.conversation;
+    ev.text = [conversation](const std::string & t) {
+        post([t, conversation] {
+            if (conversation != U.conversation) return;
             U.reply_text = t;
             U.reply_dirty = true;
             set_mood(Mood::Talk);
@@ -656,8 +659,9 @@ void send(const std::string &text, bool spoken, lv_obj_t *draft)
             vTaskDelay(pdMS_TO_TICKS(100));    // the NAS list
         }
     };
-    ev.done = [](const std::string & t, Shot mood, bool failed) {
-        post([t, mood, failed] {
+    ev.done = [conversation](const std::string & t, Shot mood, bool failed) {
+        post([t, mood, failed, conversation] {
+            if (conversation != U.conversation) return;
             const std::string text = failed ? "*" + t + "*" : t;
             // What was laid out while streaming no longer matches (a failure in
             // italics, or a final text that differs): build it all again.
@@ -958,6 +962,7 @@ void refresh_hint()
 {
     const Config c = config();
     lv_label_set_text(U.empty_hint, !c.llm_ready() ? "Set me up first: Settings, Web settings, then open the page it shows on a phone or computer."
+                      : agent_developer() ? "Developer mode: ask for code, scripts, configs and longer answers."
                       : c.asr_ready() ? "Hold the mic or the AI key and ask me anything. Tap the camera to show me something."
                       : "Type to me, or tap the camera to show me something.");
 }
@@ -1124,6 +1129,30 @@ extern "C" void swifty_app_init(const swifty_hooks_t *hooks)
         post([on] { on ? start_listening() : stop_listening(); });
         return ESP_OK;
     }, nullptr);
+}
+
+extern "C" void swifty_app_new_conversation(void)
+{
+    if (agent_busy()) {
+        agent_stop();
+    }
+    ++U.conversation;
+    agent_reset();
+    U.last.clear();
+    if (!U.built) {
+        return;
+    }
+    // The reply under way goes with the chat.
+    U.reply = U.reply_body = U.reply_tool = U.reply_done = U.reply_live = U.draft = nullptr;
+    U.reply_text.clear();
+    U.reply_dirty = false;
+    lv_obj_clean(U.chat);
+    U.attached.clear();
+    lv_obj_clean(U.attach_row);
+    U.status = "Ready";
+    set_pill(nullptr, false);
+    update_empty();
+    refresh_hint();
 }
 
 extern "C" void swifty_app_open(lv_obj_t *screen)

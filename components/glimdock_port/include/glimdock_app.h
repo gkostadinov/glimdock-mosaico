@@ -27,6 +27,10 @@ void glimdock_app_set_active(bool active);
 void glimdock_app_select(int page);
 // Touch transitions (kept for the shell; unused by the Mosaico UI).
 void glimdock_app_note_touch(bool pressed);
+// What the person signed in may change (the shell's profiles). Read-only:
+// every page, no settings ("Read-only for this profile"). Without
+// collector_changes: no connection or collector node edits. Both on until set.
+void glimdock_app_set_access(bool read_only, bool collector_changes);
 
 // What the launcher shows on the Glimdock page. Values are NAN when unknown.
 typedef struct {

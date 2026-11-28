@@ -30,7 +30,8 @@ void agent_start();
 // Sends a message with optional photos; false while a reply is running.
 bool agent_send(const std::string &text, const std::vector<Jpeg> &photos, bool spoken, const AgentEvents &events);
 void agent_stop();
-void agent_reset();  // a new conversation
+void agent_reset();  // a new conversation (a reply under way is not kept)
 bool agent_busy();
+bool agent_developer();  // developer mode now (swifty_policy_t)
 
 }  // namespace swifty

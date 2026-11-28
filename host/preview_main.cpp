@@ -21,7 +21,11 @@
 #include "fixture.h"
 #include "glim_ui.h"
 #include "glimdock_app.h"
+#include "launcher_apps.h"
 #include "launcher_ui.h"
+#include "profiles.h"
+#include "profiles_internal.h"
+#include "profiles_ui.h"
 #include "wifi_settings.h"
 #include "tools_app.h"
 #include "vpn_app.h"
@@ -41,6 +45,7 @@ extern "C" void games_app_preview_best(int game, uint32_t score);
 namespace home {
 void home_preview_open(int);
 void home_preview_theme(int);
+void home_preview_toast(const char *);
 }
 extern std::string home_fixture_dir;
 
@@ -303,6 +308,159 @@ void movie_scene(const char *key, void *)
     launcher_shortcut_feedback(key, 1);
 }
 
+// Profiles, as the shell wires them (profiles_glue.cpp, shell.cpp): the home
+// screen shows what the profile signed in may see, and the badges.
+int preview_radius = 80;
+int slot_of(const LauncherApp &a)
+{
+    return a.open >= 0 ? a.open : PROFILE_APP_SETTINGS;
+}
+
+bool preview_visible(const char *key)
+{
+    if (!profiles_configured() || !key) {
+        return true;
+    }
+    if (!strncmp(key, "sc:", 3)) {
+        return profiles_can(PROFILE_CAP_SHORTCUTS_RUN);
+    }
+    const LauncherApp *a = launcher_app(key);
+    return !a || profiles_app_access(slot_of(*a)) != PROFILE_ACCESS_HIDDEN;
+}
+
+void preview_decorate(lv_obj_t *status, lv_obj_t *settings)
+{
+    const int r = preview_radius;
+    int inset = 0;
+    if (r > 14) {
+        const float d = float(r - 14);
+        inset = int(ceilf(float(r) - sqrtf(float(r * r) - d * d)));
+    }
+    const int edge = std::max(20, inset + 10);
+    profiles_ui_badge(status, 480 - edge - 33 - 36, 8, 26);
+    profiles_ui_badge(settings, 480 - 56 - 44, 14, 44, true);
+}
+
+bool preview_faces[16];
+
+// The profiles' screens over the demo data: set-up, the lock screen, the PIN
+// pad, face sign-in without the camera module, Settings > Profiles and its
+// editor, and the home screen of Partner (no Glimdock) and of Guest.
+void render_profiles(lv_display_t *display, lv_obj_t *launcher, const LauncherStatus &status,
+                     const glimdock_summary_t &glim, const home_summary_t &home, const camera_summary_t &camera,
+                     const swifty_summary_t &swifty, const files_summary_t &files)
+{
+    profiles_platform::pbkdf2_force_iterations(10000);  // quick hashes for the captures
+    profiles_set_face_hooks([](uint8_t id) {
+        return id < 16 && preview_faces[id];
+    }, [](uint8_t id) {
+        preview_faces[id] = false;
+    });
+    profiles_init();
+    static ProfilesUiApp apps[32];
+    int n = 0;
+    for (int i = 0; i < LAUNCHER_APP_COUNT; ++i) {
+        const LauncherApp &a = LAUNCHER_APPS[i];
+        const int slot = slot_of(a);
+        apps[n++] = {slot, a.name, a.glyph, slot == 1 || slot == 2 || slot == 4};
+    }
+    ProfilesUiHooks hooks;
+    hooks.apps = apps;
+    hooks.app_count = n;
+    profiles_ui_init(hooks);
+    lv_screen_load(launcher);
+    launcher_ui_show_page(0);
+    // Off: Settings' badge leads here, to set profiles up.
+    profiles_ui_settings();
+    save("profiles-intro", display);
+    profiles_ui_close();
+    profile_pin_t pin{};
+    profiles_hash_pin("2468", &pin);
+    profiles_create_owner("Owner", &pin, nullptr);
+    profile_t partner{};
+    profiles_defaults(PROFILE_NEW, &partner);
+    partner.id = PROFILE_NEW;
+    strcpy(partner.name, "Partner");
+    partner.color = 4;
+    profiles_save(&partner, PROFILE_BY_SESSION);
+    profiles_hash_pin("1357", &pin);
+    profiles_set_pin(partner.id, &pin, PROFILE_BY_TRUSTED);
+    profile_t kids{};
+    profiles_defaults(PROFILE_NEW, &kids);
+    kids.id = PROFILE_NEW;
+    strcpy(kids.name, "Kids");
+    kids.color = 2;
+    kids.caps = 0;
+    memset(kids.apps, PROFILE_ACCESS_HIDDEN, sizeof(kids.apps));
+    kids.apps[3] = kids.apps[6] = kids.apps[10] = kids.apps[12] = PROFILE_ACCESS_FULL;  // Camera, Tools, Calculator, Games
+    kids.apps[4] = PROFILE_ACCESS_READ;                                                // Swifty, no tools that act
+    profiles_save(&kids, PROFILE_BY_SESSION);
+    // Settings > Profiles, then Partner's editor (its row is the second).
+    profiles_ui_settings();
+    save("profiles-settings", display);
+    tap({240, 230});
+    run_for(200);
+    save("profiles-editor", display);
+    for (const auto &[y, name] : {
+                std::pair{520, "profiles-editor-apps"}, std::pair{1240, "profiles-editor-permissions"}
+            }) {
+        if (lv_obj_t *sc = scroller(lv_layer_top())) {
+            lv_obj_scroll_to_y(sc, y, LV_ANIM_OFF);
+        }
+        save(name, display);
+    }
+    profiles_ui_close();
+    // The lock screen; Partner's PIN pad with two digits typed; a wrong PIN.
+    profiles_ui_switcher();
+    save("profiles-lock", display);
+    tap({183, 221});  // Partner
+    run_for(200);
+    tap({156, 178});
+    tap({324, 178});
+    save("profiles-pin", display);
+    tap({156, 252});
+    tap({156, 252});
+    tap({324, 400});  // enter
+    run_for(100);
+    save("profiles-pin-wrong", display);
+    profiles_ui_close();
+    // Full mode for Owner (a face enrolled), then signing in without the camera module.
+    preview_faces[1] = true;
+    profile_t owner{};
+    profiles_get(1, &owner);
+    owner.signin = PROFILE_SIGNIN_FACE_PIN;
+    owner.elevated = true;
+    profiles_save(&owner, PROFILE_BY_SESSION);
+    profiles_lock();
+    profiles_ui_sign_in(1);
+    run_for(200);
+    save("profiles-face", display);
+    profiles_ui_close();
+    // Partner's home screen: no Glimdock (nor its widget's data), no Files or VPN.
+    profiles_check_pin(partner.id, "1357");
+    profiles_sign_in(partner.id);
+    glimdock_summary_t no_glim{};
+    no_glim.cpu = no_glim.memory = NAN;
+    strcpy(no_glim.status, "Homelab monitor");
+    launcher_ui_refilter();
+    launcher_ui_update(status, no_glim, home, camera, swifty, files);
+    launcher_ui_show_page(0);
+    save("launcher-profile-partner", display);
+    launcher_ui_show_page(1);
+    save("launcher-profile-partner-2", display);
+    // Locked: Guest, Home and Swifty read-only and a few tools.
+    profiles_lock();
+    launcher_ui_refilter();
+    launcher_ui_update(status, no_glim, home, camera, swifty, files);
+    launcher_ui_show_page(0);
+    save("launcher-profile-guest", display);
+    (void)glim;
+    profiles_turn_off(PROFILE_BY_TRUSTED);
+    launcher_ui_refilter();
+    launcher_ui_update(status, glim, home, camera, swifty, files);
+    launcher_ui_show_page(0);
+}
+
 // Swifty's still for the launcher, as the board renders it (swifty_app_portrait).
 const lv_image_dsc_t *swifty_portrait(int size)
 {
@@ -329,6 +487,9 @@ void render_launcher(int radius)
     lv_display_t *display = lv_display_get_default();
     LauncherHooks hooks{};
     hooks.wifi = wifi_settings_open;  // the Wi-Fi card's chevron
+    hooks.visible = preview_visible;
+    hooks.decorate = preview_decorate;
+    preview_radius = radius;
     lv_obj_t *launcher = launcher_ui_build(hooks, radius, 80, true, true, swifty_portrait(168));
     glimdock_summary_t glim;
     glimdock_app_summary(&glim);
@@ -481,6 +642,7 @@ void render_launcher(int radius)
         scroll_to(0, 1)(0);
         launcher_ui_show_page(0);
     }
+    render_profiles(display, launcher, status, glim, home, camera, swifty, files);
     LauncherStatus offline{"--:--", "", false, false, "", "", "Firmware 1.1.0", -1, false};
     glimdock_summary_t none{};
     none.cpu = none.memory = NAN;
@@ -777,6 +939,16 @@ int main(int argc, char **argv)
         home::home_preview_open(2);
         save("light-home", display);
         home::home_preview_theme(1);
+        // Read-only for the profile signed in: the shell's ribbon, and the
+        // note a tap on a light brings.
+        home_app_set_read_only(true);
+        lv_obj_t *ribbon = profiles_ui_ribbon(home_screen, "Read-only for this profile");
+        lv_obj_remove_flag(ribbon, LV_OBJ_FLAG_HIDDEN);
+        home::home_preview_open(2);
+        home::home_preview_toast("Read-only for this profile");
+        save("home-read-only", display);
+        lv_obj_delete(ribbon);
+        home_app_set_read_only(false);
     }
     return 0;
 }

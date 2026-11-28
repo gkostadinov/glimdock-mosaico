@@ -8,6 +8,8 @@
 //   POST /api/stop     switches the web settings off
 //   GET  /api/shortcuts the home screen's shortcuts, and what their steps can use
 //   POST /api/shortcuts a change to them (see shortcuts.h)
+//   GET  /api/profiles  the profiles (profiles_glue.h; never a PIN)
+//   POST /api/profiles  a change, with the rights of whoever is signed in on the board
 // Every POST needs the header "X-Mosaico: 1" (a page on another site cannot
 // send it without asking first), and all but the login the session cookie.
 #include "web_settings.h"
@@ -25,6 +27,8 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "mbedtls/platform_util.h"
+#include "profiles.h"
+#include "profiles_glue.h"
 #include "shortcuts.h"
 #include "swifty_app.h"
 
@@ -250,8 +254,37 @@ esp_err_t shortcuts_change(httpd_req_t *r)
     if (!read_body(r, body)) {
         return send_json(r, "413 Payload Too Large", "error", "too large");
     }
+    if (!profiles_can(PROFILE_CAP_SHORTCUTS_EDIT)) {
+        return send_json(r, "403 Forbidden", "error", "Not allowed for the profile signed in on the board");
+    }
     bool ok = false;
     const std::string reply = shortcuts_web_apply(body.data(), body.size(), &ok);
+    return send_text_json(r, ok ? "200 OK" : "400 Bad Request", reply);
+}
+
+esp_err_t profiles_list(httpd_req_t *r)
+{
+    if (!signed_in(r)) {
+        return send_json(r, "401 Unauthorized", "error", "sign in");
+    }
+    return send_text_json(r, "200 OK", profiles_web_list());
+}
+
+esp_err_t profiles_change(httpd_req_t *r)
+{
+    if (!from_page(r)) {
+        return send_json(r, "400 Bad Request", "error", "bad request");
+    }
+    if (!signed_in(r)) {
+        return send_json(r, "401 Unauthorized", "error", "sign in");
+    }
+    std::string body;
+    if (!read_body(r, body)) {
+        return send_json(r, "413 Payload Too Large", "error", "too large");
+    }
+    bool ok = false;
+    const std::string reply = profiles_web_apply(body.data(), body.size(), &ok);
+    mbedtls_platform_zeroize(body.data(), body.size());  // it may carry a PIN
     return send_text_json(r, ok ? "200 OK" : "400 Bad Request", reply);
 }
 
@@ -327,7 +360,7 @@ bool web_settings_start()
     cfg.task_priority = 3;
     cfg.max_open_sockets = 4;
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 8;
+    cfg.max_uri_handlers = 10;
     if (httpd_start(&W.server, &cfg) != ESP_OK) {
         W.server = nullptr;
         strlcpy(W.note, "Could not start the web server", sizeof(W.note));
@@ -341,6 +374,8 @@ bool web_settings_start()
         {"/api/stop", HTTP_POST, stop, nullptr},
         {"/api/shortcuts", HTTP_GET, shortcuts_list, nullptr},
         {"/api/shortcuts", HTTP_POST, shortcuts_change, nullptr},
+        {"/api/profiles", HTTP_GET, profiles_list, nullptr},
+        {"/api/profiles", HTTP_POST, profiles_change, nullptr},
     };
     for (const httpd_uri_t &u : routes) {
         httpd_register_uri_handler(W.server, &u);
