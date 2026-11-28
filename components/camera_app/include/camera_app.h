@@ -74,6 +74,32 @@ void camera_app_set_auto_facing(bool on);
 bool camera_app_auto_facing(void);
 // The NAS list: 0 listing, 1 listed, -1 unreachable, -2 no share set up.
 int camera_app_photos_state(void);
+
+// Face ID (components/face_id) borrows the camera while no other mode uses it.
+// Frames are square BGR888 (the PPA's RGB888 byte order), the sensor's centre
+// as the viewfinder shows it, upright in the UI's rotation and mirrored for the
+// front camera (as a person sees themselves). frame runs on the capture task
+// with the borrow's lock held: copy and return. Streaming pauses the NAND, as
+// the Camera does. Needs camera_app_start first.
+typedef struct {
+    int size;  // side in pixels, a multiple of 40 from 80 to 640 (an exact PPA scale of the 640 crop)
+    void (*frame)(const uint8_t *bgr, int size, bool rear, void *user);
+    // Another mode (the Camera screen, a photo for Swifty, the webcam, the
+    // torch) took the camera: the borrow is over. Called once, on that
+    // mode's task, after which frame is never called again.
+    void (*lost)(void *user);
+    void *user;
+} camera_borrow_t;
+typedef enum { CAMERA_BORROW_OK, CAMERA_BORROW_BUSY, CAMERA_BORROW_NOT_STARTED, CAMERA_BORROW_INVALID } camera_borrow_result_t;
+// BUSY while another mode owns the camera (nothing changes then).
+camera_borrow_result_t camera_app_borrow(const camera_borrow_t *borrow);
+// Stops the stream (the camera closes and its DMA memory comes back) and
+// starts it again, keeping the borrow.
+void camera_app_borrow_pause(bool paused);
+// Ends the borrow; frame and lost are never called once this returns.
+void camera_app_borrow_end(void);
+// 1 a camera module answered, 0 none did when last opened, -1 never opened.
+int camera_app_present(void);
 // The viewfinder's thumbnail opens this instead of the built-in viewer.
 void camera_app_set_gallery_hook(void (*open)(void));
 
