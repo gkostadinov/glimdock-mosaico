@@ -16,6 +16,7 @@
 #include "ArduinoJson.h"
 #include "Preferences.h"
 #include "WiFi.h"
+#include "bsp/esp_mosaico.h"
 #include "display_clock.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
@@ -199,7 +200,15 @@ void worker(void *)
             state = 1;
             if (z != zone) {
                 zone = z;
-                save_zone(z);
+                apply_zone(z);
+                // The NVS write goes to the LVGL task: this task's stack is in
+                // PSRAM, which the cache can't reach while flash is written.
+                if (bsp_display_lock(1000)) {
+                    lv_async_call([](void *) {
+                        save_zone(zone);
+                    }, nullptr);
+                    bsp_display_unlock();
+                }
             }
             ESP_LOGI(TAG, "time zone %s: %s", name, displayClockZoneName(uint8_t(z)));
         }
