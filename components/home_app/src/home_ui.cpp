@@ -2990,7 +2990,7 @@ bool home_app_asks_first(const char *verb, const char *target, const char *value
         return false;
     }
     for (const Planned &p : plan.acts)
-        if (hub.flow(p.action) == "prepare_confirm") {
+        if (hub.flow(p.command.action) == "prepare_confirm") {
             return true;
         }
     return false;
