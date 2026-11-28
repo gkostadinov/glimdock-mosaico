@@ -1557,6 +1557,26 @@ void launcher_ui_show_page(int index)
     page_dots();
 }
 
+bool launcher_ui_back()
+{
+    if (ui.picker) {
+        close_picker();
+    } else if (ui.hidden_sheet) {
+        close_hidden();
+    } else if (ui.editing) {
+        set_editing(false);
+    } else if (!lv_obj_has_flag(ui.settings, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_add_flag(ui.settings, LV_OBJ_FLAG_HIDDEN);
+    } else if (ui.page > 0) {
+        lv_obj_scroll_to_x(ui.pager, 0, LV_ANIM_ON);
+        ui.page = 0;
+        page_dots();
+    } else {
+        return false;
+    }
+    return true;
+}
+
 void launcher_ui_edit(bool on)
 {
     set_editing(on);

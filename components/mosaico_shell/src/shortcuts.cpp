@@ -1642,6 +1642,8 @@ void new_page()
 
 void editor_show(EditorPage page, uint32_t id)
 {
+    E.go_page = page;  // the page in view (Back reads it)
+    E.go_id = id;
     if (page == EditorPage::Detail) {
         detail_page(id);
     } else if (page == EditorPage::New) {
@@ -1680,6 +1682,20 @@ void shortcuts_editor_open()
     lv_obj_add_flag(E.root, LV_OBJ_FLAG_CLICKABLE);  // takes the taps meant for the app under it
     E.kind = 0;
     editor_show(EditorPage::List, 0);
+}
+
+bool shortcuts_editor_back()
+{
+    if (!E.root) {
+        return false;
+    }
+    if (E.go_page != EditorPage::List) {
+        editor_show(EditorPage::List, 0);
+    } else {
+        lv_obj_delete(E.root);
+        E.root = E.page = E.targets = nullptr;
+    }
+    return true;
 }
 
 bool shortcuts_run(uint32_t id, bool dry_run)

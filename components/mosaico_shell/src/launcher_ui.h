@@ -74,6 +74,10 @@ void launcher_ui_entered(ShellApp app);
 void launcher_ui_calibration(bool visible, int radius);
 // Shows a home page (0 the first) at once, or Settings for 6 and up.
 void launcher_ui_show_page(int index);
+// The AI key on the launcher, one level at a time: a widget picker, the hidden
+// apps' sheet, editing, Settings, then a later page goes to the first. False
+// when there is nothing to go back from.
+bool launcher_ui_back();
 // Editing the home screen: jiggling icons, drag to move, − to hide, Done.
 void launcher_ui_edit(bool on);
 // The hidden apps' sheet (also opened from Settings and while editing).

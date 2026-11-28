@@ -438,6 +438,11 @@ void refresh_launcher(lv_timer_t *)
 
 void go_launcher_async(void *)
 {
+    // On the launcher the AI key is Back: it closes what is open on it (Wi-Fi,
+    // the shortcuts' editor, a sheet, Settings) one level at a time.
+    if (shell.current == ShellApp::Launcher && (wifi_settings_back() || shortcuts_editor_back() || launcher_ui_back())) {
+        return;
+    }
     shell_show(ShellApp::Launcher);
 }
 

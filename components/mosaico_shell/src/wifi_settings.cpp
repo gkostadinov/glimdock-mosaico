@@ -395,6 +395,7 @@ void typed(lv_event_t *)
 
 void show_page(Page page)
 {
+    W.go = page;  // the page in view (Back reads it)
     switch (page) {
     case Page::List:
         list_page();
@@ -472,4 +473,17 @@ void wifi_settings_close()
 bool wifi_settings_showing()
 {
     return W.root != nullptr;
+}
+
+bool wifi_settings_back()
+{
+    if (!W.root) {
+        return false;
+    }
+    if (W.go != Page::List) {
+        show_page(Page::List);  // the password or name page: back to the list
+    } else {
+        wifi_settings_close();
+    }
+    return true;
 }

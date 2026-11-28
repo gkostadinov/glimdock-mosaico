@@ -42,6 +42,9 @@ bool shortcuts_run(uint32_t id, bool dry_run = false);
 // New (lights off, on or toggled for all lights or a room, or a scene, in two
 // taps). LVGL task.
 void shortcuts_editor_open();
+// The AI key: a shortcut's page goes back to the list, the list closes. False
+// when the editor isn't open. LVGL task.
+bool shortcuts_editor_back();
 
 // Web settings' API (any task but the LVGL task: these take the display lock).
 // The shortcuts and what their steps can use, as JSON.
