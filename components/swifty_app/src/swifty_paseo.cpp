@@ -25,6 +25,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
+#include "iris_ext.h"
 #include "freertos/task.h"
 #include "swifty_app.h"
 #include "swifty_config.h"
@@ -35,7 +36,7 @@ using namespace swifty;
 
 namespace {
 const char *TAG = "swifty-paseo";
-constexpr uint16_t RPC_SERVICE = 0x4744, RPC_PASEO = 64;
+constexpr uint8_t RPC_PASEO = 64;  // a sub-command of RPC 54
 constexpr size_t MAX_REPLY = 192 * 1024;  // 30 agents are ~40 KB (the daemon sends each list twice)
 constexpr int LIST_MS = 15000, ACT_MS = 60000, CONFIRM_MS = 60000;
 constexpr int AGENTS = 30, AGENT_HOURS = 24 * 14;
@@ -573,5 +574,5 @@ extern "C" void swifty_paseo_start(void)
                         "The person's Paseo schedules (agents started on a timetable): when each runs next. Or run one now "
                         "(run: its name or id); the person confirms on the screen first.",
                         R"({"type":"object","properties":{"run":{"type":"string"}},"required":[]})", schedules_tool);
-    esp_iris_rpc_register(RPC_SERVICE, RPC_PASEO, rpc, nullptr);
+    iris_ext_register(RPC_PASEO, rpc, nullptr);  // RPC 54, sub-command 64 (iris_ext.h)
 }
