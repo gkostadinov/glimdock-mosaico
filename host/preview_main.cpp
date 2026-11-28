@@ -26,6 +26,8 @@
 #include "tools_app.h"
 #include "vpn_app.h"
 #include "games_app.h"
+#include "face_id.h"
+extern "C" void face_id_host_status(int status);  // face_id_host.cpp
 // games_ui.cpp: the preview's synchronous frames and screens
 extern "C" void games_app_preview_frame(void);
 extern "C" void games_app_preview_mode(int mode);
@@ -745,6 +747,22 @@ int main(int argc, char **argv)
                 lv_image_set_src(img, &dsc);
             });
         }
+    }
+    // Face ID's round preview (a synthetic frame: the host has no camera).
+    {
+        lv_obj_t *screen = lv_obj_create(nullptr);
+        lv_obj_remove_style_all(screen);
+        lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+        lv_screen_load(screen);
+        face_id_preview_create(screen, 90, 90, 300);
+        save("face-id", display);
+        face_id_host_status(8);  // face_core::Status::Recognised
+        save("face-id-recognised", display);
+        face_id_host_status(7);  // Rear: the longest message
+        save("face-id-rear", display);
+        lv_screen_load(lv_obj_create(nullptr));
+        lv_obj_delete(screen);  // the widget's own clean-up runs too
     }
     // Swifty Home in the inscribed square.
     if (argc > 3) {

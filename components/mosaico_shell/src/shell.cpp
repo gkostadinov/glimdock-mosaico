@@ -18,6 +18,7 @@
 #include "app_config.h"
 #include "boot_stage.h"
 #include "camera_app.h"
+#include "face_id.h"
 #include "files_app.h"
 #include "games_app.h"
 #include "tools_app.h"
@@ -1582,6 +1583,8 @@ extern "C" esp_err_t mosaico_shell_start(void)
             });
         };
         swifty_app_init(&hooks);
+        // Face ID borrows the camera's frames (profiles sign in with it).
+        face_id_init([] { camera_app_start(shell.camera_screen); });
         swifty_app_config_section("glimdock", glimdock_apply, glimdock_status);
         swifty_app_config_section("home", home_apply, home_status);
         swifty_app_config_section("files", files_app_config_apply, files_app_config_status);
