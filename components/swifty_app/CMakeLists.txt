@@ -1,7 +1,7 @@
 # Swifty: Swifty Home's bird in 3D, chat with a local model, push-to-talk ASR.
 idf_component_register(
     SRCS "src/swifty_figure.cpp" "src/swifty_config.cpp" "src/swifty_asr.cpp" "src/swifty_agent.cpp"
-         "src/swifty_md.cpp" "src/swifty_ui.cpp"
+         "src/swifty_md.cpp" "src/swifty_ui.cpp" "src/swifty_paseo.cpp" "src/swifty_paseo_proto.cpp" "src/swifty_paseo_ui.cpp"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "src"
     REQUIRES lvgl

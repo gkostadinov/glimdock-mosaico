@@ -16,9 +16,17 @@ struct Config {
     std::string asr_url, asr_key, asr_model;  // Qwen/DashScope-style realtime ASR WebSocket
     std::string asr_ca;                        // optional PEM when the ASR host is not publicly signed
     std::string search_key;                    // Tavily web search (api.tavily.com); empty: no web search
+    // A Paseo daemon's address (e.g. http://host:6767), its password, an
+    // optional PEM for a privately signed https:// one, and the provider/model
+    // new agents start with (e.g. codex/gpt-5.4; empty: Swifty starts none).
+    std::string paseo_url, paseo_token, paseo_ca, paseo_provider;
     bool llm_ready() const
     {
         return !llm_url.empty();
+    }
+    bool paseo_ready() const
+    {
+        return !paseo_url.empty();
     }
     bool asr_ready() const
     {

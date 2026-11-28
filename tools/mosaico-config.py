@@ -11,7 +11,11 @@ change. Within a section a missing key keeps the board's value and (for
 Swifty) an empty string clears it.
 
   "swifty":   llm_url, llm_key, llm_model, asr_url, asr_key, asr_model, asr_ca,
-              search_key (Tavily, for Swifty's web search)
+              search_key (Tavily, for Swifty's web search), and for Swifty's
+              Paseo agents: paseo_url (the daemon, http(s)://host:port),
+              paseo_token (its password), paseo_ca (PEM, for a privately
+              signed https:// daemon), paseo_provider (provider/model for new
+              agents, e.g. codex/gpt-5.4; empty: Swifty starts none).
               Applies at once.
   "glimdock": endpoint, token, setup_token, ca, ssid, password,
               private_reader_file
@@ -77,7 +81,20 @@ SERVICE = 0x4744
 METHOD = 40
 CHUNK = 3000
 SECTIONS = {
-    "swifty": ("llm_url", "llm_key", "llm_model", "asr_url", "asr_key", "asr_model", "asr_ca", "search_key"),
+    "swifty": (
+        "llm_url",
+        "llm_key",
+        "llm_model",
+        "asr_url",
+        "asr_key",
+        "asr_model",
+        "asr_ca",
+        "search_key",
+        "paseo_url",
+        "paseo_token",
+        "paseo_ca",
+        "paseo_provider",
+    ),
     "glimdock": ("endpoint", "token", "setup_token", "ca", "ssid", "password", "private_reader_file"),
     "home": ("hub", "pairing_code"),
     "files": ("shares", "photos", "swifty"),
@@ -107,6 +124,9 @@ TEMPLATE = {
         "asr_key": "MOSAICO-ASR-KEY",
         "asr_model": "swifty-speech",
         "search_key": "TAVILY-KEY",
+        "paseo_url": "http://PASEO-HOST:6767",
+        "paseo_token": "PASEO-DAEMON-PASSWORD",  # pragma: allowlist secret (a placeholder)
+        "paseo_provider": "",
     },
     "glimdock": {
         "endpoint": "https://COLLECTOR-HOST/api/v1/snapshot",

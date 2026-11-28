@@ -33,6 +33,7 @@
 #include "swifty_config.h"
 #include "swifty_figure.h"
 #include "swifty_md.h"
+#include "swifty_paseo.h"
 
 using namespace mui;
 using namespace swifty;
@@ -1113,6 +1114,7 @@ extern "C" void swifty_app_init(const swifty_hooks_t *hooks)
     }
     config_start();
     agent_start();
+    swifty_paseo_start();
     esp_iris_rpc_register(0x4744, 41, say_rpc, nullptr);
     // Test hook: method 42, payload 1 starts listening and 0 stops, as the mic pill.
     esp_iris_rpc_register(0x4744, 42, [](const esp_iris_rpc_request_t *request, uint8_t *, size_t, size_t *size, void *) {
