@@ -42,6 +42,11 @@ struct Hud {
     float meter = 1;               // 0..1
     uint32_t meter_color = 0xFFFFFF;
     const char *meter_name = "";   // "Oil", "Shield", "Time"
+    // A second meter under the first (Ridge Rally's car), shown when named.
+    float meter2 = 1;
+    uint32_t meter2_color = 0xFFFFFF;
+    const char *meter2_name = "";
+    int stage = 0;                 // how far into its difficulty a run is (0: the game has no stages)
     char line[64] = "";            // a short status: "Depth 2 · 3 of 6 shards"
 };
 
@@ -81,9 +86,16 @@ public:
         events_ = 0;
         return e;
     }
+    // Tests and tuning: the title screen's pilot plays a real run, one that
+    // ends as a played run does (a demo never ends). Call before reset().
+    // Skyglide and Ridge Rally have one; the other games ignore it.
+    void set_bot(bool on)
+    {
+        bot_ = on;
+    }
 
 protected:
-    bool over_ = false, demo_ = false;
+    bool over_ = false, demo_ = false, bot_ = false;
     int score_ = 0;
     uint32_t events_ = 0;
 };

@@ -178,14 +178,16 @@ struct {
     int64_t ready_until = 0;
     // hud
     lv_obj_t *hud = nullptr, *h_score = nullptr, *h_line = nullptr, *h_fill = nullptr, *h_name = nullptr;
+    lv_obj_t *h_name2 = nullptr, *h_track2 = nullptr, *h_fill2 = nullptr;  // a second meter (Ridge Rally's car)
     // cards
     lv_obj_t *paused = nullptr, *over = nullptr, *o_title = nullptr, *o_reason = nullptr, *o_score = nullptr, *o_best = nullptr;
     lv_obj_t *resume = nullptr, *again = nullptr;
     lv_timer_t *timer = nullptr;
     int64_t press_at = 0;
     lv_point_t press{};
-    int shown_score = -1, shown_fill = -1;
-    uint32_t shown_color = 0;
+    int shown_score = -1, shown_fill = -1, shown_fill2 = -1;
+    uint32_t shown_color = 0, shown_color2 = 0;
+    bool shown_two = false;
     char shown_line[64] = "";
     bool thumbs_shown = false;
 } G;
@@ -383,6 +385,7 @@ bool frame_once()
     if (game != T.game || reset_seq != T.reset_seq) {
         T.game = game;
         T.reset_seq = reset_seq;
+        g.set_bot(false);  // (the host preview's pilot plays only the run it was given)
         g.reset(uint32_t(t0) ^ 0x5A5A1234u, demo);
         g.take_events();
         T.level_now = true;
@@ -911,6 +914,26 @@ void tick(lv_timer_t *)
         set_bg_color(G.h_fill, lv_color_hex(hud.meter_color));
         G.shown_color = hud.meter_color;
     }
+    // the second meter, when the game has one; the status line moves below it
+    const bool two = hud.meter2_name[0] != 0;
+    if (two != G.shown_two) {
+        set_hidden(G.h_name2, !two);
+        set_hidden(G.h_track2, !two);
+        lv_obj_set_y(G.h_line, two ? 84 : 70);
+        G.shown_two = two;
+    }
+    if (two) {
+        set_text(G.h_name2, hud.meter2_name);
+        const int fill2 = std::max(2, int(lroundf(std::clamp(hud.meter2, 0.0f, 1.0f) * 120)));
+        if (fill2 != G.shown_fill2) {
+            lv_obj_set_width(G.h_fill2, fill2);
+            G.shown_fill2 = fill2;
+        }
+        if (hud.meter2_color != G.shown_color2) {
+            set_bg_color(G.h_fill2, lv_color_hex(hud.meter2_color));
+            G.shown_color2 = hud.meter2_color;
+        }
+    }
     // what happened: one sound, a buzz, the sub-board's lights
     if (events) {
         const Accent &a = INFO[G.game].accent;
@@ -992,6 +1015,7 @@ void show(Mode mode)
     case Mode::Play: {
         const bool resume = previous == Mode::Paused;
         G.shown_score = -1, G.shown_fill = -1, G.shown_color = 0, G.shown_line[0] = 0;
+        G.shown_fill2 = -1, G.shown_color2 = 0;
         command(G.game, false, true, !resume, 30, H, 32);
         relevel();
         // With Tilt: a moment to hold the board the way you'll play; the tilt
@@ -1099,6 +1123,14 @@ void build_hud(lv_obj_t *s)
     lv_obj_set_style_bg_opa(track, LV_OPA_60, 0);
     G.h_fill = box(track, 0, 0, 120, 7, 4);
     lv_obj_set_style_bg_opa(G.h_fill, LV_OPA_COVER, 0);
+    G.h_name2 = label(G.hud, "", 96, 66, 76, TEXT2, 12, true, LV_TEXT_ALIGN_RIGHT);
+    G.h_track2 = box(G.hud, 180, 70, 120, 7, 4);
+    lv_obj_set_style_bg_color(G.h_track2, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(G.h_track2, LV_OPA_60, 0);
+    G.h_fill2 = box(G.h_track2, 0, 0, 120, 7, 4);
+    lv_obj_set_style_bg_opa(G.h_fill2, LV_OPA_COVER, 0);
+    lv_obj_add_flag(G.h_name2, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(G.h_track2, LV_OBJ_FLAG_HIDDEN);
     G.h_line = label(G.hud, "", 60, 70, PANEL - 120, TEXT, 13, false, LV_TEXT_ALIGN_CENTER);
     lv_obj_t *pause = round_button(G.hud, 400, 28, 46, "pause");
     on_click(pause, pause_cb);
@@ -1297,7 +1329,7 @@ extern "C" void games_app_preview_mode(int mode)
             std::lock_guard<std::mutex> l(T.s.m);
             T.s.over = true;
             T.s.result_seq = T.s.reset_seq;
-            T.s.ending = "Out of time";
+            T.s.ending = "Down in the hills on stage 5";  // as Skyglide, which the preview shows ending, says it
         }
         tick(nullptr);  // the card, as the board shows it at a game's end
         return;
@@ -1307,6 +1339,24 @@ extern "C" void games_app_preview_mode(int mode)
 extern "C" void games_app_preview_best(int game, uint32_t score)
 {
     G.best[game] = score;
+}
+// The preview: the game on screen played by its own pilot as a real run
+// (one that ends), from a seed, for up to the given seconds without drawing;
+// the frames after it go on from there (a late stage, the game-over card).
+// Call in mode 2. Returns the seconds played.
+extern "C" float games_app_preview_bot(uint32_t seed, float seconds)
+{
+    games::Game &g = game_at(G.game);
+    g.set_bot(true);
+    g.reset(seed, false);
+    float t = 0;
+    for (; t < seconds && !g.over(); t += 1.0f / 30) {
+        g.step(1.0f / 30, {});
+        g.take_events();
+    }
+    std::lock_guard<std::mutex> l(T.s.m);
+    T.game = G.game, T.reset_seq = T.s.reset_seq;  // frame_once carries on with this run
+    return t;
 }
 // The preview drives a played game with a fixed input.
 extern "C" void games_app_preview_touch(bool down, float x, float y, bool tap)

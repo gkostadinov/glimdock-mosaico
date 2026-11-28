@@ -30,6 +30,7 @@
 extern "C" void games_app_preview_frame(void);
 extern "C" void games_app_preview_mode(int mode);
 extern "C" void games_app_preview_best(int game, uint32_t score);
+extern "C" float games_app_preview_bot(uint32_t seed, float seconds);
 #include "swifty_figure.h"
 #include "swifty_paseo_ui.h"
 #include "mui.h"
@@ -650,6 +651,17 @@ int main(int argc, char **argv)
                 games_app_preview_mode(4);
                 frames(3);
                 save("games-over", lv_display_get_default());
+            }
+            if (g == 2 || g == 5) {
+                // Skyglide and Ridge Rally get harder: a late stage of a real
+                // run (played by the game's own pilot) and how that run ends
+                games_app_preview_mode(2);
+                games_app_preview_bot(77, g == 2 ? 165 : 105);
+                frames(12);  // past the new run's fade-in
+                save(std::string("games-late-") + names[g], lv_display_get_default());
+                games_app_preview_bot(77, 900);
+                frames(3);
+                save(std::string("games-end-") + names[g], lv_display_get_default());
             }
         }
         games_app_set_active(false);
