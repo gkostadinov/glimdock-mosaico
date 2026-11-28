@@ -54,6 +54,7 @@
 #include "board_wifi.h"
 #include "wifi_settings.h"
 #include "web_settings.h"
+#include "weather.h"
 #include "tusb.h"
 
 namespace {
@@ -1587,6 +1588,7 @@ extern "C" esp_err_t mosaico_shell_start(void)
         swifty_app_config_section("files", files_app_config_apply, files_app_config_status);
         swifty_app_config_section("display", always_on_config_apply, always_on_config_status);
         swifty_app_config_section("vpn", vpn_app_config_apply, vpn_app_config_status);
+        swifty_app_config_section("weather", weather_config_apply, weather_config_status);
         agent_tools::register_all();
         reminders_start();
     }
@@ -1658,8 +1660,8 @@ extern "C" esp_err_t mosaico_shell_start(void)
     const int home_x = int(lroundf(shell.radius * 0.15f)), home_y = int(lroundf(shell.radius * 0.1f));
     shell.home_screen =
         app_screen(&shell.home_frame, home_x, home_y, PANEL - 2 * home_x, PANEL - 2 * home_y, 0x000000);
-    int widgets[2] = {-1, -1};
-    char layout[512] = "";  // the home screen's pages (launcher_layout.h's text)
+    int widgets[2] = {-1, -1};  // firmware 1.2's two widget kinds: migrated into the layout once
+    char layout[1024] = "";     // the home screen's pages (launcher_layout.h's text)
     {
         Preferences p;
         if (p.begin(PREFS, true)) {
@@ -1671,6 +1673,7 @@ extern "C" esp_err_t mosaico_shell_start(void)
             p.end();
         }
     }
+    weather_start();  // its cached forecast for the widgets' first draw
     shell.launcher = launcher_ui_build({shell_show, save_radius, set_brightness, haptics_set_enabled, orientation_set_enabled,
                                         [](int left, int right)
     {

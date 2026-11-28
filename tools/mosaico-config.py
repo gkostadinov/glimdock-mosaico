@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Configure the ESP-Mosaico's apps (Swifty, Glimdock, Home, Files, the display, the VPN) from one file.
+"""Configure the ESP-Mosaico's apps (Swifty, Glimdock, Home, Files, the display, the VPN, the weather) from one file.
 
   python3 projects/glimdock/tools/mosaico-config.py --config-file FILE
   python3 projects/glimdock/tools/mosaico-config.py --status
   python3 projects/glimdock/tools/mosaico-config.py --template > mosaico.json
 
-FILE is JSON with any of six sections; leave out what you don't want to
+FILE is JSON with any of seven sections; leave out what you don't want to
 change. Within a section a missing key keeps the board's value and (for
 Swifty) an empty string clears it.
 
@@ -48,6 +48,9 @@ Swifty) an empty string clears it.
               connect at start-up); on (true/false: connect or disconnect
               now). Applies at once; --status shows the state and the board's
               public key, never a key.
+  "weather":  the home screen's weather widget. place: a city ("Lisbon",
+              "Springfield, US") or "latitude,longitude"; "" for the
+              network's location. units: "c" or "f". Applies at once.
 
 The file must be an absolute path, owned by you, with mode 0600. Its contents
 never appear on a command line or in a log: they reach the Mosaico CLI
@@ -82,6 +85,7 @@ SECTIONS = {
     "home": ("hub", "pairing_code"),
     "files": ("shares", "photos", "swifty"),
     "display": ("always_on",),
+    "weather": ("place", "units"),
     "vpn": (
         "conf_file",
         "private_key",
@@ -141,6 +145,7 @@ TEMPLATE = {
         "photos": {"share": "Media", "path": "Photos"},
     },
     "display": {"always_on": 120},
+    "weather": {"place": "", "units": "c"},
     "vpn": {"conf_file": "~/.config/mosaico/wireguard.conf", "auto_connect": False, "on": True},
 }
 
@@ -230,6 +235,9 @@ def load(path: str) -> dict:
             v = section.get("always_on", 0)
             if isinstance(v, bool) or v not in ALWAYS_ON:
                 raise ValueError(f"display.always_on: seconds, one of {', '.join(map(str, ALWAYS_ON))} (0: off)")
+        elif name == "weather":
+            if not isinstance(section.get("place", ""), str) or section.get("units", "c") not in ("c", "f"):
+                raise ValueError('weather: place a string (a city, "latitude,longitude" or ""), units "c" or "f"')
         elif name == "vpn":
             for key, v in section.items():
                 if key in ("auto_connect", "on"):
@@ -356,7 +364,7 @@ def main(argv=None) -> int:
         if not reply.startswith("ok"):
             print(f"Configuration not loaded: {reply}", file=sys.stderr)
             return 1
-        for name in ("swifty", "glimdock", "files"):
+        for name in ("swifty", "glimdock", "files", "weather"):
             if name in config:
                 print(f"{name.capitalize()} settings saved.")
         if "vpn" in config:

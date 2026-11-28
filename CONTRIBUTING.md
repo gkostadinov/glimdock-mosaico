@@ -117,10 +117,19 @@ The shell registers RPCs on service `0x4744` (18244), callable with
 | 52 | a URL (`http://` or `https://`) / none | Starts a GET of the URL / its result: HTTP status, time, the default route and DNS servers in use, the start of the body. Where the board's traffic goes, with the VPN on or off. |
 | 55 | none, or JSON text: `{"op":"list"}`, `{"op":"run","id":N,"dry_run":true}`, `{"op":"save","shortcut":{...}}`, `{"op":"delete","id":N}`, `{"op":"starters"}`, `{"op":"editor"}`, `{"op":"dry_run","on":true}` | Shortcuts (`shortcuts.h`): the list with each one's steps and the last run, or a change. `dry_run` on makes every run a dry run (nothing sent to Swifty Home or the Interaction board) until a restart. |
 
-| 53 | none / `00` / `01` then text / `02` / `03` / `04` / `05` / `06` | The home screen: page, editing and layout (pages split by `\|`, keys by commas, hidden keys after `#`). `00` resets the layout, `01` sets it from the text, `02` and `03` start and end editing, `04` shows the hidden apps, `05` shows Settings and `06` opens Settings > Wi-Fi. The reply comes before the change. |
+| 53 | none / `00` / `01` then text / `02` / `03` / `04` / `05` / `06` | The home screen: page, editing and layout (`@2` first, pages split by `\|`, keys by commas, hidden keys after `#`; a widget's key is `w2:` (half a row) or `w4:` (a whole row) and its kind, such as `w4:weather`; see `launcher_layout.h`). `00` resets the layout, `01` sets it from the text (one without `@2`, from before widgets moved, gets the two default widgets first), `02` and `03` start and end editing, `04` shows the hidden apps, `05` shows Settings and `06` opens Settings > Wi-Fi. The reply comes before the change. |
 | 56 | `00` / `01` / `02` ssid `00` password / `03` ssid | The board's Wi-Fi (`board_wifi.h`) as JSON: the network, whether it is connected, its address and signal, whether it is saved or Vibe Mode's, the last join's result and the networks from the last scan. `01` scans first (read again for the results), `02` joins (no password: the saved one), `03` forgets a saved network. Passwords are never in the reply. |
+| 54 · 63 | none / `01` / `02` then text / `03` then `c` or `f` | Through RPC 54 (`components/iris_ext`), sub-command 63: the weather widget's forecast (`weather.h`) as JSON: its state (`idle`, `locating`, `fetching`, `offline`, `failed`, `no_place`), the place shown and the one set, the temperature, today's high and low and the sky now, when it was updated and the last error. `01` fetches now, `02` sets the place (a city, `latitude,longitude`, or nothing for the network's location), `03` the units. The reply comes before the change. |
 
 While the USB webcam is on, ESP-Iris is stopped: read 44–46 after it ends.
+
+The weather widget's place and units are the `weather` section of the
+configuration (RPC 40, which `tools/mosaico-config.py` drives, and Web
+settings): `{"weather": {"place": "Lisbon", "units": "c"}}`. An empty place
+follows the network's location from the time zone's lookup (ipapi.co, no
+second request); the forecast comes from Open-Meteo (no key) every 30 minutes
+on a task with its stack in PSRAM, and NVS keeps the last one for the next
+boot. The host preview uses made-up weather (`host/weather_host.cpp`).
 
 The VPN's settings and its switch are the `vpn` section of the configuration
 (RPC 40, which `tools/mosaico-config.py` drives: `{"vpn": {"on": true}}`

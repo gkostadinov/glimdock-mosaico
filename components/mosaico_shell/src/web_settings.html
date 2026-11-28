@@ -363,6 +363,32 @@ function renderDisplay() {
   return s;
 }
 
+// The weather widget: its place (a city, coordinates, or the network's location) and units.
+function renderWeather() {
+  const w = status.weather || {};
+  const units = w.units || "c";
+  const s = sectionBox("Weather", w.found ? "Showing " + w.found : "Applies at once");
+  const grid = el("div", { className: "grid" });
+  const place = field("text", "Place", w.place, "Empty: the network's location");
+  const select = el("select");
+  for (const [v, text] of [["c", "Celsius (\u00b0C)"], ["f", "Fahrenheit (\u00b0F)"]]) select.append(el("option", { value: v, textContent: text }));
+  select.value = units;
+  grid.append(place.box, el("label", {}, "Units", select));
+  s.append(grid);
+  s.append(el("p", { className: "note",
+    textContent: "A city (Lisbon, or Springfield, US) or latitude, longitude (38.72, -9.14). Forecasts from Open-Meteo, every 30 minutes." }));
+  const { button } = actions(s, "Save", async say => {
+    const change = {};
+    if (place.changed()) change.place = place.value();
+    if (select.value !== units) change.units = select.value;
+    if (await saveSection("weather", change, say)) await reload();
+  });
+  const changed = () => { button.disabled = !place.changed() && select.value === units; };
+  s.addEventListener("input", changed);
+  select.onchange = changed;
+  return s;
+}
+
 // ---- Shortcuts: one-tap tiles on the board's home screen ----
 let shortcuts = null;  // the board's answer to /api/shortcuts
 const ACCENT_COLOURS = { violet: "#8c73ff", cyan: "#6fe3f7", amber: "#f7ce7e", green: "#8ee6b5" };
@@ -683,7 +709,7 @@ function renderVpn() {
 }
 
 function render() {
-  $("#sections").replaceChildren(...SIMPLE.map(renderSimple), renderHome(), renderShortcuts(), renderFiles(), renderVpn(), renderDisplay());
+  $("#sections").replaceChildren(...SIMPLE.map(renderSimple), renderHome(), renderShortcuts(), renderFiles(), renderVpn(), renderDisplay(), renderWeather());
 }
 
 async function reload() {
